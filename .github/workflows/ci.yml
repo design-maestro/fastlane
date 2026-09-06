@@ -17,6 +17,16 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - name: Verify contributor license agreement
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          if ! jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" \
+            | grep -Eiq '^- \[[xX]\] I have read and agree to the \[Fast Lane Contributor License Agreement\]'; then
+            echo "The pull request author must accept the Fast Lane Contributor License Agreement."
+            exit 1
+          fi
+
       - uses: actions/checkout@v6
 
       - uses: actions/setup-go@v7
