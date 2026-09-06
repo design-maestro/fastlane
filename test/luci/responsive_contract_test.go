@@ -18,7 +18,7 @@ func TestFastLaneCurrentViewsKeepMobileInteractionContracts(t *testing.T) {
 	}{
 		{
 			name: "shared navigation",
-			path: filepath.Join("fastlane", "fastlane-20260904-v3.js"),
+			path: filepath.Join("fastlane", "fastlane-20260906-v4.js"),
 			required: []string{
 				"@media(max-width:1100px)",
 				".fl-nav-links{display:flex;gap:8px}",
@@ -31,7 +31,7 @@ func TestFastLaneCurrentViewsKeepMobileInteractionContracts(t *testing.T) {
 		},
 		{
 			name: "VPN",
-			path: filepath.Join("view", "fastlane", "vpn-20260905-latency-v18.js"),
+			path: filepath.Join("view", "fastlane", "vpn-20260906-latency-v19.js"),
 			required: []string{
 				"@media(max-width:1100px)",
 				".fl-status{grid-template-columns:1fr 1fr 1fr}",
@@ -48,7 +48,7 @@ func TestFastLaneCurrentViewsKeepMobileInteractionContracts(t *testing.T) {
 		},
 		{
 			name: "Routes",
-			path: filepath.Join("view", "fastlane", "routing-20260904-v3.js"),
+			path: filepath.Join("view", "fastlane", "routing-20260906-v4.js"),
 			required: []string{
 				"@media(max-width:900px)",
 				".flr-head{align-items:flex-start;flex-direction:column}",

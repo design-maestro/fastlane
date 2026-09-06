@@ -126,7 +126,8 @@ const ui = {
 	hideModal: () => { modalHidden++; }
 };
 const countries = {
-	name: (code) => ({ RU: 'Russia', DE: 'Germany', IR: 'Iran' }[code] || code),
+	codes: ['AR', 'DE', 'EE', 'IR', 'JP', 'NL', 'PL', 'RU'],
+	name: (code) => ({ AR: 'Argentina', DE: 'Germany', EE: 'Estonia', IR: 'Iran', JP: 'Japan', NL: 'Netherlands', PL: 'Poland', RU: 'Russia' }[code] || code),
 	options: (selected) => ['RU', 'DE', 'IR'].map((code) => E('option', { value: code, selected: selected === code ? 'selected' : null }, [ ({ RU: 'Russia', DE: 'Germany', IR: 'Iran' }[code]) ]))
 };
 const uciValues = { lang: 'auto' };
@@ -247,7 +248,7 @@ function loadModule(filePath, dependencies) {
 }
 
 function loadPage(route) {
-	return loadModule(productionViewPath(route), { view, fs: fsStub, ui, dom, poll, L, E, fastlaneShell, countries, uci });
+	return loadModule(productionViewPath(route), { view, fs: fsStub, ui, dom, poll, L, E, fastlaneShell, countries, countryCatalog: countries, uci });
 }
 
 function treeText(node) {
@@ -410,11 +411,28 @@ async function smoke(section, name, run) {
 		page.handleSearch({ target: { value: ' poland ' } });
 		assert.deepEqual(page.visibleRows().map((row) => row.node.id), ['pl']);
 		page.query = '';
-		page.handleCountry({ target: { value: 'Netherlands' } });
+		page.handleCountry({ target: { value: 'NL' } });
 		assert.deepEqual(page.visibleRows().map((row) => row.node.id), ['nl']);
 		page.country = 'all';
 		page.handleProtocol({ target: { value: 'vless' } });
 		assert.deepEqual(page.visibleRows().map((row) => row.node.id).sort(), ['nl', 'pl']);
+	});
+
+	await smoke('VPN', 'normalizes localized country labels into one filter option', async () => {
+		const page = makeVPN();
+		page.pageData[1][1].nodes.push(
+			{ id: 'ru-en', name: '🇷🇺 Russia, Extra Whitelist', protocol: 'vless', address: 'ru-one.example', port: 443 },
+			{ id: 'ru-ru', name: 'Россия · Москва', protocol: 'vless', address: 'ru-two.example', port: 443 },
+			{ id: 'ar-ru', name: 'Буэнос-Айрес, Аргентина, Extra', protocol: 'vless', address: 'ar.example', port: 443 }
+		);
+		assert.equal(page.filterCountries().filter((code) => code === 'RU').length, 1);
+		page.handleCountry({ target: { value: 'RU' } });
+		assert.deepEqual(page.visibleRows().map((row) => row.node.id).sort(), ['ru-en', 'ru-ru']);
+		page.country = 'AR';
+		const text = treeText(page.renderTable());
+		assert.match(text, /Argentina/);
+		assert.match(text, /Буэнос-Айрес/);
+		assert.doesNotMatch(text, /Argentina.*Argentina/);
 	});
 
 	await smoke('VPN', 'sorts by GET latency, name and source', async () => {

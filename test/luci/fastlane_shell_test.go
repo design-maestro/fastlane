@@ -15,7 +15,7 @@ func TestFastLaneShellKeepsBrandAndBackgroundConsistent(t *testing.T) {
 		t.Fatalf("resolve repo root: %v", err)
 	}
 
-	shellPath := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "fastlane", "fastlane-20260904-v3.js")
+	shellPath := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "fastlane", "fastlane-20260906-v4.js")
 	shellData, err := os.ReadFile(shellPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", shellPath, err)
@@ -39,6 +39,11 @@ func TestFastLaneShellKeepsBrandAndBackgroundConsistent(t *testing.T) {
 		"max-width:min(420px",
 		"text-align:left",
 		"fl-toast-details",
+		".fl-dialog-form{display:grid!important;gap:17px!important",
+		".fl-dialog .fl-dialog-form input[type=\"text\"]",
+		".fl-dialog .fl-dialog-form textarea{min-height:150px!important",
+		".fl-dialog-actions{display:flex!important;justify-content:flex-end!important",
+		".fl-dialog-button{min-width:112px!important;min-height:44px!important",
 	} {
 		if !strings.Contains(shellSource, want) {
 			t.Fatalf("Fast Lane shell missing shared style marker %q", want)
@@ -53,14 +58,14 @@ func TestFastLaneShellKeepsBrandAndBackgroundConsistent(t *testing.T) {
 		}
 	}
 
-	for _, viewName := range []string{"vpn-20260905-latency-v18.js", "routing-20260904-v3.js", "diagnostics-20260904-v3.js", "settings-20260905-updates-v6.js"} {
+	for _, viewName := range []string{"vpn-20260906-latency-v19.js", "routing-20260906-v4.js", "diagnostics-20260904-v3.js", "settings-20260905-updates-v6.js"} {
 		viewPath := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", viewName)
 		viewData, err := os.ReadFile(viewPath)
 		if err != nil {
 			t.Fatalf("read %s: %v", viewPath, err)
 		}
 		viewSource := string(viewData)
-		if !strings.Contains(viewSource, "require fastlane.fastlane-20260904-v3 as fastlaneShell") ||
+		if !strings.Contains(viewSource, "require fastlane.fastlane-20260906-v4 as fastlaneShell") ||
 			!strings.Contains(viewSource, "fastlaneShell.renderStyles()") ||
 			!strings.Contains(viewSource, "fastlaneShell.renderHeader(") {
 			t.Fatalf("%s does not use the shared Fast Lane shell", viewName)
@@ -74,7 +79,7 @@ func TestFastLaneViewsUseSharedToastsInsteadOfLuCINotifications(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	for _, viewName := range []string{"vpn-20260905-latency-v18.js", "routing-20260904-v3.js", "diagnostics-20260904-v3.js", "settings-20260905-updates-v6.js"} {
+	for _, viewName := range []string{"vpn-20260906-latency-v19.js", "routing-20260906-v4.js", "diagnostics-20260904-v3.js", "settings-20260905-updates-v6.js"} {
 		path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", viewName)
 		data, err := os.ReadFile(path)
 		if err != nil {

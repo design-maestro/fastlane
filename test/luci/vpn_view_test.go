@@ -258,7 +258,7 @@ func TestFastLaneVPNMovesCountryEmojiIntoFlagMarker(t *testing.T) {
 		"fl-server-flag-emoji",
 		"fl-server-flag-glyph",
 		".fastlane-root .fl-server-flag-glyph{transform:translateY(2px)}",
-		"emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(nodeFlag(row.node))",
+		"emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(location.code)",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("VPN view missing country emoji normalization marker %q", want)
@@ -294,8 +294,10 @@ func TestFastLaneVPNUsesBrandedResponsiveSubscriptionModal(t *testing.T) {
 	for _, want := range []string{
 		"body:has(.fastlane-modal) #modal_overlay",
 		"width:min(600px,calc(100vw - 32px))!important",
-		"class: 'fl-add-field'",
-		"class: 'fl-modal-button fl-modal-primary'",
+		"class: 'fl-add-field fl-dialog-field'",
+		"class: 'fl-modal-button fl-modal-primary fl-dialog-button fl-dialog-primary'",
+		"class: 'fl-add-form fl-dialog-form'",
+		"modal.classList.add('fl-dialog')",
 		"class: 'fl-modal-status', role: 'status', 'aria-live': 'polite'",
 		"window.requestAnimationFrame(function() { source.focus(); })",
 		"submitButton.textContent = _('Adding…')",
@@ -348,7 +350,7 @@ func readVPNViewSource(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260905-latency-v18.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260906-latency-v19.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

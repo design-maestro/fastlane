@@ -3,7 +3,7 @@
 'require fs';
 'require ui';
 'require dom';
-'require fastlane.fastlane-20260904-v3 as fastlaneShell';
+'require fastlane.fastlane-20260906-v4 as fastlaneShell';
 'require fastlane.countries as countries';
 
 var binary = '/usr/bin/fastlane';
@@ -316,19 +316,22 @@ return view.extend({
 		domainsInput.value = list(rule && rule.domains).join('\n');
 		cidrsInput.value = list(rule && rule.cidrs).join('\n');
 		var errorBox = E('div', { class: 'flr-form-error', 'aria-live': 'polite' });
-		var submit = E('button', { class: 'flr-modal-button flr-modal-primary', type: 'button' }, [ editing ? _('Save') : _('Add') ]);
+		var submit = E('button', { class: 'flr-modal-button flr-modal-primary fl-dialog-button fl-dialog-primary', type: 'button' }, [ editing ? _('Save') : _('Add') ]);
 		submit.addEventListener('click', L.bind(this.handleRuleSubmit, this, rule || null, nameInput, domainsInput, cidrsInput, errorBox, submit));
 		ui.showModal(editing ? _('Edit exclusion') : _('Add exclusion'), [
-			E('div', { class: 'flr-rule-form' }, [
-				E('label', { class: 'flr-form-field' }, [ E('span', { class: 'flr-form-label' }, [ _('Name') ]), nameInput, E('span', { class: 'flr-form-help' }, [ _('Lowercase Latin letters, digits, and hyphens. The name cannot be changed later.') ]) ]),
-				E('label', { class: 'flr-form-field' }, [ E('span', { class: 'flr-form-label' }, [ _('Domains') ]), domainsInput, E('span', { class: 'flr-form-help' }, [ _('One domain per line. Subdomains are included automatically.') ]) ]),
-				E('label', { class: 'flr-form-field' }, [ E('span', { class: 'flr-form-label' }, [ _('IP addresses and networks') ]), cidrsInput, E('span', { class: 'flr-form-help' }, [ _('One IPv4 address, CIDR, or range per line.') ]) ]),
+			E('div', { class: 'flr-rule-form fl-dialog-form' }, [
+				E('label', { class: 'flr-form-field fl-dialog-field' }, [ E('span', { class: 'flr-form-label fl-dialog-label' }, [ _('Name') ]), nameInput, E('span', { class: 'flr-form-help fl-dialog-help' }, [ _('Lowercase Latin letters, digits, and hyphens. The name cannot be changed later.') ]) ]),
+				E('label', { class: 'flr-form-field fl-dialog-field' }, [ E('span', { class: 'flr-form-label fl-dialog-label' }, [ _('Domains') ]), domainsInput, E('span', { class: 'flr-form-help fl-dialog-help' }, [ _('One domain per line. Subdomains are included automatically.') ]) ]),
+				E('label', { class: 'flr-form-field fl-dialog-field' }, [ E('span', { class: 'flr-form-label fl-dialog-label' }, [ _('IP addresses and networks') ]), cidrsInput, E('span', { class: 'flr-form-help fl-dialog-help' }, [ _('One IPv4 address, CIDR, or range per line.') ]) ]),
 				errorBox
 			]),
-			E('div', { class: 'right' }, [ E('button', { class: 'flr-modal-button', type: 'button', click: ui.hideModal }, [ _('Cancel') ]), submit ])
+			E('div', { class: 'right fl-dialog-actions' }, [ E('button', { class: 'flr-modal-button fl-dialog-button', type: 'button', click: ui.hideModal }, [ _('Cancel') ]), submit ])
 		]);
 		var modal = document.querySelector('.modal');
-		if (modal) modal.classList.add('fastlane-routing-modal');
+		if (modal) {
+			modal.classList.add('fastlane-routing-modal');
+			modal.classList.add('fl-dialog');
+		}
 		window.requestAnimationFrame(function() { (editing ? domainsInput : nameInput).focus(); });
 	},
 

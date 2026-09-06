@@ -54,6 +54,23 @@ func TestFastLaneRoutingHasOneVisibleOnOffState(t *testing.T) {
 	}
 }
 
+func TestFastLaneRoutingReusesSharedDialogFields(t *testing.T) {
+	t.Parallel()
+	source := readRoutingViewSource(t)
+	for _, want := range []string{
+		"class: 'flr-rule-form fl-dialog-form'",
+		"class: 'flr-form-field fl-dialog-field'",
+		"class: 'flr-form-label fl-dialog-label'",
+		"class: 'flr-form-help fl-dialog-help'",
+		"class: 'right fl-dialog-actions'",
+		"modal.classList.add('fl-dialog')",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("routing modal missing shared dialog marker %q", want)
+		}
+	}
+}
+
 func TestFastLaneRoutingViewReadsHAPPLinksWithoutPartialApply(t *testing.T) {
 	t.Parallel()
 	source := readRoutingViewSource(t)
@@ -98,7 +115,7 @@ func readRoutingViewSource(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20260904-v3.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20260906-v4.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

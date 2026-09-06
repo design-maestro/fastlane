@@ -402,7 +402,7 @@ func (h *openWRTHarness) InstallFastLane(ctx context.Context) error {
 	if err := h.sshCommand(ctx, "chmod 0755 "+fastlaneRemoteBinary+" "+fastlaneRemoteService+" /usr/libexec/fastlane-cron /usr/libexec/fastlane-geodata /usr/libexec/fastlane-self-update /usr/libexec/fastlane-xray-update"); err != nil {
 		return err
 	}
-	if err := h.sshCommand(ctx, "test -s /www/luci-static/resources/fastlane/fastlane-20260904-v3.js && test -s /www/luci-static/resources/fastlane/assets/fastlane-mark.png"); err != nil {
+	if err := h.sshCommand(ctx, "test -s /www/luci-static/resources/fastlane/fastlane-20260906-v4.js && test -s /www/luci-static/resources/fastlane/assets/fastlane-mark.png"); err != nil {
 		return err
 	}
 	for _, viewFile := range viewFiles {

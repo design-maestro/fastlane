@@ -4,7 +4,8 @@
 'require ui';
 'require dom';
 'require poll';
-'require fastlane.fastlane-20260904-v3 as fastlaneShell';
+'require fastlane.fastlane-20260906-v4 as fastlaneShell';
+'require fastlane.countries as countryCatalog';
 
 var binary = '/usr/bin/fastlane';
 var pingKey = 'fastlane.vpn.get.results.v1';
@@ -31,6 +32,16 @@ function flagEmojiFromCode(code) {
 		0x1F1E6 + code.charCodeAt(0) - 65,
 		0x1F1E6 + code.charCodeAt(1) - 65
 	);
+}
+
+function countryCodeFromFlag(value) {
+	var emoji = flagEmoji(value);
+	if (!emoji)
+		return '';
+	var points = Array.from(emoji).map(function(character) { return character.codePointAt(0); });
+	if (points.length !== 2 || points[0] < 0x1F1E6 || points[0] > 0x1F1FF || points[1] < 0x1F1E6 || points[1] > 0x1F1FF)
+		return '';
+	return String.fromCharCode(points[0] - 0x1F1E6 + 65, points[1] - 0x1F1E6 + 65);
 }
 
 function nodeName(node) {
@@ -164,10 +175,75 @@ function fresherObservation(persisted, session) {
 		: persisted;
 }
 
+var countryAliasCache = null;
+
+function normalizeCountryAlias(value) {
+	return trim(value).toLocaleLowerCase().replace(/[.()]/g, '').replace(/\s+/g, ' ');
+}
+
+function countryAliases() {
+	if (countryAliasCache)
+		return countryAliasCache;
+	var exact = {};
+	var searchable = [];
+	var codes = Array.isArray(countryCatalog.codes) ? countryCatalog.codes : [];
+	var locales = [ 'en', 'ru' ];
+	for (var i = 0; i < codes.length; i++) {
+		var code = trim(codes[i]).toUpperCase();
+		exact[code.toLowerCase()] = code;
+		for (var l = 0; l < locales.length; l++) {
+			try {
+				var label = new window.Intl.DisplayNames([ locales[l] ], { type: 'region' }).of(code);
+				var alias = normalizeCountryAlias(label);
+				if (alias && alias !== code.toLowerCase()) {
+					exact[alias] = code;
+					searchable.push({ alias: alias, code: code });
+				}
+			} catch (err) {}
+		}
+	}
+	searchable.sort(function(a, b) { return b.alias.length - a.alias.length; });
+	countryAliasCache = { exact: exact, searchable: searchable };
+	return countryAliasCache;
+}
+
+function labelParts(value) {
+	return trim(value).split(/\s*(?:,|·|—|\|)\s*/).map(trim).filter(Boolean);
+}
+
+function exactCountryCode(value) {
+	return countryAliases().exact[normalizeCountryAlias(value)] || '';
+}
+
+function countryCodeFromLabel(value) {
+	var parts = labelParts(value);
+	for (var i = 0; i < parts.length; i++) {
+		var exact = exactCountryCode(parts[i]);
+		if (exact)
+			return exact;
+	}
+	var normalized = ' ' + normalizeCountryAlias(value).replace(/[,·—|/:;[\]{}]+/g, ' ') + ' ';
+	var aliases = countryAliases().searchable;
+	for (var a = 0; a < aliases.length; a++)
+		if (normalized.indexOf(' ' + aliases[a].alias + ' ') >= 0)
+			return aliases[a].code;
+	return '';
+}
+
+function nodeCountryCode(node) {
+	var extra = trim(node && node.extras && (node.extras.country_code || node.extras.country)).toUpperCase();
+	if (countryAliases().exact[extra.toLowerCase()])
+		return countryAliases().exact[extra.toLowerCase()];
+	return countryCodeFromFlag(nodeRawName(node)) || countryCodeFromLabel(nodeName(node)) || nodeFlag(node);
+}
+
 function nodeLocation(node) {
 	var value = nodeName(node);
-	var parts = value.split(/\s*[·—|-]\s*/).filter(Boolean);
-	return { country: parts[0] || value, city: parts.slice(1).join(' · ') };
+	var code = nodeCountryCode(node);
+	if (!code)
+		return { code: '', country: value, city: '' };
+	var details = labelParts(value).filter(function(part) { return exactCountryCode(part) !== code; });
+	return { code: code, country: countryCatalog.name(code), city: details.join(' · ') };
 }
 
 function nodeFlag(node) {
@@ -736,17 +812,17 @@ return view.extend({
 		var files = E('input', { type: 'file', multiple: 'multiple', accept: '.yaml,.yml,.json,.txt,application/x-yaml,text/yaml' });
 		var fileList = E('div', { class: 'fl-file-list' });
 		var subscriptionPane = E('div', { class: 'fl-add-pane' }, [
-			E('label', { class: 'fl-add-field' }, [
-				E('span', { class: 'fl-add-label' }, [ E('span', {}, [ _('Name') ]), E('span', { class: 'fl-add-optional' }, [ _('Optional') ]) ]),
+			E('label', { class: 'fl-add-field fl-dialog-field' }, [
+				E('span', { class: 'fl-add-label fl-dialog-label' }, [ E('span', {}, [ _('Name') ]), E('span', { class: 'fl-add-optional' }, [ _('Optional') ]) ]),
 				name
 			]),
-			E('label', { class: 'fl-add-field' }, [ E('span', { class: 'fl-add-label' }, [ _('Link or configuration') ]), source ]),
-			E('p', { class: 'fl-modal-help' }, [ _('The format is detected automatically. Links are refreshed on schedule.') ])
+			E('label', { class: 'fl-add-field fl-dialog-field' }, [ E('span', { class: 'fl-add-label fl-dialog-label' }, [ _('Link or configuration') ]), source ]),
+			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('The format is detected automatically. Links are refreshed on schedule.') ])
 		]);
 		var filePane = E('div', { class: 'fl-add-pane', hidden: 'hidden' }, [
 			E('label', { class: 'fl-file-picker' }, [ files, E('span', {}, [ E('strong', {}, [ _('Choose YAML files') ]), _('You can add several files at once') ]) ]),
 			fileList,
-			E('p', { class: 'fl-modal-help' }, [ _('Use a Clash/Mihomo YAML file with a proxies: array or a provider file with payload:. Each file becomes a separate source; removing it also removes its servers.') ])
+			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('Use a Clash/Mihomo YAML file with a proxies: array or a provider file with payload:. Each file becomes a separate source; removing it also removes its servers.') ])
 		]);
 		var mode = 'subscription';
 		var subscriptionButton = E('button', { class: 'fl-add-mode-button fl-add-mode-button-active', type: 'button' }, [ _('Subscription') ]);
@@ -767,22 +843,25 @@ return view.extend({
 			}));
 		});
 		var error = E('div', { class: 'fl-modal-status', role: 'status', 'aria-live': 'polite' });
-		var submit = E('button', { class: 'fl-modal-button fl-modal-primary', type: 'button' }, [ _('Add') ]);
+		var submit = E('button', { class: 'fl-modal-button fl-modal-primary fl-dialog-button fl-dialog-primary', type: 'button' }, [ _('Add') ]);
 		submit.addEventListener('click', L.bind(this.handleAddSubmit, this, name, source, files, function() { return mode; }, error, submit));
 		ui.showModal(_('Add servers'), [
-			E('div', { class: 'fl-add-form' }, [
+			E('div', { class: 'fl-add-form fl-dialog-form' }, [
 				E('div', { class: 'fl-add-mode', role: 'tablist', 'aria-label': _('Add method') }, [ subscriptionButton, fileButton ]),
 				subscriptionPane,
 				filePane,
 				error
 			]),
-			E('div', { class: 'right' }, [
-				E('button', { class: 'fl-modal-button', type: 'button', click: ui.hideModal }, [ _('Cancel') ]),
+			E('div', { class: 'right fl-dialog-actions' }, [
+				E('button', { class: 'fl-modal-button fl-dialog-button', type: 'button', click: ui.hideModal }, [ _('Cancel') ]),
 				submit
 			])
 		]);
 		var modal = document.querySelector('.modal');
-		if (modal) modal.classList.add('fastlane-modal');
+		if (modal) {
+			modal.classList.add('fastlane-modal');
+			modal.classList.add('fl-dialog');
+		}
 		window.requestAnimationFrame(function() { source.focus(); });
 	},
 
@@ -925,7 +1004,7 @@ return view.extend({
 				var haystack = (nodeName(node) + ' ' + sourceName(sub) + ' ' + trim(node.protocol) + ' ' + trim(node.address)).toLowerCase();
 				if (this.query && haystack.indexOf(this.query) < 0)
 					continue;
-				if (this.country !== 'all' && nodeLocation(node).country !== this.country)
+				if (this.country !== 'all' && nodeLocation(node).code !== this.country)
 					continue;
 				if (this.protocol !== 'all' && trim(node.protocol).toLowerCase() !== this.protocol)
 					continue;
@@ -951,10 +1030,12 @@ return view.extend({
 		var subscriptions = this.poolSubscriptions();
 		for (var i = 0; i < subscriptions.length; i++) {
 			var nodes = subscriptions[i].nodes || [];
-			for (var n = 0; n < nodes.length; n++)
-				seen[nodeLocation(nodes[n]).country] = true;
+			for (var n = 0; n < nodes.length; n++) {
+				var code = nodeLocation(nodes[n]).code;
+				if (code) seen[code] = true;
+			}
 		}
-		return Object.keys(seen).filter(Boolean).sort();
+		return Object.keys(seen).sort(function(a, b) { return countryCatalog.name(a).localeCompare(countryCatalog.name(b)); });
 	},
 
 	filterProtocols: function() {
@@ -992,11 +1073,11 @@ return view.extend({
 		if (!activeSubscription && connected && state.active_subscription_id)
 			activeSubscription = this.subscriptions().filter(function(sub) { return sub.id === state.active_subscription_id; })[0];
 		var activeSource = connected && activeSubscription ? sourceName(activeSubscription) : '—';
-		var activeNode = connected && status.active_node ? nodeName(status.active_node) : '—';
+		var activeNode = connected && status.active_node ? status.active_node : { name: '—' };
 		var observed = this.pings[state.active_subscription_id + ':' + state.active_node_id] || {};
 		return E('div', { class: 'fl-status' }, [
 			E('div', { class: 'fl-status-cell fl-status-main' }, [ E('span', { class: 'fl-dot ' + (connected ? 'fl-dot-on' : '') }), connected ? _('VPN on') : _('VPN off') ]),
-			E('div', { class: 'fl-status-cell' }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Server') ]), E('span', { class: 'fl-status-cell-value' }, [ nodeLocation({ name: activeNode }).country ]) ]),
+			E('div', { class: 'fl-status-cell' }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Server') ]), E('span', { class: 'fl-status-cell-value' }, [ nodeLocation(activeNode).country ]) ]),
 			E('div', { class: 'fl-status-cell' }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Source') ]), E('span', { class: 'fl-status-cell-value' }, [ activeSource ]) ]),
 			E('div', { class: 'fl-status-cell', title: _('GET: up to 100 ms is low latency; 101–200 ms is medium; 201–1000 ms is high; over 1000 ms is very high. A successful GET means the server is reachable even if it is slow. This is not a download speed test.') }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Ping (GET)') ]), E('span', { class: 'fl-status-cell-value fl-status-cell-latency ' + this.latencyClass(observed.latency_ms, observed) }, [ formatLatency(observed.latency_ms) ]) ]),
 			E('div', { class: 'fl-mode-switch', 'aria-label': _('Connection mode') }, [
@@ -1071,7 +1152,7 @@ return view.extend({
 								: checked ? (slow ? _('Slow') : _('Ready'))
 									: _('Not checked');
 			var location = nodeLocation(row.node);
-			var emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(nodeFlag(row.node));
+			var emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(location.code);
 			var marker = emoji
 				? E('div', { class: 'fl-server-mark fl-server-flag-emoji', 'aria-hidden': 'true' }, [ E('span', { class: 'fl-server-flag-glyph' }, [ emoji ]) ])
 				: E('div', { class: 'fl-server-mark' }, [ icon(active ? 'bolt' : 'server') ]);
@@ -1158,7 +1239,7 @@ return view.extend({
 			E('div', { class: 'fl-toolbar' }, [
 				E('div', { class: 'fl-toolbar-actions' }, [
 					E('label', { class: 'fl-search-wrap' }, [ E('span', { class: 'fl-sr-only' }, [ _('Search servers') ]), E('input', { class: 'fl-search', value: this.query, placeholder: _('Search servers…'), input: L.bind(this.handleSearch, this) }) ]),
-					E('select', { class: 'fl-select', 'aria-label': _('Country'), change: L.bind(this.handleCountry, this) }, [ E('option', { value: 'all', selected: this.country === 'all' ? 'selected' : null }, [ _('All countries') ]) ].concat(countries.map(L.bind(function(country) { return E('option', { value: country, selected: this.country === country ? 'selected' : null }, [ country ]); }, this)))),
+					E('select', { class: 'fl-select', 'aria-label': _('Country'), change: L.bind(this.handleCountry, this) }, [ E('option', { value: 'all', selected: this.country === 'all' ? 'selected' : null }, [ _('All countries') ]) ].concat(countries.map(L.bind(function(country) { return E('option', { value: country, selected: this.country === country ? 'selected' : null }, [ countryCatalog.name(country) ]); }, this)))),
 					E('select', { class: 'fl-select', 'aria-label': _('Protocol'), change: L.bind(this.handleProtocol, this) }, [ E('option', { value: 'all', selected: this.protocol === 'all' ? 'selected' : null }, [ _('All protocols') ]) ].concat(protocols.map(L.bind(function(protocol) { return E('option', { value: protocol, selected: this.protocol === protocol ? 'selected' : null }, [ protocol.toUpperCase() ]); }, this)))),
 					E('select', { class: 'fl-select', 'aria-label': _('Server sorting'), change: L.bind(this.handleSort, this) }, [ E('option', { value: 'latency', selected: this.sort === 'latency' ? 'selected' : null }, [ _('Sort: ping (GET)') ]), E('option', { value: 'name', selected: this.sort === 'name' ? 'selected' : null }, [ _('Sort: name') ]), E('option', { value: 'source', selected: this.sort === 'source' ? 'selected' : null }, [ _('Sort: source') ]) ])
 				]),

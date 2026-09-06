@@ -1,4 +1,4 @@
 'use strict';
-'require view.fastlane.routing-20260904-v3 as fastlaneRouting';
+'require view.fastlane.routing-20260906-v4 as fastlaneRouting';
 
 return fastlaneRouting;

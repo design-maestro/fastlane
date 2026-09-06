@@ -2,7 +2,7 @@
 'require view';
 'require fs';
 'require ui';
-'require fastlane.fastlane-20260904-v3 as fastlaneShell';
+'require fastlane.fastlane-20260906-v4 as fastlaneShell';
 
 var binary = '/usr/bin/fastlane';
 

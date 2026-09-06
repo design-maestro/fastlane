@@ -17,7 +17,7 @@
 		"order": 10,
 		"action": {
 			"type": "view",
-			"path": "fastlane/vpn-20260905-latency-v18"
+			"path": "fastlane/vpn-20260906-latency-v19"
 		}
 	},
 	"admin/services/fastlane/diagnostics": {
@@ -33,7 +33,7 @@
 		"order": 20,
 		"action": {
 			"type": "view",
-			"path": "fastlane/routing-20260904-v3"
+			"path": "fastlane/routing-20260906-v4"
 		}
 	},
 	"admin/services/fastlane/settings": {
