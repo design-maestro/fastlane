@@ -50,6 +50,7 @@ func TestFastLaneRoutingHAPPInputDoesNotStickToAction(t *testing.T) {
 	t.Parallel()
 	source := readRoutingViewSource(t)
 	for _, want := range []string{
+		".flr-advanced-copy{max-width:72ch;margin:2px 0 22px",
 		".flr-import{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:stretch}",
 		".flr-import .flr-button{min-width:176px}",
 	} {
