@@ -152,4 +152,13 @@ runtime coverage gates, and the sensitive-path guard before a change is merged.
 
 ## License
 
-[MIT](LICENSE)
+Fast Lane's original contributions are source-available under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). Personal and other
+noncommercial use, modification, and distribution are permitted. Commercial
+use requires separate written permission from Fast Lane owner Nikita Goryachev
+(`design-maestro`).
+
+Some portions are derived from an earlier MIT-licensed codebase. Its required
+notice is preserved separately in [LICENSES/UPSTREAM-MIT.txt](LICENSES/UPSTREAM-MIT.txt).
+See [NOTICE](NOTICE) for the exact licensing boundary. Fast Lane is not
+OSI-approved open-source software because commercial use is restricted.

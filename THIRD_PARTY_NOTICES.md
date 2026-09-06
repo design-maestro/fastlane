@@ -1,5 +1,13 @@
 # Third-party notices
 
+## Earlier MIT-licensed codebase
+
+Some portions of Fast Lane are derived from an earlier MIT-licensed codebase.
+The original copyright and license notice are preserved in
+[LICENSES/UPSTREAM-MIT.txt](LICENSES/UPSTREAM-MIT.txt). Those MIT terms apply to
+the inherited portions; Fast Lane's original contributions are licensed under
+the top-level [PolyForm Noncommercial License 1.0.0](LICENSE).
+
 ## LuCI LMO compiler compatibility
 
 `cmd/po2lmo` implements the LMO archive format and SuperFastHash behavior used

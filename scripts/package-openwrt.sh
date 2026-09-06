@@ -38,6 +38,7 @@ mkdir -p \
 	"${DATA_DIR}/etc/uci-defaults" \
 	"${DATA_DIR}/usr/bin" \
 	"${DATA_DIR}/usr/lib/lua/luci/i18n" \
+	"${DATA_DIR}/usr/share/licenses/fastlane" \
 	"${DATA_DIR}/usr/share/luci/menu.d" \
 	"${DATA_DIR}/usr/share/rpcd/acl.d" \
 	"${DATA_DIR}/www/luci-static/resources/fastlane" \
@@ -49,6 +50,10 @@ mkdir -p \
 cp "${BINARY_PATH}" "${DATA_DIR}/usr/bin/fastlane"
 cp -R "${ROOT_DIR}/openwrt/root/." "${DATA_DIR}/"
 cp "${ROOT_DIR}/scripts/uninstall.sh" "${DATA_DIR}/usr/libexec/fastlane-uninstall"
+cp "${ROOT_DIR}/LICENSE" "${DATA_DIR}/usr/share/licenses/fastlane/LICENSE"
+cp "${ROOT_DIR}/NOTICE" "${DATA_DIR}/usr/share/licenses/fastlane/NOTICE"
+cp "${ROOT_DIR}/THIRD_PARTY_NOTICES.md" "${DATA_DIR}/usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md"
+cp "${ROOT_DIR}/LICENSES/UPSTREAM-MIT.txt" "${DATA_DIR}/usr/share/licenses/fastlane/UPSTREAM-MIT.txt"
 [ -d "${DATA_DIR}/etc/init.d" ] && find "${DATA_DIR}/etc/init.d" -type f -exec chmod 0755 {} \;
 [ -d "${DATA_DIR}/usr/libexec" ] && find "${DATA_DIR}/usr/libexec" -type f -exec chmod 0755 {} \;
 cp "${ROOT_DIR}/luci-app-fastlane/root/usr/share/luci/menu.d/luci-app-fastlane.json" \
@@ -106,8 +111,8 @@ cat > "${CONTROL_DIR}/control" <<EOF
 Package: ${PACKAGE_NAME}
 Version: ${VERSION}
 Architecture: ${ARCH}
-Maintainer: Alexey
-License: MIT
+Maintainer: design-maestro
+License: PolyForm-Noncommercial-1.0.0
 Section: net
 Priority: optional
 Depends: ca-bundle, nftables, kmod-nft-tproxy, rpcd-mod-file

@@ -25,6 +25,10 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	writeExecutable(t, filepath.Join(repoDir, "openwrt", "root", "usr", "libexec", "fastlane-xray-update"), "#!/bin/sh\nexit 0\n")
 	writeExecutable(t, filepath.Join(repoDir, "openwrt", "root", "usr", "libexec", "fastlane-geodata"), "#!/bin/sh\nexit 0\n")
 	writeExecutable(t, filepath.Join(repoDir, "scripts", "uninstall.sh"), "#!/bin/sh\nexit 0\n")
+	writeFile(t, filepath.Join(repoDir, "LICENSE"), "PolyForm Noncommercial License 1.0.0\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "NOTICE"), "Required Notice: Copyright Fast Lane contributors.\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "THIRD_PARTY_NOTICES.md"), "# Third-party notices\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "LICENSES", "UPSTREAM-MIT.txt"), "MIT License\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "root", "usr", "share", "luci", "menu.d", "luci-app-fastlane.json"), "{}\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "root", "usr", "share", "rpcd", "acl.d", "luci-app-fastlane.json"), "{}\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "po", "ru", "fastlane.po"), "msgid \"Settings\"\nmsgstr \"Настройки\"\n", 0o644)
@@ -86,6 +90,14 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	if !strings.Contains(string(control), "This standalone IPK requires an existing /usr/bin/xray runtime") {
 		t.Fatalf("expected generated package control to disclose the external Xray runtime, got:\n%s", control)
 	}
+	for _, want := range []string{
+		"Maintainer: design-maestro\n",
+		"License: PolyForm-Noncommercial-1.0.0\n",
+	} {
+		if !strings.Contains(string(control), want) {
+			t.Fatalf("expected generated package control to contain %q, got:\n%s", want, control)
+		}
+	}
 	for _, path := range []string{
 		filepath.Join(repoDir, "dist", "fastlane_1.2.3_x86_64.ipk.sha256"),
 		filepath.Join(repoDir, "dist", "fastlane_1.2.3_x86_64.tar.gz.sha256"),
@@ -96,6 +108,12 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "www", "luci-static", "resources", "fastlane", "ui.js")); err != nil {
 		t.Fatalf("expected shared fastlane ui helper in package data: %v", err)
+	}
+	for _, name := range []string{"LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "UPSTREAM-MIT.txt"} {
+		path := filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "usr", "share", "licenses", "fastlane", name)
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected packaged license file %s: %v", name, err)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "www", "luci-static", "resources", "fastlane", "assets", "fastlane-mark.png")); err != nil {
 		t.Fatalf("expected Fast Lane visual assets in package data: %v", err)

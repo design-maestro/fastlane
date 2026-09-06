@@ -27,3 +27,7 @@ Device and firmware version:
 
 - [ ] The changes contain no backups, subscriptions, UUIDs, keys, tokens, cookies, public IPs, or home-device data.
 - [ ] `make security-check` passes.
+
+## Contributor terms
+
+- [ ] I have read and agree to the [Fast Lane Contributor License Agreement](../CONTRIBUTOR_LICENSE_AGREEMENT.md), and I have the right to submit this contribution.

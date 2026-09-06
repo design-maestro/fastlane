@@ -26,6 +26,15 @@ Read [PRODUCT.md](PRODUCT.md), [DESIGN.md](DESIGN.md), and
 runtime changes without a clear reason; such pull requests are harder to review
 safely.
 
+## Contributor terms
+
+By intentionally submitting a contribution, you agree to the
+[Fast Lane Contributor License Agreement](CONTRIBUTOR_LICENSE_AGREEMENT.md).
+You keep ownership of your work and grant Fast Lane owner Nikita Goryachev
+(`design-maestro`) the rights needed to keep Fast Lane consistently licensed
+and to offer separate commercial permissions. Do not submit a contribution if
+you cannot grant those rights.
+
 ## Required checks
 
 ```sh
