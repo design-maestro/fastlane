@@ -1,0 +1,49 @@
+#!/bin/sh /etc/rc.common
+
+USE_PROCD=1
+START=95
+STOP=10
+
+SERVICE_NAME="fastlane"
+FASTLANE_BIN="/usr/bin/fastlane"
+FASTLANE_CRON_HELPER="/usr/libexec/fastlane-cron"
+FASTLANE_RUNTIME_ROOT="/tmp/fastlane-runtime"
+
+migrate_health_runtime_files() {
+	local root file source target
+
+	root="$1"
+	if [ -e "${FASTLANE_RUNTIME_ROOT}" ] && [ ! -d "${FASTLANE_RUNTIME_ROOT}" ]; then
+		rm -f "${FASTLANE_RUNTIME_ROOT}"
+	fi
+	mkdir -p "${FASTLANE_RUNTIME_ROOT}"
+	chmod 700 "${FASTLANE_RUNTIME_ROOT}"
+	for file in health-check.request health-check-progress.json; do
+		source="${root}/${file}"
+		target="${FASTLANE_RUNTIME_ROOT}/${file}"
+		[ -f "${source}" ] || continue
+		if [ ! -e "${target}" ]; then
+			mv "${source}" "${target}"
+		else
+			rm -f "${source}"
+		fi
+	done
+}
+
+start_service() {
+	local root tick
+
+	root="${FASTLANE_ROOT:-/etc/fastlane}"
+	tick="${FASTLANE_SCHEDULER_TICK:-1m}"
+
+	[ -x "${FASTLANE_BIN}" ] || return 1
+	[ -x "${FASTLANE_CRON_HELPER}" ] && "${FASTLANE_CRON_HELPER}" ensure-xray-log-retention >/dev/null 2>&1 || true
+	migrate_health_runtime_files "${root}"
+
+	procd_open_instance
+	procd_set_param command "${FASTLANE_BIN}" --root "${root}" daemon --tick "${tick}"
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}

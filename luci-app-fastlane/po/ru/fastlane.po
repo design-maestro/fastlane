@@ -1,0 +1,976 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Fast Lane\n"
+"Language: ru\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "0 s disables automatic checks"
+msgstr "0 с отключает автоматические проверки"
+
+msgid "A file is larger than 96 KB. Split it into several provider files."
+msgstr "Один из файлов больше 96 КБ. Разделите его на несколько файлов провайдера."
+
+msgid "Actions"
+msgstr "Действия"
+
+msgid "Active"
+msgstr "Активен"
+
+msgid "Add"
+msgstr "Добавить"
+
+msgid "Add a subscription first"
+msgstr "Сначала добавьте подписку"
+
+msgid "Add method"
+msgstr "Способ добавления"
+
+msgid "Add servers"
+msgstr "Добавить серверы"
+
+msgid "Add your first subscription. Links, VLESS, Base64, and Xray JSON are supported."
+msgstr "Добавьте первую подписку. Поддерживаются ссылки, VLESS, Base64 и Xray JSON."
+
+msgid "Adding"
+msgstr "Добавление"
+
+msgid "Adding and checking subscription…"
+msgstr "Добавляю и проверяю подписку…"
+
+msgid "Adding…"
+msgstr "Добавляю…"
+
+msgid "Add at least one domain or IP address."
+msgstr "Добавьте хотя бы один домен или IP-адрес."
+
+msgid "Add exclusion"
+msgstr "Добавить исключение"
+
+msgid "Admin panel and local devices"
+msgstr "Админка и локальные устройства"
+
+msgid "All countries"
+msgstr "Все страны"
+
+msgid "All protocols"
+msgstr "Все протоколы"
+
+msgid "All servers"
+msgstr "Все серверы"
+
+msgid "Always direct"
+msgstr "Всегда напрямую"
+
+msgid "Application management"
+msgstr "Управление приложениями"
+
+msgid "Applying the selected country…"
+msgstr "Применяю выбранную страну…"
+
+msgid "Auto"
+msgstr "Авто"
+
+msgid "Automatic"
+msgstr "Автоматически"
+
+msgid "Automatic follows the LuCI language. Other languages fall back to English."
+msgstr "Автоматически использует язык LuCI. Для остальных языков включается английский."
+
+msgid "Automatic selection"
+msgstr "Автовыбор"
+
+msgid "Automatic server check"
+msgstr "Автопроверка серверов"
+
+msgid "Background GET check started. You can close the page."
+msgstr "Фоновая GET-проверка запущена. Можно закрыть страницу."
+
+msgid "Background update interval"
+msgstr "Интервал фонового обновления"
+
+msgid "Background updates run automatically; every action can also be started manually on the VPN page."
+msgstr "Фоновые обновления запускаются автоматически; каждое действие также можно запустить вручную на странице VPN."
+
+msgid "By device"
+msgstr "По устройствам"
+
+msgid "By rule"
+msgstr "По правилам"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Check failed"
+msgstr "Ошибка проверки"
+
+msgid "Check for updates"
+msgstr "Проверить обновления"
+
+msgid "Check ping (GET)"
+msgstr "Проверить пинг (GET)"
+
+msgid "Check running in background"
+msgstr "Проверка идёт в фоне"
+
+msgid "Check the link and router internet access."
+msgstr "Проверьте ссылку и доступ роутера к интернету."
+
+msgid "Check whether a new version is available."
+msgstr "Проверьте наличие новой версии."
+
+msgid "Checking"
+msgstr "Проверяется"
+
+msgid "Checking…"
+msgstr "Проверяю…"
+
+msgid "Choose YAML files"
+msgstr "Выбрать YAML-файлы"
+
+msgid "Choose a country"
+msgstr "Выберите страну"
+
+msgid "Choose a country first."
+msgstr "Сначала выберите страну."
+
+msgid "Choose a server from the list to pin it manually."
+msgstr "Выберите сервер в списке, чтобы закрепить его вручную."
+
+msgid "Choose at least one YAML file."
+msgstr "Выберите хотя бы один YAML-файл."
+
+msgid "Choose which traffic goes directly and which goes through VPN. Geo databases are managed automatically."
+msgstr "Выберите, какой трафик идёт напрямую, а какой через VPN. Geo-базы обновляются автоматически."
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "Close error"
+msgstr "Закрыть ошибку"
+
+msgid "Combined pool"
+msgstr "Единый пул"
+
+msgid "Connect"
+msgstr "Подключить"
+
+msgid "Connect this server manually"
+msgstr "Подключить этот сервер вручную"
+
+msgid "Connected"
+msgstr "Подключён"
+
+msgid "Connecting the selected server…"
+msgstr "Подключаю выбранный сервер…"
+
+msgid "Connection mode"
+msgstr "Режим подключения"
+
+msgid "Could not add the file. Check the YAML format."
+msgstr "Не удалось добавить файл. Проверьте формат YAML."
+
+msgid "Could not add the subscription. Check the link or configuration."
+msgstr "Не удалось добавить подписку. Проверьте ссылку или конфигурацию."
+
+msgid "Could not change routing."
+msgstr "Не удалось изменить маршрутизацию."
+
+msgid "Could not change the interface language."
+msgstr "Не удалось изменить язык интерфейса."
+
+msgid "Could not complete the action. Try again."
+msgstr "Не удалось выполнить действие. Повторите попытку."
+
+msgid "Could not confirm installation. Check the current status before trying again."
+msgstr "Не удалось подтвердить установку. Проверьте состояние перед повторной попыткой."
+
+msgid "Could not load subscriptions. Reload the page."
+msgstr "Не удалось загрузить подписки. Обновите страницу."
+
+msgid "Could not read"
+msgstr "Не удалось прочитать"
+
+msgid "Could not read Fast Lane status."
+msgstr "Не удалось получить состояние Fast Lane."
+
+msgid "Could not read Geo database status."
+msgstr "Не удалось прочитать состояние Geo-баз."
+
+msgid "Could not read VPN status. Reload the page."
+msgstr "Не удалось получить состояние VPN. Обновите страницу."
+
+msgid "Could not read the HAPP profile."
+msgstr "Не удалось прочитать HAPP-профиль."
+
+msgid "Could not read update status. Try again; during installation, wait for the connection to return."
+msgstr "Не удалось получить состояние обновления. Повторите проверку; при установке дождитесь восстановления связи."
+
+msgid "Could not refresh VPN status. Showing the last confirmed state."
+msgstr "Не удалось обновить состояние VPN. Показываем последнее подтверждённое состояние."
+
+msgid "Could not refresh subscriptions. Showing the last loaded data."
+msgstr "Не удалось обновить подписки. Показываем последние загруженные данные."
+
+msgid "Could not remove Fast Lane."
+msgstr "Не удалось удалить Fast Lane."
+
+msgid "Could not save settings."
+msgstr "Не удалось сохранить настройки."
+
+msgid "Could not save the country."
+msgstr "Не удалось сохранить страну."
+
+msgid "Could not start the update check. Try again."
+msgstr "Не удалось запустить проверку обновлений. Попробуйте ещё раз."
+
+msgid "Could not update"
+msgstr "Не удалось обновить"
+
+msgid "Could not update GeoIP and GeoSite."
+msgstr "Не удалось обновить GeoIP и GeoSite."
+
+msgid "Country"
+msgstr "Страна"
+
+msgid "Country saved."
+msgstr "Страна сохранена."
+
+msgid "Current Fast Lane and connection status."
+msgstr "Текущее состояние Fast Lane и подключения."
+
+msgid "DNS requests are handled by Fast Lane."
+msgstr "DNS-запросы обрабатываются Fast Lane."
+
+msgid "Databases will be installed automatically when routing is first enabled"
+msgstr "Базы установятся автоматически при первом включении маршрутизации"
+
+msgid "Details"
+msgstr "Подробнее"
+
+msgid "Detected: direct"
+msgstr "Распознано: напрямую"
+
+msgid "Diagnostics"
+msgstr "Диагностика"
+
+msgid "Direct"
+msgstr "Напрямую"
+
+msgid "Disabled to prevent leaks"
+msgstr "Отключён для защиты от утечек"
+
+msgid "Disconnect"
+msgstr "Отключить"
+
+msgid "Disconnected"
+msgstr "Отключён"
+
+msgid "Disconnecting VPN…"
+msgstr "Отключаю VPN…"
+
+msgid "Downloading and validating GeoIP and GeoSite…"
+msgstr "Скачиваю и проверяю GeoIP и GeoSite…"
+
+msgid "Enabled"
+msgstr "Включено"
+
+msgid "Except exclusions in advanced rules"
+msgstr "Кроме исключений из расширенных правил"
+
+msgid "Excluded from Auto"
+msgstr "Не участвуют в авто"
+
+msgid "Expired"
+msgstr "Срок истёк"
+
+msgid "Expired on"
+msgstr "Истекла"
+
+msgid "Expires in"
+msgstr "Истекает через"
+
+msgid "Expires on"
+msgstr "Истекает"
+
+msgid "Expires today"
+msgstr "Истекает сегодня"
+
+msgid "Expires tomorrow"
+msgstr "Истекает завтра"
+
+msgid "Fast Lane avoids reconnecting for insignificant latency differences."
+msgstr "Fast Lane не переподключается при незначительной разнице в задержке."
+
+msgid "Fast Lane did not recognize the format. Check the link, key, or JSON."
+msgstr "Fast Lane не распознал формат. Проверьте ссылку, ключ или JSON."
+
+msgid "Fast Lane returned an invalid response."
+msgstr "Fast Lane вернул некорректный ответ."
+
+msgid "Fast Lane routing is off"
+msgstr "Маршрутизация Fast Lane выключена"
+
+msgid "Fast Lane sections"
+msgstr "Разделы Fast Lane"
+
+msgid "Fast Lane service"
+msgstr "Служба Fast Lane"
+
+msgid "Fast Lane settings"
+msgstr "Настройки Fast Lane"
+
+msgid "Fast Lane settings saved."
+msgstr "Настройки Fast Lane сохранены."
+
+msgid "Fast Lane status"
+msgstr "Состояние Fast Lane"
+
+msgid "Fast Lane update"
+msgstr "Обновление Fast Lane"
+
+msgid "File and its servers removed."
+msgstr "Файл и его серверы удалены."
+
+msgid "Files added:"
+msgstr "Добавлено файлов:"
+
+msgid "For example, Liberty"
+msgstr "Например, Liberty"
+
+msgid "FriendlyWrt package manager"
+msgstr "Менеджер пакетов FriendlyWrt"
+
+msgid "From file"
+msgstr "Через файл"
+
+msgid "GET check queued on the router…"
+msgstr "GET-проверка поставлена в очередь на роутере…"
+
+msgid "GET did not return a positive latency."
+msgstr "GET не вернул положительную задержку."
+
+msgid "GET: up to 100 ms is low latency; 101–200 ms is medium; 201–1000 ms is high; over 1000 ms is very high. A successful GET means the server is reachable even if it is slow. This is not a download speed test."
+msgstr "GET: до 100 мс — низкая задержка; 101–200 мс — средняя; 201–1000 мс — высокая; выше 1000 мс — очень высокая. Сервер с успешным GET доступен, но может отвечать медленно. Это не оценка скорости загрузки."
+
+msgid "GeoIP and GeoSite are ready"
+msgstr "GeoIP и GeoSite готовы"
+
+msgid "GeoIP and GeoSite are up to date."
+msgstr "GeoIP и GeoSite обновлены."
+
+msgid "GeoIP and GeoSite did not pass validation."
+msgstr "GeoIP и GeoSite не прошли проверку."
+
+msgid "GeoIP and GeoSite update failed."
+msgstr "Обновление GeoIP и GeoSite завершилось с ошибкой."
+
+msgid "HAPP profile"
+msgstr "Профиль HAPP"
+
+msgid "HTTPS GET through this server, bypassing the active VPN"
+msgstr "HTTPS GET через этот сервер в обход активного VPN"
+
+msgid "HTTPS page with a fast 204 response"
+msgstr "HTTPS-страница с быстрым ответом 204"
+
+msgid "Hidden"
+msgstr "Скрытые"
+
+msgid "Hide"
+msgstr "Скрыть"
+
+msgid "Hide details"
+msgstr "Скрыть подробности"
+
+msgid "Hiding server…"
+msgstr "Скрываю сервер…"
+
+msgid "Home network"
+msgstr "Домашняя сеть"
+
+msgid "How much faster a new server must be"
+msgstr "Насколько быстрее должен быть новый сервер"
+
+msgid "Import and advanced rules"
+msgstr "Импорт и расширенные правила"
+
+msgid "Inactive"
+msgstr "Неактивен"
+
+msgid "Install"
+msgstr "Установить"
+
+msgid "Install Fast Lane"
+msgstr "Установить Fast Lane"
+
+msgid "Install Geo databases"
+msgstr "Установить Geo-базы"
+
+msgid "Installed version:"
+msgstr "Установлена версия:"
+
+msgid "Interface language"
+msgstr "Язык интерфейса"
+
+msgid "Internet access failed after connecting. Fast Lane restored the previous route."
+msgstr "После подключения интернет не заработал. Fast Lane вернул прежний маршрут."
+
+msgid "Internet traffic is direct."
+msgstr "Интернет-трафик идёт напрямую."
+
+msgid "It starts together with VPN."
+msgstr "Запустится вместе с VPN."
+
+msgid "It starts when a server is connected."
+msgstr "Запустится при подключении к серверу."
+
+msgid "LAN and traffic for the selected country bypass VPN. All other internet traffic follows the active Fast Lane routing policy."
+msgstr "LAN и трафик выбранной страны идут в обход VPN. Остальной интернет следует активной политике маршрутизации Fast Lane."
+
+msgid "Link or configuration"
+msgstr "Ссылка или конфигурация"
+
+msgid "List refreshed."
+msgstr "Список обновлён."
+
+msgid "Local DNS"
+msgstr "Локальный DNS"
+
+msgid "Local-country routing is off."
+msgstr "Маршрутизация локальной страны выключена."
+
+msgid "Local-country routing is on. LAN and the selected country go directly."
+msgstr "Маршрутизация включена: LAN и выбранная страна идут напрямую."
+
+msgid "Local-country traffic directly"
+msgstr "Трафик локальной страны напрямую"
+
+msgid "Managed GeoIP rule"
+msgstr "Управляемое правило GeoIP"
+
+msgid "Manual"
+msgstr "Вручную"
+
+msgid "Maximum wait time"
+msgstr "Максимальное время ожидания"
+
+msgid "Minimum improvement"
+msgstr "Минимальный выигрыш"
+
+msgid "Mode"
+msgstr "Режим"
+
+msgid "Name"
+msgstr "Название"
+
+msgid "No active connection."
+msgstr "Нет активного подключения."
+
+msgid "No server selected yet."
+msgstr "Сервер пока не выбран."
+
+msgid "No servers are available for automatic selection. Add a subscription or restore hidden servers."
+msgstr "Нет доступных серверов для автовыбора. Добавьте подписку или верните скрытые серверы."
+
+msgid "No servers match this filter."
+msgstr "По этому фильтру серверов нет."
+
+msgid "No settings changed."
+msgstr "Настройки не изменились."
+
+msgid "No technical details were returned."
+msgstr "Технические подробности не получены."
+
+msgid "Not checked"
+msgstr "Не проверен"
+
+msgid "Not detected"
+msgstr "Не определено"
+
+msgid "Not selected"
+msgstr "Не выбрана"
+
+msgid "Off"
+msgstr "Выключено"
+
+msgid "On"
+msgstr "Включено"
+
+msgid "Only parameters that affect VPN selection and stability."
+msgstr "Только параметры, влияющие на выбор VPN и стабильность."
+
+msgid "Only stable GitHub releases are used, and installation always requires confirmation."
+msgstr "Используются только стабильные релизы GitHub, а установка всегда требует подтверждения."
+
+msgid "Optional"
+msgstr "Необязательно"
+
+msgid "Paste a link or configuration."
+msgstr "Вставьте ссылку или конфигурацию."
+
+msgid "Pause between switches"
+msgstr "Пауза между переключениями"
+
+msgid "Ping (GET)"
+msgstr "Пинг (GET)"
+
+msgid "Ping (GET) updated."
+msgstr "Пинг (GET) обновлён."
+
+msgid "Pinned"
+msgstr "Закреплён"
+
+msgid "Preparing routing…"
+msgstr "Готовлю маршрутизацию…"
+
+msgid "Prevents constant server hopping"
+msgstr "Предотвращает постоянные переключения между серверами"
+
+msgid "Protocol"
+msgstr "Протокол"
+
+msgid "Queuing GET check…"
+msgstr "Ставлю GET-проверку в очередь…"
+
+msgid "Reading files…"
+msgstr "Читаю файлы…"
+
+msgid "Ready"
+msgstr "Готов"
+
+msgid "Refresh"
+msgstr "Обновить"
+
+msgid "Refreshing interface data…"
+msgstr "Обновляю данные интерфейса…"
+
+msgid "Reload page"
+msgstr "Обновить страницу"
+
+msgid "Remove Fast Lane"
+msgstr "Удалить Fast Lane"
+
+msgid "Remove Fast Lane from the router? Settings and subscriptions will also be removed."
+msgstr "Удалить Fast Lane с роутера? Настройки и подписки тоже будут удалены."
+
+msgid "Remove file"
+msgstr "Удалить файл"
+
+msgid "Remove other services through the FriendlyWrt package manager. Fast Lane can be removed here."
+msgstr "Удаляйте другие службы через менеджер пакетов FriendlyWrt. Fast Lane можно удалить здесь."
+
+msgid "Remove subscription"
+msgstr "Удалить подписку"
+
+msgid "Remove this file and all its servers?"
+msgstr "Удалить этот файл и все его серверы?"
+
+msgid "Remove this subscription?"
+msgstr "Удалить эту подписку?"
+
+msgid "Removing file…"
+msgstr "Удаляю файл…"
+
+msgid "Removing subscription…"
+msgstr "Удаляю подписку…"
+
+msgid "Rest of the internet"
+msgstr "Остальной интернет"
+
+msgid "Restore"
+msgstr "Вернуть"
+
+msgid "Restore the previous server if HTTPS does not work after connecting"
+msgstr "Вернуть прежний сервер, если после подключения не работает HTTPS"
+
+msgid "Restoring server…"
+msgstr "Возвращаю сервер…"
+
+msgid "Retry"
+msgstr "Повторить"
+
+msgid "Retrying subscription update…"
+msgstr "Повторно обновляю подписку…"
+
+msgid "Routing"
+msgstr "Маршруты"
+
+msgid "Rule is off"
+msgstr "Правило выключено"
+
+msgid "Running"
+msgstr "Работает"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Saved settings and subscriptions will remain. VPN may reconnect briefly. Do not turn off the router until installation finishes."
+msgstr "Настройки и подписки сохранятся. VPN может кратковременно переподключиться. Не выключайте роутер до завершения установки."
+
+msgid "Saving the selected country…"
+msgstr "Сохраняю выбранную страну…"
+
+msgid "Search servers"
+msgstr "Поиск серверов"
+
+msgid "Search servers…"
+msgstr "Поиск серверов…"
+
+msgid "Server"
+msgstr "Сервер"
+
+msgid "Server actions"
+msgstr "Действия с сервером"
+
+msgid "Server hidden and excluded from automatic selection."
+msgstr "Сервер скрыт и исключён из автовыбора."
+
+msgid "Server pinned manually."
+msgstr "Сервер закреплён вручную."
+
+msgid "Server restored to the list and automatic selection."
+msgstr "Сервер возвращён в список и автовыбор."
+
+msgid "Server selection method."
+msgstr "Способ выбора сервера."
+
+msgid "Server sorting"
+msgstr "Сортировка серверов"
+
+msgid "Server sources"
+msgstr "Источники серверов"
+
+msgid "Server:"
+msgstr "Сервер:"
+
+msgid "Servers"
+msgstr "Серверы"
+
+msgid "Service files"
+msgstr "Служебные файлы"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Show technical error"
+msgstr "Показать техническую ошибку"
+
+msgid "Slow"
+msgstr "Медленный"
+
+msgid "Sort: name"
+msgstr "Сортировка: название"
+
+msgid "Sort: ping (GET)"
+msgstr "Сортировка: пинг (GET)"
+
+msgid "Sort: source"
+msgstr "Сортировка: источник"
+
+msgid "Source"
+msgstr "Источник"
+
+msgid "Starting the check on the router…"
+msgstr "Запускаю проверку на роутере…"
+
+msgid "Status"
+msgstr "Статус"
+
+msgid "Stopped"
+msgstr "Остановлена"
+
+msgid "Strict internet check"
+msgstr "Строгая проверка интернета"
+
+msgid "Subscription"
+msgstr "Подписка"
+
+msgid "Subscription added."
+msgstr "Подписка добавлена."
+
+msgid "Subscription link, VLESS key, Base64, or Xray JSON"
+msgstr "Ссылка подписки, VLESS-ключ, Base64 или Xray JSON"
+
+msgid "Subscription removed."
+msgstr "Подписка удалена."
+
+msgid "Subscription update"
+msgstr "Обновление подписок"
+
+msgid "Subscription updated."
+msgstr "Подписка обновлена."
+
+msgid "Subscriptions and checks"
+msgstr "Подписки и проверки"
+
+msgid "Subscriptions updated."
+msgstr "Подписки обновлены."
+
+msgid "System DNS"
+msgstr "Системные DNS"
+
+msgid "Technical details"
+msgstr "Технические данные"
+
+msgid "The Fast Lane command failed."
+msgstr "Команда Fast Lane завершилась с ошибкой."
+
+msgid "The command failed."
+msgstr "Команда завершилась с ошибкой."
+
+msgid "The format is detected automatically. Links are refreshed on schedule."
+msgstr "Формат определится автоматически. Ссылки обновляются по расписанию."
+
+msgid "The last connection failed."
+msgstr "Последнее подключение не удалось."
+
+msgid "The link does not contain a routing profile."
+msgstr "В ссылке нет профиля маршрутизации."
+
+msgid "The link is valid. Partial application is disabled until Fast Lane can apply custom direct, proxy, and block rules atomically."
+msgstr "Ссылка читается. Частично применять её нельзя: Fast Lane ещё нужна атомарная поддержка custom direct/proxy/block-правил."
+
+msgid "The link must start with happ://routing/onadd/."
+msgstr "Ссылка должна начинаться с happ://routing/onadd/."
+
+msgid "The router is checking servers in the background"
+msgstr "Роутер проверяет серверы в фоне"
+
+msgid "The server did not respond in time. Try again or choose another server."
+msgstr "Сервер не ответил вовремя. Повторите попытку или выберите другой сервер."
+
+msgid "The server is available, but latency is very high."
+msgstr "Сервер доступен, но задержка очень высокая."
+
+msgid "The service process is running."
+msgstr "Служебный процесс запущен."
+
+msgid "The subscription is not accessible. Check its link and credentials."
+msgstr "Нет доступа к подписке. Проверьте ссылку и данные доступа."
+
+msgid "The update did not finish in time. It may still be running in the background."
+msgstr "Не удалось дождаться завершения. Обновление может продолжаться в фоне."
+
+msgid "There are no hidden servers."
+msgstr "Скрытых серверов нет."
+
+msgid "This subscription has expired. Its servers remain viewable but are excluded from updates, GET checks, and automatic selection."
+msgstr "Срок подписки истёк. Серверы оставлены только для просмотра и не участвуют в обновлении, GET-тестах и автовыборе."
+
+msgid "Through VPN"
+msgstr "Через VPN"
+
+msgid "Traffic goes through the selected server."
+msgstr "Трафик проходит через выбранный сервер."
+
+msgid "Turning local-country routing on…"
+msgstr "Включаю маршрутизацию локальной страны…"
+
+msgid "Turning the rule off…"
+msgstr "Выключаю правило…"
+
+msgid "URL test address"
+msgstr "Адрес URL-теста"
+
+msgid "URL test timeout"
+msgstr "Тайм-аут URL-теста"
+
+msgid "Unavailable"
+msgstr "Недоступен"
+
+msgid "Unsupported"
+msgstr "Не поддерживается"
+
+msgid "Untitled"
+msgstr "Без названия"
+
+msgid "Update Geo databases"
+msgstr "Обновить Geo-базы"
+
+msgid "Update failed"
+msgstr "Ошибка обновления"
+
+msgid "Update subscriptions"
+msgstr "Обновить подписки"
+
+msgid "Updated"
+msgstr "Обновлено"
+
+msgid "Updating subscriptions…"
+msgstr "Загружаю свежие подписки…"
+
+msgid "Use a Clash/Mihomo YAML file with a proxies: array or a provider file with payload:. Each file becomes a separate source; removing it also removes its servers."
+msgstr "Подойдёт Clash/Mihomo YAML с массивом proxies: или provider-файл с payload:. Каждый файл будет отдельным источником; его удаление удалит и серверы."
+
+msgid "VPN configuration"
+msgstr "Конфигурация VPN"
+
+msgid "VPN disconnected."
+msgstr "VPN отключён."
+
+msgid "VPN is used only for selected destinations"
+msgstr "VPN используется только для выбранных направлений"
+
+msgid "VPN is used only for selected devices"
+msgstr "VPN используется только для выбранных устройств"
+
+msgid "VPN off"
+msgstr "VPN выключен"
+
+msgid "VPN on"
+msgstr "VPN включён"
+
+msgid "VPN service"
+msgstr "Служба VPN"
+
+msgid "Validate link"
+msgstr "Проверить ссылку"
+
+msgid "Wait for the installation to finish before saving settings."
+msgstr "Дождитесь завершения установки перед сохранением настроек."
+
+msgid "Wait for the update to finish before removing Fast Lane."
+msgstr "Дождитесь завершения обновления перед удалением Fast Lane."
+
+msgid "What is new"
+msgstr "Что нового"
+
+msgid "Xray was not found. Reinstall Fast Lane."
+msgstr "Компонент Xray не найден. Переустановите Fast Lane."
+
+msgid "You can add no more than 10 files at once."
+msgstr "Можно добавить не более 10 файлов за раз."
+
+msgid "You can add several files at once"
+msgstr "Можно добавить несколько файлов сразу"
+
+msgid "You can close the admin panel; the task will continue on the router."
+msgstr "Можно закрыть админку — задача продолжится на роутере."
+
+msgid "You can validate a HAPP link. Fast Lane shows its contents and never silently drops unsupported rules."
+msgstr "Можно проверить ссылку в формате HAPP. Fast Lane покажет состав профиля и не будет молча отбрасывать неподдерживаемые правила."
+
+msgid "available"
+msgstr "на месте"
+
+msgid "blocked"
+msgstr "заблокировано"
+
+msgid "days"
+msgstr "дн."
+
+msgid "hours"
+msgstr "часы"
+
+msgid "in the list"
+msgstr "в списке"
+
+msgid "milliseconds"
+msgstr "миллисекунды"
+
+msgid "minutes"
+msgstr "минуты"
+
+msgid "ms"
+msgstr "мс"
+
+msgid "never"
+msgstr "никогда"
+
+msgid "seconds"
+msgstr "секунды"
+
+msgid "through VPN"
+msgstr "через VPN"
+
+msgid "unknown"
+msgstr "неизвестно"
+
+msgid "update failed"
+msgstr "ошибка обновления"
+
+msgid "Could not change the exclusion."
+msgstr "Не удалось изменить исключение."
+
+msgid "Could not delete the exclusion."
+msgstr "Не удалось удалить исключение."
+
+msgid "Could not load exclusions."
+msgstr "Не удалось загрузить исключения."
+
+msgid "Delete"
+msgstr "Удалить"
+
+msgid "Delete this exclusion? Traffic matching it will follow the regular VPN route."
+msgstr "Удалить это исключение? Подходящий трафик снова пойдёт по обычному VPN-маршруту."
+
+msgid "Direct access exclusions"
+msgstr "Исключения из VPN"
+
+msgid "Domains"
+msgstr "Домены"
+
+msgid "Edit"
+msgstr "Изменить"
+
+msgid "Edit exclusion"
+msgstr "Изменить исключение"
+
+msgid "Except the enabled exclusions below"
+msgstr "Кроме включённых исключений ниже"
+
+msgid "Exclusion added and enabled."
+msgstr "Исключение добавлено и включено."
+
+msgid "Exclusion deleted."
+msgstr "Исключение удалено."
+
+msgid "Exclusion disabled."
+msgstr "Исключение выключено."
+
+msgid "Exclusion enabled."
+msgstr "Исключение включено."
+
+msgid "Exclusion saved."
+msgstr "Исключение сохранено."
+
+msgid "IP addresses and networks"
+msgstr "IP-адреса и сети"
+
+msgid "IP entries"
+msgstr "IP-адресов"
+
+msgid "Lowercase Latin letters, digits, and hyphens. The name cannot be changed later."
+msgstr "Строчные латинские буквы, цифры и дефисы. Позже имя изменить нельзя."
+
+msgid "No domains"
+msgstr "Нет доменов"
+
+msgid "No exclusions yet. Add a service or device cloud that must use the regular internet connection."
+msgstr "Исключений пока нет. Добавьте сервис или облако устройства, которому нужен обычный интернет без VPN."
+
+msgid "No IP addresses"
+msgstr "Нет IP-адресов"
+
+msgid "One domain per line. Subdomains are included automatically."
+msgstr "Один домен на строку. Поддомены учитываются автоматически."
+
+msgid "One IPv4 address, CIDR, or range per line."
+msgstr "Один IPv4-адрес, CIDR или диапазон на строку."
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Saving…"
+msgstr "Сохраняю…"
+
+msgid "Traffic matching an enabled group bypasses VPN. Everything else follows the route above."
+msgstr "Трафик включённой группы идёт напрямую, в обход VPN. Всё остальное следует маршруту выше."
+
+msgid "Use lowercase Latin letters, digits, and hyphens; start with a letter."
+msgstr "Используйте строчные латинские буквы, цифры и дефисы; начните с буквы."
+
+msgid "domains"
+msgstr "доменов"

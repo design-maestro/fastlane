@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an improvement to Fast Lane
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: situation
+    attributes:
+      label: User situation
+      description: What are you trying to do, and why is the current behavior insufficient?
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Desired outcome
+      description: What should a successful experience look like?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you already tried?

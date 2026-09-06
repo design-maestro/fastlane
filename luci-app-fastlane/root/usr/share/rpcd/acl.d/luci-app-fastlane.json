@@ -1,0 +1,32 @@
+{
+	"luci-app-fastlane": {
+		"description": "Grant access to Fast Lane status and control",
+		"read": {
+			"uci": [ "luci" ],
+			"file": {
+				"/usr/bin/fastlane --json status": [ "exec" ],
+				"/usr/bin/fastlane --json inspect health-check-status": [ "exec" ],
+				"/usr/bin/fastlane --json diagnostics": [ "exec" ],
+				"/usr/bin/fastlane --json list subscriptions": [ "exec" ],
+				"/usr/bin/fastlane --json settings get": [ "exec" ],
+				"/usr/bin/fastlane --json update status": [ "exec" ],
+				"/usr/bin/fastlane --json dns get": [ "exec" ],
+				"/usr/bin/fastlane --json firewall get": [ "exec" ],
+				"/usr/bin/fastlane --json zapret get": [ "exec" ],
+				"/usr/bin/fastlane --json zapret status": [ "exec" ],
+				"/usr/bin/fastlane --json services list": [ "exec" ],
+				"/usr/libexec/fastlane-geodata status": [ "exec" ]
+			}
+		},
+		"write": {
+			"uci": [ "luci" ],
+			"file": {
+				"/usr/bin/fastlane *": [ "exec" ],
+				"/usr/libexec/fastlane-uninstall --confirm": [ "exec" ],
+				"/usr/libexec/fastlane-self-update": [ "exec" ],
+				"/usr/libexec/fastlane-xray-update": [ "exec" ],
+				"/usr/libexec/fastlane-geodata *": [ "exec" ]
+			}
+		}
+	}
+}

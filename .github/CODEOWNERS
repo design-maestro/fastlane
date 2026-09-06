@@ -1,0 +1,6 @@
+* @design-maestro
+
+/.github/ @design-maestro
+/scripts/ @design-maestro
+/openwrt/ @design-maestro
+/luci-app-fastlane/ @design-maestro
