@@ -1,0 +1,683 @@
+#!/bin/sh
+set -eu
+
+FASTLANE_VERSION="${FASTLANE_VERSION:-__FASTLANE_VERSION__}"
+FASTLANE_SUPPORTED_ARCHES="${FASTLANE_SUPPORTED_ARCHES:-__SUPPORTED_ARCHES__}"
+FASTLANE_REPO_OWNER="${FASTLANE_REPO_OWNER:-design-maestro}"
+FASTLANE_REPO_NAME="${FASTLANE_REPO_NAME:-fastlane}"
+FASTLANE_RELEASE_BASE_URL="${FASTLANE_RELEASE_BASE_URL:-}"
+FASTLANE_INSTALL_ROOT="${FASTLANE_INSTALL_ROOT:-/}"
+FASTLANE_ARCH_OVERRIDE="${FASTLANE_ARCH:-}"
+FASTLANE_XRAY_BINARY_PATH="${FASTLANE_XRAY_BINARY:-}"
+FASTLANE_XRAY_SERVICE_PATH="${FASTLANE_XRAY_SERVICE:-}"
+FASTLANE_INSTALL_DEPS="${FASTLANE_INSTALL_DEPS:-1}"
+FASTLANE_DRY_RUN=0
+FASTLANE_OPKG_UPDATED=0
+FASTLANE_INSTALL_MANIFEST_TMP="${FASTLANE_INSTALL_MANIFEST_TMP:-}"
+
+usage() {
+	printf '%s\n' "Fast Lane OpenWrt installer"
+	printf '%s\n' ""
+	printf '%s\n' "Usage: install.sh [--version <version>] [--arch <arch>] [--base-url <url>] [--asset-dir <path>] [--install-root <path>] [--dry-run] [--without-deps]"
+}
+
+log() {
+	printf '%s\n' "$*"
+}
+
+warn() {
+	printf 'warning: %s\n' "$*" >&2
+}
+
+die() {
+	printf 'error: %s\n' "$*" >&2
+	exit 1
+}
+
+command_exists() {
+	command -v "$1" >/dev/null 2>&1
+}
+
+root_path() {
+	path="$1"
+	if [ "${FASTLANE_INSTALL_ROOT}" = "/" ]; then
+		printf '/%s\n' "${path}"
+		return
+	fi
+
+	printf '%s/%s\n' "${FASTLANE_INSTALL_ROOT%/}" "${path}"
+}
+
+service_path() {
+	if [ "$1" = "xray" ] && [ -n "${FASTLANE_XRAY_SERVICE_PATH}" ]; then
+		printf '%s\n' "${FASTLANE_XRAY_SERVICE_PATH}"
+		return
+	fi
+
+	root_path "etc/init.d/$1"
+}
+
+xray_binary_path() {
+	if [ -n "${FASTLANE_XRAY_BINARY_PATH}" ]; then
+		printf '%s\n' "${FASTLANE_XRAY_BINARY_PATH}"
+		return
+	fi
+
+	root_path "usr/bin/xray"
+}
+
+fastlane_cron_helper_path() {
+	root_path "usr/libexec/fastlane-cron"
+}
+
+install_manifest_path() {
+	root_path "etc/fastlane/install-manifest.txt"
+}
+
+xray_config_path() {
+	root_path "etc/xray/config.json"
+}
+
+record_manifest_entry() {
+	kind="$1"
+	value="$2"
+
+	[ -n "${FASTLANE_INSTALL_MANIFEST_TMP}" ] || return 0
+	[ -n "${value}" ] || return 0
+
+	mkdir -p "$(dirname "${FASTLANE_INSTALL_MANIFEST_TMP}")"
+	if [ -f "${FASTLANE_INSTALL_MANIFEST_TMP}" ] && grep -Fqx "${kind}=${value}" "${FASTLANE_INSTALL_MANIFEST_TMP}" 2>/dev/null; then
+		return 0
+	fi
+
+	printf '%s=%s\n' "${kind}" "${value}" >> "${FASTLANE_INSTALL_MANIFEST_TMP}"
+}
+
+record_installed_pkg() {
+	record_manifest_entry "pkg" "$1"
+}
+
+record_restore_pkg() {
+	record_manifest_entry "restore" "$1"
+}
+
+record_owned_runtime() {
+	record_manifest_entry "runtime" "$1"
+}
+
+record_installed_ipk_packages() {
+	for ipk in "$@"; do
+		base="$(basename "${ipk}" .ipk)"
+		pkg="${base%%_*}"
+		[ -n "${pkg}" ] || continue
+		record_installed_pkg "${pkg}"
+	done
+}
+
+persist_install_manifest() {
+	destination="$(install_manifest_path)"
+
+	if [ -z "${FASTLANE_INSTALL_MANIFEST_TMP}" ] || [ ! -f "${FASTLANE_INSTALL_MANIFEST_TMP}" ]; then
+		remove_path="${destination}"
+		if [ -f "${remove_path}" ]; then
+			rm -f "${remove_path}"
+		fi
+		return 0
+	fi
+
+	mkdir -p "$(dirname "${destination}")"
+	cp "${FASTLANE_INSTALL_MANIFEST_TMP}" "${destination}"
+	chmod 0600 "${destination}" >/dev/null 2>&1 || true
+}
+
+chmod_if_exists() {
+	path="$1"
+	mode="$2"
+
+	[ -e "${path}" ] || return 0
+	chmod "${mode}" "${path}" >/dev/null 2>&1 || return 1
+}
+
+harden_secret_storage() {
+	fastlane_root="$(root_path "etc/fastlane")"
+	if [ -d "${fastlane_root}" ]; then
+		chmod 0700 "${fastlane_root}" >/dev/null 2>&1 || true
+		for name in subscriptions.json settings.json state.json .fastlane.lock speedtest.lock; do
+			chmod_if_exists "${fastlane_root}/${name}" 0600 || true
+		done
+		find "${fastlane_root}" -maxdepth 1 -type f -name '*.corrupt-*' -exec chmod 0600 {} \; >/dev/null 2>&1 || true
+	fi
+
+	xray_config="$(xray_config_path)"
+	chmod_if_exists "${xray_config}" 0600 || true
+	chmod_if_exists "${xray_config}.last-known-good" 0600 || true
+}
+
+require_root_if_needed() {
+	if [ "${FASTLANE_INSTALL_ROOT}" = "/" ] && [ "$(id -u)" -ne 0 ]; then
+		die "run this installer as root on the router, or use --install-root for a staging directory"
+	fi
+}
+
+is_supported_arch() {
+	arch="$1"
+	for supported in ${FASTLANE_SUPPORTED_ARCHES}; do
+		if [ "${arch}" = "${supported}" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+list_opkg_architectures() {
+	if ! command_exists opkg; then
+		return 0
+	fi
+
+	opkg print-architecture 2>/dev/null | while read -r kind arch _priority; do
+		if [ "${kind}" != "arch" ]; then
+			continue
+		fi
+		if [ "${arch}" = "all" ] || [ "${arch}" = "noarch" ]; then
+			continue
+		fi
+		printf '%s\n' "${arch}"
+	done
+}
+
+list_apk_architectures() {
+	command_exists apk || return 0
+	arch="$(apk --print-arch 2>/dev/null || true)"
+	case "${arch}" in
+		aarch64|arm64) printf 'aarch64_cortex-a53\n' ;;
+		x86_64|amd64) printf 'x86_64\n' ;;
+		*) [ -n "${arch}" ] && printf '%s\n' "${arch}" ;;
+	esac
+}
+
+detect_uname_arch() {
+	if ! command_exists uname; then
+		return 0
+	fi
+
+	machine="$(uname -m 2>/dev/null || true)"
+	case "${machine}" in
+		x86_64|amd64)
+			printf 'x86_64\n'
+			;;
+	esac
+}
+
+resolve_arch() {
+	if [ -n "${FASTLANE_ARCH_OVERRIDE}" ]; then
+		printf '%s\n' "${FASTLANE_ARCH_OVERRIDE}"
+		return 0
+	fi
+
+	opkg_arches="$(list_opkg_architectures)"
+	if [ -n "${opkg_arches}" ]; then
+		for candidate in ${opkg_arches}; do
+			if is_supported_arch "${candidate}"; then
+				printf '%s\n' "${candidate}"
+				return 0
+			fi
+		done
+		return 1
+	fi
+
+	apk_arches="$(list_apk_architectures)"
+	if [ -n "${apk_arches}" ]; then
+		for candidate in ${apk_arches}; do
+			if is_supported_arch "${candidate}"; then
+				printf '%s\n' "${candidate}"
+				return 0
+			fi
+		done
+		return 1
+	fi
+
+	for candidate in $(detect_uname_arch); do
+		if is_supported_arch "${candidate}"; then
+			printf '%s\n' "${candidate}"
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+download_file() {
+	url="$1"
+	destination="$2"
+	if [ -n "${FASTLANE_ASSET_DIR:-}" ]; then
+		# The updater has pinned and verified these assets before installation.
+		# Never fall back to latest/network if the approved local asset is missing.
+		cp "${FASTLANE_ASSET_DIR}/${url##*/}" "${destination}"
+		return
+	fi
+
+	if command_exists wget; then
+		wget -O "${destination}" "${url}"
+		return 0
+	fi
+
+	if command_exists curl; then
+		curl -fsSL -o "${destination}" "${url}"
+		return 0
+	fi
+
+	die "wget or curl is required to download release assets"
+}
+
+run_service_if_present() {
+	name="$1"
+	action="$2"
+	script="$(service_path "${name}")"
+
+	if [ ! -x "${script}" ]; then
+		return 0
+	fi
+
+	"${script}" "${action}" >/dev/null 2>&1 || return 1
+}
+
+xray_is_ready() {
+	[ -x "$(xray_binary_path)" ] && [ -x "$(service_path xray)" ]
+}
+
+download_stdout() {
+	url="$1"
+
+	if command_exists wget; then
+		wget -qO- "${url}"
+		return 0
+	fi
+
+	if command_exists curl; then
+		curl -fsSL "${url}"
+		return 0
+	fi
+
+	die "wget or curl is required to download release assets"
+}
+
+opkg_available() {
+	command_exists opkg
+}
+
+apk_available() {
+	command_exists apk
+}
+
+opkg_update_once() {
+	opkg_available || return 0
+	if [ "${FASTLANE_OPKG_UPDATED}" = "1" ]; then
+		return 0
+	fi
+
+	log "Updating opkg package lists"
+	opkg update
+	FASTLANE_OPKG_UPDATED=1
+}
+
+opkg_is_installed() {
+	pkg="$1"
+	opkg_available || return 1
+	opkg list-installed "${pkg}" 2>/dev/null | grep -Fq "${pkg} -"
+}
+
+ensure_opkg_package() {
+	pkg="$1"
+	reason="$2"
+
+	if ! opkg_available; then
+		warn "opkg is unavailable, cannot install ${pkg} (${reason})"
+		return 0
+	fi
+
+	if opkg_is_installed "${pkg}"; then
+		log "Detected ${pkg}"
+		return 0
+	fi
+
+	opkg_update_once
+	log "Installing ${pkg} (${reason})"
+	opkg install "${pkg}"
+	record_installed_pkg "${pkg}"
+}
+
+ensure_download_client() {
+	if command_exists wget || command_exists curl; then
+		log "Detected existing download client"
+		return 0
+	fi
+
+	if ! opkg_available; then
+		die "wget or curl is required to download release assets"
+	fi
+
+	ensure_opkg_package curl "required to download release assets"
+	if command_exists wget || command_exists curl; then
+		return 0
+	fi
+
+	ensure_opkg_package wget-ssl "required to download release assets"
+	if command_exists wget || command_exists curl; then
+		return 0
+	fi
+
+	die "wget or curl is required to download release assets"
+}
+
+ensure_dnsmasq_full() {
+	if ! opkg_available; then
+		warn "opkg is unavailable, cannot ensure dnsmasq-full"
+		return 0
+	fi
+
+	if opkg_is_installed dnsmasq-full; then
+		log "Detected dnsmasq-full"
+		return 0
+	fi
+
+	had_dnsmasq=0
+	if opkg_is_installed dnsmasq; then
+		had_dnsmasq=1
+	fi
+
+	opkg_update_once
+	log "Installing dnsmasq-full (required for Fast Lane domain selectors and nftset integration)"
+	if opkg install dnsmasq-full; then
+		record_installed_pkg dnsmasq-full
+		if [ "${had_dnsmasq}" = "1" ]; then
+			record_restore_pkg dnsmasq
+		fi
+		return 0
+	fi
+
+	if [ "${had_dnsmasq}" = "1" ]; then
+		warn "Replacing dnsmasq with dnsmasq-full"
+		record_restore_pkg dnsmasq
+		opkg remove dnsmasq || true
+		opkg install dnsmasq-full
+		record_installed_pkg dnsmasq-full
+		return 0
+	fi
+
+	die "failed to install dnsmasq-full"
+}
+
+ensure_openwrt_dependencies() {
+	if [ "${FASTLANE_INSTALL_DEPS}" != "1" ]; then
+		log "Skipping OpenWrt dependency installation"
+		return 0
+	fi
+
+	if ! opkg_available; then
+		if apk_available; then
+			log "Installing FriendlyWrt APK dependencies"
+			apk add ca-bundle curl nftables kmod-nft-tproxy dnsmasq-full rpcd-mod-file
+			return 0
+		fi
+		warn "neither opkg nor apk found, skipping OpenWrt dependency installation"
+		return 0
+	fi
+
+	ensure_opkg_package ca-bundle "TLS certificate store for HTTPS downloads"
+	ensure_download_client
+	ensure_opkg_package nftables "required for Fast Lane transparent routing"
+	ensure_opkg_package kmod-nft-tproxy "required for UDP transparent proxy routing"
+	ensure_dnsmasq_full
+	ensure_opkg_package rpcd-mod-file "required for the Fast Lane LuCI backend"
+}
+
+verify_sha256() {
+	asset="$1"
+	checksum_file="$2"
+	command_exists sha256sum || die "sha256sum is required to verify release assets"
+	expected="$(sed -n 's/^\([0-9a-fA-F]\{64\}\).*/\1/p' "${checksum_file}" | head -n1 | tr 'A-F' 'a-f')"
+	[ -n "${expected}" ] || die "invalid SHA-256 file for $(basename "${asset}")"
+	actual="$(sha256sum "${asset}" | awk '{ print $1 }' | tr 'A-F' 'a-f')"
+	[ "${actual}" = "${expected}" ] || die "SHA-256 mismatch for $(basename "${asset}")"
+}
+
+download_verified_asset() {
+	verified_url="$1"
+	verified_destination="$2"
+	verified_checksum="${verified_destination}.sha256"
+	download_file "${verified_url}" "${verified_destination}"
+	download_file "${verified_url}.sha256" "${verified_checksum}"
+	verify_sha256 "${verified_destination}" "${verified_checksum}"
+}
+
+install_fastlane_asset() {
+	if [ -z "${FASTLANE_ASSET_DIR:-}" ]; then
+		tar -xzf "${asset_path}" -C "${FASTLANE_INSTALL_ROOT}"
+		return
+	fi
+	# The UI updater validates every archive path and rejects links before this
+	# step. Publish each regular file by rename, not truncation: the old daemon
+	# and updater can keep executing their inode while the new binary is placed.
+	stage_dir="${tmp_dir}/staged"
+	mkdir -p "${stage_dir}"
+	tar -xzf "${asset_path}" -C "${stage_dir}"
+	find "${stage_dir}" -type f > "${tmp_dir}/files"
+	while IFS= read -r staged_file; do
+		relative_file="${staged_file#"${stage_dir}/"}"
+		target_file="$(root_path "${relative_file}")"
+		mkdir -p "$(dirname "${target_file}")"
+		new_file="${target_file}.fastlane-new.$$"
+		if ! cp -p "${staged_file}" "${new_file}"; then
+			rm -f "${new_file}"
+			die "could not stage ${relative_file}"
+		fi
+		if ! mv -f "${new_file}" "${target_file}"; then
+			rm -f "${new_file}"
+			die "could not replace ${relative_file}"
+		fi
+	done < "${tmp_dir}/files"
+}
+
+installed_fastlane_version() {
+	binary="$(root_path "usr/bin/fastlane")"
+	[ -x "${binary}" ] || return 0
+	"${binary}" --json version 2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1 | sed 's/^v//'
+}
+
+version_is_older() {
+	candidate="$1"
+	current="$2"
+	awk -v a="${candidate}" -v b="${current}" 'BEGIN { split(a,x,"."); split(b,y,"."); for(i=1;i<=4;i++){sub(/[^0-9].*/,"",x[i]);sub(/[^0-9].*/,"",y[i]); xv=x[i]+0;yv=y[i]+0;if(xv<yv)exit 0;if(xv>yv)exit 1}exit 1 }'
+}
+
+ensure_xray_log_retention() {
+	helper="$(fastlane_cron_helper_path)"
+	[ -x "${helper}" ] || return 0
+	FASTLANE_INSTALL_ROOT="${FASTLANE_INSTALL_ROOT}" "${helper}" ensure-xray-log-retention
+}
+
+register_fastlane_languages() {
+	[ "${FASTLANE_INSTALL_ROOT}" = "/" ] || return 0
+	defaults="$(root_path "etc/uci-defaults/luci-i18n-fastlane-ru")"
+	[ -x "${defaults}" ] || return 0
+	"${defaults}" >/dev/null 2>&1 || true
+	rm -f "${defaults}"
+}
+
+ensure_geodata() {
+	helper="$(root_path "usr/libexec/fastlane-geodata")"
+	[ -x "${helper}" ] || return 0
+	geodata_status="$(FASTLANE_GEODATA_DIR="$(root_path "usr/share/xray")" "${helper}" status 2>/dev/null || true)"
+	case "${geodata_status}" in
+		*'"ready":true'*) return 0 ;;
+	esac
+	geodata_xray_service="$(service_path xray)"
+	if [ "${FASTLANE_INSTALL_ROOT}" != "/" ]; then
+		# A staged install may validate its staged Xray binary/config, but it must
+		# never stop or restart a service on the host running the installer.
+		geodata_xray_service="$(root_path "var/run/fastlane-xray-service-disabled")"
+	fi
+	FASTLANE_GEODATA_DIR="$(root_path "usr/share/xray")" \
+		FASTLANE_XRAY_BIN="$(xray_binary_path)" \
+		FASTLANE_XRAY_BINARY="$(xray_binary_path)" \
+		FASTLANE_XRAY_SERVICE="${geodata_xray_service}" \
+		FASTLANE_XRAY_CONFIG="$(xray_config_path)" \
+		"${helper}" update
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--version)
+			[ "$#" -ge 2 ] || die "missing value for --version"
+			FASTLANE_VERSION="${2#v}"
+			shift 2
+			;;
+		--arch)
+			[ "$#" -ge 2 ] || die "missing value for --arch"
+			FASTLANE_ARCH_OVERRIDE="$2"
+			shift 2
+			;;
+		--base-url)
+			[ "$#" -ge 2 ] || die "missing value for --base-url"
+			FASTLANE_RELEASE_BASE_URL="$2"
+			shift 2
+			;;
+		--asset-dir)
+			[ "$#" -ge 2 ] || die "missing value for --asset-dir"
+			[ -d "$2" ] || die "asset directory does not exist"
+			FASTLANE_ASSET_DIR="$2"
+			shift 2
+			;;
+		--install-root)
+			[ "$#" -ge 2 ] || die "missing value for --install-root"
+			FASTLANE_INSTALL_ROOT="$2"
+			shift 2
+			;;
+		--dry-run)
+			FASTLANE_DRY_RUN=1
+			shift
+			;;
+		--without-deps)
+			FASTLANE_INSTALL_DEPS=0
+			shift
+			;;
+		--without-zapret)
+			# Kept as a compatibility no-op. Fast Lane never installs or changes Zapret.
+			shift
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			die "unknown argument: $1"
+			;;
+	esac
+done
+
+require_root_if_needed
+
+if [ -z "${FASTLANE_RELEASE_BASE_URL}" ]; then
+	FASTLANE_RELEASE_BASE_URL="https://github.com/${FASTLANE_REPO_OWNER}/${FASTLANE_REPO_NAME}/releases/download/v${FASTLANE_VERSION}"
+fi
+
+resolved_arch="$(resolve_arch || true)"
+if [ -z "${resolved_arch}" ]; then
+	detected=""
+	if command_exists opkg; then
+		detected="$(list_opkg_architectures | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+	fi
+	if [ -z "${detected}" ] && command_exists apk; then
+		detected="$(list_apk_architectures | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+	fi
+	if [ -z "${detected}" ]; then
+		detected="$(detect_uname_arch | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+	fi
+	[ -n "${detected}" ] || detected="unknown"
+	die "unsupported architecture: ${detected}. Supported release arches: ${FASTLANE_SUPPORTED_ARCHES}"
+fi
+
+if ! is_supported_arch "${resolved_arch}"; then
+	die "unsupported architecture: ${resolved_arch}. Supported release arches: ${FASTLANE_SUPPORTED_ARCHES}"
+fi
+
+current_version="$(installed_fastlane_version)"
+if [ -n "${current_version}" ] && version_is_older "${FASTLANE_VERSION}" "${current_version}"; then
+	die "refusing downgrade from ${current_version} to ${FASTLANE_VERSION}"
+fi
+
+asset_name="fastlane_${FASTLANE_VERSION}_${resolved_arch}.tar.gz"
+asset_url="${FASTLANE_RELEASE_BASE_URL}/${asset_name}"
+xray_asset_name="xray_${FASTLANE_VERSION}_${resolved_arch}.tar.gz"
+xray_asset_url="${FASTLANE_RELEASE_BASE_URL}/${xray_asset_name}"
+
+log "Fast Lane version: ${FASTLANE_VERSION}"
+log "Fast Lane arch: ${resolved_arch}"
+log "Fast Lane asset: ${asset_url}"
+
+if [ "${FASTLANE_DRY_RUN}" = "1" ]; then
+	exit 0
+fi
+
+command_exists tar || die "tar is required to install release assets"
+
+tmp_dir="${TMPDIR:-/tmp}/fastlane-install.$$"
+asset_path="${tmp_dir}/${asset_name}"
+xray_asset_path="${tmp_dir}/${xray_asset_name}"
+mkdir -p "${tmp_dir}"
+trap 'rm -rf "${tmp_dir}"' EXIT HUP INT TERM
+FASTLANE_INSTALL_MANIFEST_TMP="${tmp_dir}/install-manifest.txt"
+if [ -f "$(install_manifest_path)" ]; then
+	cp "$(install_manifest_path)" "${FASTLANE_INSTALL_MANIFEST_TMP}"
+fi
+
+ensure_openwrt_dependencies
+
+if xray_is_ready; then
+	log "Detected existing Xray runtime"
+else
+	log "Xray runtime not found, installing bundled Xray"
+	log "Xray asset: ${xray_asset_url}"
+		download_verified_asset "${xray_asset_url}" "${xray_asset_path}"
+		mkdir -p "${FASTLANE_INSTALL_ROOT}"
+		tar -xzf "${xray_asset_path}" -C "${FASTLANE_INSTALL_ROOT}"
+		record_owned_runtime xray
+	xray_service="$(service_path xray)"
+	if [ -f "${xray_service}" ]; then
+		chmod 0755 "${xray_service}" || true
+	fi
+	log "Bundled Xray installed"
+fi
+
+log "Downloading Fast Lane release asset"
+download_verified_asset "${asset_url}" "${asset_path}"
+
+log "Extracting files into ${FASTLANE_INSTALL_ROOT}"
+mkdir -p "${FASTLANE_INSTALL_ROOT}"
+install_fastlane_asset
+
+fastlane_service="$(service_path fastlane)"
+if [ -f "${fastlane_service}" ]; then
+	chmod 0755 "${fastlane_service}" || true
+fi
+
+harden_secret_storage
+register_fastlane_languages
+ensure_geodata
+ensure_xray_log_retention
+persist_install_manifest
+
+rm -f "$(root_path "tmp/luci-indexcache")"
+rm -rf "$(root_path "tmp/luci-modulecache")"
+run_service_if_present rpcd reload || true
+run_service_if_present uhttpd reload || true
+run_service_if_present fastlane enable || true
+if [ -n "${FASTLANE_ASSET_DIR:-}" ]; then
+	run_service_if_present fastlane restart || run_service_if_present fastlane start || die "Fast Lane service did not restart; inspect the service before retrying"
+else
+	run_service_if_present fastlane restart || run_service_if_present fastlane start || true
+fi
+
+log "Fast Lane installed successfully"
+log "Open LuCI: Services -> Fast Lane"
+log "CLI example: fastlane add https://provider.example/subscription"

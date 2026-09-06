@@ -1,0 +1,436 @@
+#!/bin/sh
+set -eu
+
+ASSET_DIR="${FASTLANE_GEODATA_DIR:-/usr/share/xray}"
+WORK_DIR="${FASTLANE_GEODATA_WORKDIR:-/tmp/fastlane-geodata}"
+LOCK_DIR="${FASTLANE_GEODATA_LOCK_DIR:-${WORK_DIR}.lock}"
+STATUS_FILE="${FASTLANE_GEODATA_STATUS_FILE:-${ASSET_DIR}/.fastlane-geodata-status}"
+MANIFEST_FILE="${FASTLANE_GEODATA_MANIFEST_FILE:-${ASSET_DIR}/.fastlane-geodata-manifest.sha256}"
+BASE_URL="${FASTLANE_GEODATA_BASE_URL:-https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download}"
+WGET_BIN="${FASTLANE_GEODATA_WGET:-wget}"
+CURL_BIN="${FASTLANE_GEODATA_CURL:-curl}"
+SHA256_BIN="${FASTLANE_GEODATA_SHA256:-sha256sum}"
+XRAY_SERVICE="${FASTLANE_XRAY_SERVICE:-/etc/init.d/xray}"
+XRAY_BIN="${FASTLANE_XRAY_BIN:-xray}"
+XRAY_CONFIG="${FASTLANE_XRAY_CONFIG:-/etc/xray/config.json}"
+
+json_escape() {
+	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+write_status() {
+	result="$1"
+	message="$2"
+	mkdir -p "${ASSET_DIR}"
+	tmp_status="${STATUS_FILE}.new.$$"
+	printf '%s|%s|%s\n' "${result}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${message}" >"${tmp_status}"
+	mv "${tmp_status}" "${STATUS_FILE}"
+}
+
+sha256_available() {
+	[ -x "${SHA256_BIN}" ] || command -v "${SHA256_BIN}" >/dev/null 2>&1
+}
+
+valid_sha256() {
+	checksum_value="$1"
+	[ "${#checksum_value}" -eq 64 ] || return 1
+	case "${checksum_value}" in
+		*[!0-9a-fA-F]*) return 1 ;;
+	esac
+}
+
+file_sha256() {
+	"${SHA256_BIN}" "$1" 2>/dev/null | awk 'NR == 1 { print tolower($1) }'
+}
+
+verify_downloaded_checksum() {
+	checksum_asset="$1"
+	checksum_document="$2"
+	checksum_name="$3"
+	checksum_expected="$(awk -v expected_name="${checksum_name}" '
+		NF == 0 { next }
+		{
+			lines++
+			if (lines != 1 || NF != 2 || $2 != expected_name || length($1) != 64 || $1 ~ /[^0-9a-fA-F]/) {
+				exit 1
+			}
+			value = tolower($1)
+		}
+		END {
+			if (lines != 1) exit 1
+			print value
+		}
+	' "${checksum_document}")" || return 1
+	checksum_actual="$(file_sha256 "${checksum_asset}")" || return 1
+	valid_sha256 "${checksum_actual}" || return 1
+	[ "${checksum_actual}" = "${checksum_expected}" ]
+}
+
+verify_installed_pair() {
+	[ -s "${ASSET_DIR}/geoip.dat" ] || return 1
+	[ -s "${ASSET_DIR}/geosite.dat" ] || return 1
+	[ -s "${MANIFEST_FILE}" ] || return 1
+	sha256_available || return 1
+
+	manifest_line_count=0
+	manifest_geoip_checksum=""
+	manifest_geosite_checksum=""
+	while IFS=' ' read -r manifest_checksum manifest_name manifest_extra ||
+		[ -n "${manifest_checksum}${manifest_name}${manifest_extra}" ]; do
+		manifest_line_count=$((manifest_line_count + 1))
+		[ -z "${manifest_extra}" ] || return 1
+		valid_sha256 "${manifest_checksum}" || return 1
+		case "${manifest_line_count}:${manifest_name}" in
+			1:geoip.dat) manifest_geoip_checksum="$(printf '%s' "${manifest_checksum}" | tr 'A-F' 'a-f')" ;;
+			2:geosite.dat) manifest_geosite_checksum="$(printf '%s' "${manifest_checksum}" | tr 'A-F' 'a-f')" ;;
+			*) return 1 ;;
+		esac
+	done <"${MANIFEST_FILE}"
+	[ "${manifest_line_count}" -eq 2 ] || return 1
+
+	installed_geoip_checksum="$(file_sha256 "${ASSET_DIR}/geoip.dat")" || return 1
+	installed_geosite_checksum="$(file_sha256 "${ASSET_DIR}/geosite.dat")" || return 1
+	[ "${installed_geoip_checksum}" = "${manifest_geoip_checksum}" ] &&
+		[ "${installed_geosite_checksum}" = "${manifest_geosite_checksum}" ]
+}
+
+status() {
+	last_result="never"
+	last_updated=""
+	last_message=""
+	if [ -s "${STATUS_FILE}" ]; then
+		IFS='|' read -r last_result last_updated last_message <"${STATUS_FILE}" || true
+	fi
+	updating=false
+	if update_lock_is_live; then
+		# The result file may already contain ok/error while the worker is still
+		# removing its transaction files. Keep polling until the lock is gone.
+		updating=true
+		[ -n "${last_message}" ] || last_message="GeoIP/GeoSite update in progress"
+	elif [ -d "${LOCK_DIR}" ] || [ "${last_result}" = "updating" ]; then
+		# A killed worker cannot run its EXIT trap. Do not leave callers polling an
+		# orphaned status forever; the next start will recover its stale PID lock.
+		last_result="error"
+		last_message="GeoIP/GeoSite update stopped unexpectedly"
+	fi
+	if verify_installed_pair; then
+		ready=true
+	else
+		ready=false
+	fi
+	printf '{"ready":%s,"updating":%s,"asset_dir":"%s","last_result":"%s","last_updated":"%s","message":"%s"}\n' \
+		"${ready}" "${updating}" "$(json_escape "${ASSET_DIR}")" "$(json_escape "${last_result}")" \
+		"$(json_escape "${last_updated}")" "$(json_escape "${last_message}")"
+}
+
+download() {
+	url="$1"
+	destination="$2"
+	if [ -x "${WGET_BIN}" ] || command -v "${WGET_BIN}" >/dev/null 2>&1; then
+		"${WGET_BIN}" -q -O "${destination}" "${url}"
+		return
+	fi
+	if [ -x "${CURL_BIN}" ] || command -v "${CURL_BIN}" >/dev/null 2>&1; then
+		"${CURL_BIN}" -fsSL -o "${destination}" "${url}"
+		return
+	fi
+	printf 'Для загрузки GeoIP/GeoSite нужен wget или curl.\n' >&2
+	return 1
+}
+
+xray_service_running() {
+	[ -x "${XRAY_SERVICE}" ] || return 1
+	service_status="$(${XRAY_SERVICE} status 2>/dev/null || true)"
+	case "$(printf '%s' "${service_status}" | tr 'A-Z' 'a-z')" in
+		*not\ running*|*not\ active*|*inactive*|*stopped*|*dead*) return 1 ;;
+		*running*|*active*) return 0 ;;
+	esac
+	"${XRAY_SERVICE}" running >/dev/null 2>&1
+}
+
+update_lock_is_live() {
+	lock_owner=""
+	if [ -r "${LOCK_DIR}/pid" ]; then
+		IFS= read -r lock_owner <"${LOCK_DIR}/pid" || true
+	fi
+	case "${lock_owner}" in
+		""|0|*[!0-9]*) return 1 ;;
+	esac
+	kill -0 "${lock_owner}" >/dev/null 2>&1 || [ -d "/proc/${lock_owner}" ]
+}
+
+recover_xray_service() {
+	[ -x "${XRAY_SERVICE}" ] || return 1
+	"${XRAY_SERVICE}" restart >/dev/null 2>&1 || true
+	if xray_service_running; then
+		return 0
+	fi
+	"${XRAY_SERVICE}" start >/dev/null 2>&1 || true
+	xray_service_running
+}
+
+acquire_update_lock() {
+	mkdir -p "$(dirname "${LOCK_DIR}")"
+	if mkdir "${LOCK_DIR}" 2>/dev/null; then
+		printf '%s\n' "$$" >"${LOCK_DIR}/pid"
+		lock_acquired=1
+		return 0
+	fi
+
+	lock_owner=""
+	if [ -r "${LOCK_DIR}/pid" ]; then
+		IFS= read -r lock_owner <"${LOCK_DIR}/pid" || true
+	fi
+	case "${lock_owner}" in
+		""|0|*[!0-9]*) return 1 ;;
+	esac
+	if kill -0 "${lock_owner}" >/dev/null 2>&1 || [ -d "/proc/${lock_owner}" ]; then
+		return 1
+	fi
+
+	# A power loss or SIGKILL can leave the mkdir lock behind. Move that exact
+	# lock out of the way atomically, then remove only its known pid file; never
+	# recursively delete a caller-controlled path.
+	stale_lock="${LOCK_DIR}.stale.$$"
+	if ! mv "${LOCK_DIR}" "${stale_lock}" 2>/dev/null; then
+		return 1
+	fi
+	rm -f "${stale_lock}/pid"
+	if ! rmdir "${stale_lock}" 2>/dev/null; then
+		printf 'Устаревшая блокировка GeoIP/GeoSite содержит неожиданные файлы: %s\n' "${stale_lock}" >&2
+		return 1
+	fi
+	# The numeric owner is dead and each update owns only WORK_DIR.<pid>.
+	# Cleaning that exact directory also repairs remnants from an RPC SIGKILL.
+	rm -rf "${WORK_DIR}.${lock_owner}"
+	if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+		return 1
+	fi
+	printf '%s\n' "$$" >"${LOCK_DIR}/pid"
+	lock_acquired=1
+}
+
+release_update_lock() {
+	[ "${lock_acquired:-0}" -eq 1 ] || return 0
+	lock_owner=""
+	if [ -r "${LOCK_DIR}/pid" ]; then
+		IFS= read -r lock_owner <"${LOCK_DIR}/pid" || true
+	fi
+	[ "${lock_owner}" = "$$" ] || return 0
+	released_lock="${LOCK_DIR}.released.$$"
+	if ! mv "${LOCK_DIR}" "${released_lock}" 2>/dev/null; then
+		return 1
+	fi
+	lock_acquired=0
+	rm -f "${released_lock}/pid"
+	rmdir "${released_lock}" 2>/dev/null || true
+}
+
+update() {
+	lock_already_acquired="${1:-0}"
+	work="${WORK_DIR}.$$"
+	backup="${ASSET_DIR}/.fastlane-geodata-backup.$$"
+	staged_geoip="${ASSET_DIR}/.geoip.dat.new.$$"
+	staged_geosite="${ASSET_DIR}/.geosite.dat.new.$$"
+	staged_manifest="${MANIFEST_FILE}.new.$$"
+	transaction_started=0
+	transaction_committed=0
+	lock_acquired="${lock_already_acquired}"
+
+	rollback() {
+		for rollback_name in geoip.dat geosite.dat; do
+			if [ -e "${backup}/${rollback_name}" ]; then
+				cp "${backup}/${rollback_name}" "${ASSET_DIR}/.${rollback_name}.rollback.$$"
+				mv "${ASSET_DIR}/.${rollback_name}.rollback.$$" "${ASSET_DIR}/${rollback_name}"
+			else
+				rm -f "${ASSET_DIR}/${rollback_name}"
+			fi
+		done
+		if [ -e "${backup}/manifest.sha256" ]; then
+			cp "${backup}/manifest.sha256" "${MANIFEST_FILE}.rollback.$$"
+			mv "${MANIFEST_FILE}.rollback.$$" "${MANIFEST_FILE}"
+		else
+			rm -f "${MANIFEST_FILE}"
+		fi
+	}
+
+	cleanup() {
+		cleanup_status=$?
+		trap - EXIT INT TERM HUP
+		if [ "${transaction_started}" -eq 1 ] && [ "${transaction_committed}" -ne 1 ]; then
+			rollback || true
+		fi
+		if [ "${cleanup_status}" -ne 0 ] && [ "${lock_acquired:-0}" -eq 1 ]; then
+			cleanup_result=""
+			if [ -s "${STATUS_FILE}" ]; then
+				IFS='|' read -r cleanup_result cleanup_updated cleanup_message <"${STATUS_FILE}" || true
+			fi
+			if [ "${cleanup_result}" = "updating" ]; then
+				write_status error "GeoIP/GeoSite update failed unexpectedly" || true
+			fi
+		fi
+		rm -rf "${work}" "${backup}" || true
+		rm -f "${staged_geoip}" "${staged_geosite}" "${staged_manifest}" || true
+		release_update_lock || true
+		exit "${cleanup_status}"
+	}
+
+	trap 'cleanup' EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+	trap 'exit 129' HUP
+	if [ "${lock_already_acquired}" -eq 1 ]; then
+		# start() created the lock before replying to LuCI. The detached process
+		# owns the same PID as the background subshell after exec, so handoff is
+		# complete once the PID file is replaced here.
+		printf '%s\n' "$$" >"${LOCK_DIR}/pid"
+	else
+		if ! acquire_update_lock; then
+			printf 'Обновление GeoIP/GeoSite уже выполняется.\n' >&2
+			exit 1
+		fi
+		write_status updating "GeoIP/GeoSite update in progress"
+	fi
+
+	rm -rf "${work}"
+	mkdir -p "${work}" "${backup}"
+
+	if ! sha256_available; then
+		write_status error "sha256sum is required to verify geodata"
+		printf 'Для проверки GeoIP/GeoSite нужен sha256sum.\n' >&2
+		exit 1
+	fi
+
+	for name in geoip.dat geosite.dat; do
+		if ! download "${BASE_URL}/${name}" "${work}/${name}" ||
+			! download "${BASE_URL}/${name}.sha256sum" "${work}/${name}.sha256sum"; then
+			write_status error "failed to download ${name} or its checksum"
+			printf 'Не удалось загрузить %s или его контрольную сумму.\n' "${name}" >&2
+			exit 1
+		fi
+		if ! verify_downloaded_checksum "${work}/${name}" "${work}/${name}.sha256sum" "${name}"; then
+			write_status error "checksum verification failed for ${name}"
+			printf 'Контрольная сумма %s не совпала.\n' "${name}" >&2
+			exit 1
+		fi
+	done
+
+	if ! grep -qi 'category-ru' "${work}/geosite.dat"; then
+		write_status error "geosite.dat does not contain category-ru"
+		printf 'GeoSite не содержит обязательную категорию category-ru.\n' >&2
+		exit 1
+	fi
+	geoip_checksum="$(file_sha256 "${work}/geoip.dat")"
+	geosite_checksum="$(file_sha256 "${work}/geosite.dat")"
+	printf '%s  geoip.dat\n%s  geosite.dat\n' "${geoip_checksum}" "${geosite_checksum}" >"${work}/manifest.sha256"
+
+	mkdir -p "${ASSET_DIR}"
+	for name in geoip.dat geosite.dat; do
+		if [ -e "${ASSET_DIR}/${name}" ]; then
+			cp "${ASSET_DIR}/${name}" "${backup}/${name}"
+		fi
+		cp "${work}/${name}" "${ASSET_DIR}/.${name}.new.$$"
+		chmod 0644 "${ASSET_DIR}/.${name}.new.$$"
+	done
+	if [ -e "${MANIFEST_FILE}" ]; then
+		cp "${MANIFEST_FILE}" "${backup}/manifest.sha256"
+	fi
+	cp "${work}/manifest.sha256" "${staged_manifest}"
+	chmod 0644 "${staged_manifest}"
+	service_was_running=0
+	if xray_service_running; then
+		service_was_running=1
+	fi
+
+	transaction_started=1
+	if ! mv "${staged_geoip}" "${ASSET_DIR}/geoip.dat" ||
+		! mv "${staged_geosite}" "${ASSET_DIR}/geosite.dat" ||
+		! mv "${staged_manifest}" "${MANIFEST_FILE}"; then
+		rollback
+		transaction_started=0
+		write_status error "failed to install geodata pair"
+		exit 1
+	fi
+	if ! verify_installed_pair; then
+		rollback
+		transaction_started=0
+		write_status error "installed geodata failed manifest verification"
+		printf 'Установленная пара GeoIP/GeoSite не прошла проверку; восстановлена предыдущая пара.\n' >&2
+		exit 1
+	fi
+
+	if command -v "${XRAY_BIN}" >/dev/null 2>&1 && [ -s "${XRAY_CONFIG}" ]; then
+		if ! "${XRAY_BIN}" run -test -config "${XRAY_CONFIG}" >/dev/null 2>&1; then
+			rollback
+			transaction_started=0
+			write_status error "Xray rejected updated geodata"
+			printf 'Xray отклонил новые GeoIP/GeoSite; восстановлена предыдущая пара.\n' >&2
+			exit 1
+		fi
+	fi
+
+	# Installing geodata while VPN is disconnected must not start Xray. When it
+	# was running, a zero exit status is not enough: the service must still be
+	# observable as running after reload/restart.
+	if [ "${service_was_running}" -eq 1 ]; then
+		service_refresh_ok=0
+		if "${XRAY_SERVICE}" reload >/dev/null 2>&1; then
+			if xray_service_running; then
+				service_refresh_ok=1
+			fi
+		elif "${XRAY_SERVICE}" restart >/dev/null 2>&1 && xray_service_running; then
+			service_refresh_ok=1
+		fi
+		if [ "${service_refresh_ok}" -ne 1 ]; then
+			rollback
+			transaction_started=0
+			if recover_xray_service; then
+				write_status error "Xray reload failed; previous geodata and service restored"
+			else
+				write_status error "Xray reload failed; previous geodata restored but service recovery failed"
+			fi
+			printf 'Новые GeoIP/GeoSite откачены: Xray не запущен после reload; восстановлена предыдущая пара.\n' >&2
+			exit 1
+		fi
+	fi
+	transaction_committed=1
+	write_status ok "GeoIP/GeoSite updated and verified"
+	status
+}
+
+start() {
+	lock_acquired=0
+	if ! acquire_update_lock; then
+		if update_lock_is_live; then
+			# Starting is idempotent: another UI action can join the same worker.
+			status
+			return 0
+		fi
+		printf 'Не удалось получить блокировку обновления GeoIP/GeoSite.\n' >&2
+		return 1
+	fi
+
+	write_status updating "GeoIP/GeoSite update in progress"
+	if command -v nohup >/dev/null 2>&1; then
+		nohup "$0" _run </dev/null >/dev/null 2>&1 &
+	else
+		(
+			trap '' HUP
+			exec "$0" _run
+		) </dev/null >/dev/null 2>&1 &
+	fi
+	worker_pid=$!
+	printf '%s\n' "${worker_pid}" >"${LOCK_DIR}/pid"
+	# Ownership has moved to the detached worker; this short-lived RPC process
+	# must not remove its lock on return.
+	lock_acquired=0
+	status
+}
+
+case "${1:-status}" in
+	status) status ;;
+	update) update ;;
+	start) start ;;
+	_run) update 1 ;;
+	*) printf 'Использование: fastlane-geodata status|start|update\n' >&2; exit 2 ;;
+esac

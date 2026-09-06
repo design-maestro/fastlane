@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible Fast Lane problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not publish subscriptions, UUIDs, keys, cookies, public IPs, or router backups. For vulnerabilities, use Security → Report a vulnerability."
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open…\n2. Click…\n3. Observe…"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Fast Lane version
+      placeholder: "Release tag or commit"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Router and firmware
+      placeholder: "NanoPi R4S, FriendlyWrt …"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - VPN and automatic selection
+        - GET checks
+        - Routing and GeoIP/GeoSite
+        - DNS
+        - LuCI
+        - Installation or update
+        - CLI or TUI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots and sanitized logs
+      description: Remove all sensitive data before posting.

@@ -1,0 +1,47 @@
+{
+	"admin/services/fastlane": {
+		"title": "Fast Lane",
+		"order": 60,
+		"action": {
+			"type": "alias",
+			"path": "admin/services/fastlane/vpn"
+		},
+		"depends": {
+			"fs": {
+				"/usr/bin/fastlane": "executable"
+			}
+		}
+	},
+	"admin/services/fastlane/vpn": {
+		"title": "VPN",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "fastlane/vpn-20260906-latency-v19"
+		}
+	},
+	"admin/services/fastlane/diagnostics": {
+		"title": "Diagnostics",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "fastlane/diagnostics-20260904-v3"
+		}
+	},
+	"admin/services/fastlane/routing": {
+		"title": "Routing",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "fastlane/routing-20260906-v4"
+		}
+	},
+	"admin/services/fastlane/settings": {
+		"title": "Settings",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "fastlane/settings-20260905-updates-v6"
+		}
+	}
+}
