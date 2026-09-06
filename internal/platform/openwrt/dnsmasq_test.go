@@ -90,7 +90,7 @@ func TestFirewallManagerValidateAllowsCIDRBypassTargetsWithoutDNSMasqNFTSet(t *t
 	}
 }
 
-func TestFirewallManagerApplyWritesDNSMasqSnippetAndReloads(t *testing.T) {
+func TestFirewallManagerApplyWritesDNSMasqSnippetAndRestarts(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -158,8 +158,11 @@ func TestFirewallManagerApplyWritesDNSMasqSnippetAndReloads(t *testing.T) {
 		t.Fatalf("read call log: %v", err)
 	}
 
-	if !strings.Contains(string(calls), "reload") {
-		t.Fatalf("expected dnsmasq reload, got %q", calls)
+	if !strings.Contains(string(calls), "restart") {
+		t.Fatalf("expected dnsmasq restart, got %q", calls)
+	}
+	if strings.Contains(string(calls), "reload") {
+		t.Fatalf("dnsmasq reload does not reliably reread generated conf-dir snippets, got %q", calls)
 	}
 }
 

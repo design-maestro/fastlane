@@ -33,7 +33,7 @@
 		"order": 20,
 		"action": {
 			"type": "view",
-			"path": "fastlane/routing-20260906-v4"
+			"path": "fastlane/routing-20260906-v5"
 		}
 	},
 	"admin/services/fastlane/settings": {

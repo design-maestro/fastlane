@@ -237,28 +237,27 @@ func (m FirewallManager) syncDNSMasqTargets(ctx context.Context, proxyDomains []
 		if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove dnsmasq nftset snippet: %w", err)
 		}
-		return m.reloadDNSMasq(ctx)
+		return m.restartDNSMasq(ctx)
 	}
 
 	if err := atomicWriteText(snippetPath, buildDNSMasqNFTSetConfig(trimmedProxyDomains, trimmedBypassDomains), 0o644); err != nil {
 		return fmt.Errorf("write dnsmasq nftset snippet: %w", err)
 	}
 
-	return m.reloadDNSMasq(ctx)
+	return m.restartDNSMasq(ctx)
 }
 
-func (m FirewallManager) reloadDNSMasq(ctx context.Context) error {
+func (m FirewallManager) restartDNSMasq(ctx context.Context) error {
 	script := firstNonEmpty(m.DNSMasqServicePath, dnsmasqServicePath())
 	if script == "" {
 		return nil
 	}
 
-	if err := runCommand(ctx, script, "reload"); err == nil {
-		return nil
-	}
-
+	// OpenWrt's reload path may keep the existing conf-dir contents in the
+	// running dnsmasq process. A restart is required after replacing the
+	// generated nftset snippet so new domain rules take effect immediately.
 	if err := runCommand(ctx, script, "restart"); err != nil {
-		return fmt.Errorf("reload dnsmasq service: %w", err)
+		return fmt.Errorf("restart dnsmasq service: %w", err)
 	}
 
 	return nil
