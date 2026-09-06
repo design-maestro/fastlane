@@ -99,7 +99,7 @@ cp "${ROOT_DIR}/luci-app-fastlane/htdocs/luci-static/resources/fastlane/assets/"
 	"${DATA_DIR}/www/luci-static/resources/fastlane/assets/"
 for view_name in \
 	vpn.js vpn-20260906-latency-v19.js \
-	routing.js routing-20260906-v4.js \
+	routing.js routing-20260906-v5.js \
 	diagnostics.js diagnostics-20260904-v3.js \
 	settings.js settings-20260905-updates-v6.js
 do

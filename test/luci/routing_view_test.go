@@ -46,6 +46,20 @@ func TestFastLaneRoutingCountrySelectMatchesPrimaryInputs(t *testing.T) {
 	}
 }
 
+func TestFastLaneRoutingHAPPInputDoesNotStickToAction(t *testing.T) {
+	t.Parallel()
+	source := readRoutingViewSource(t)
+	for _, want := range []string{
+		".flr-advanced-copy{max-width:72ch;margin:2px 0 22px",
+		".flr-import{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:stretch}",
+		".flr-import .flr-button{min-width:176px}",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("routing HAPP control missing stable spacing %q", want)
+		}
+	}
+}
+
 func TestFastLaneRoutingHasOneVisibleOnOffState(t *testing.T) {
 	t.Parallel()
 	source := readRoutingViewSource(t)
@@ -115,7 +129,7 @@ func readRoutingViewSource(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20260906-v4.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20260906-v5.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

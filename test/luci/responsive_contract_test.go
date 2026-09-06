@@ -48,7 +48,7 @@ func TestFastLaneCurrentViewsKeepMobileInteractionContracts(t *testing.T) {
 		},
 		{
 			name: "Routes",
-			path: filepath.Join("view", "fastlane", "routing-20260906-v4.js"),
+			path: filepath.Join("view", "fastlane", "routing-20260906-v5.js"),
 			required: []string{
 				"@media(max-width:900px)",
 				".flr-head{align-items:flex-start;flex-direction:column}",
