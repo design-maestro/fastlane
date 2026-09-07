@@ -95,6 +95,7 @@ verify_installed_pair() {
 }
 
 status() {
+	force_updating="${1:-0}"
 	last_result="never"
 	last_updated=""
 	last_message=""
@@ -102,7 +103,14 @@ status() {
 		IFS='|' read -r last_result last_updated last_message <"${STATUS_FILE}" || true
 	fi
 	updating=false
-	if update_lock_is_live; then
+	if [ "${force_updating}" -eq 1 ]; then
+		# start() has already persisted the queued state and handed the lock to a
+		# detached PID. Return that accepted state without racing the scheduler:
+		# the next ordinary status call will validate the worker PID normally.
+		updating=true
+		last_result="updating"
+		last_message="GeoIP/GeoSite update in progress"
+	elif update_lock_is_live; then
 		# The result file may already contain ok/error while the worker is still
 		# removing its transaction files. Keep polling until the lock is gone.
 		updating=true
@@ -411,20 +419,20 @@ start() {
 	fi
 
 	write_status updating "GeoIP/GeoSite update in progress"
-	if command -v nohup >/dev/null 2>&1; then
-		nohup "$0" _run </dev/null >/dev/null 2>&1 &
-	else
-		(
-			trap '' HUP
-			exec "$0" _run
-		) </dev/null >/dev/null 2>&1 &
-	fi
+	# Keep the worker in one shell process from fork through exec. Some nohup
+	# implementations briefly expose an intermediate process which can exit
+	# before the script takes ownership of the lock, making a healthy queued
+	# update look orphaned under scheduler pressure.
+	(
+		trap '' HUP
+		exec "$0" _run
+	) </dev/null >/dev/null 2>&1 &
 	worker_pid=$!
 	printf '%s\n' "${worker_pid}" >"${LOCK_DIR}/pid"
 	# Ownership has moved to the detached worker; this short-lived RPC process
 	# must not remove its lock on return.
 	lock_acquired=0
-	status
+	status 1
 }
 
 case "${1:-status}" in
