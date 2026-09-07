@@ -7,7 +7,7 @@
 **Управление Xray на OpenWrt с понятным интерфейсом LuCI.**
 
 [![CI](https://github.com/design-maestro/fastlane/actions/workflows/ci.yml/badge.svg)](https://github.com/design-maestro/fastlane/actions/workflows/ci.yml)
-[![Лицензия](https://img.shields.io/github/license/design-maestro/fastlane)](LICENSE)
+[![Лицензия: исходный код доступен · PolyForm NC](https://img.shields.io/badge/license-source--available%20%C2%B7%20PolyForm%20NC-59636e)](LICENSE)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-22.03%2B-00B5E2?logo=openwrt)](https://openwrt.org/)
 [![Go](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go)](go.mod)
 
