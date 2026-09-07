@@ -23,6 +23,42 @@ func TestParseVLESSLink(t *testing.T) {
 	assertGoldenNodes(t, nodes, "vless", "normalized.golden.json")
 }
 
+func TestParseVLESSGRPCServiceNameAliases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "serviceName", query: "serviceName=livestreamcontent"},
+		{name: "service_name", query: "service_name=livestreamcontent"},
+		{name: "grpc-service-name", query: "grpc-service-name=livestreamcontent"},
+		{name: "legacy path", query: "path=livestreamcontent"},
+		{name: "serviceName takes precedence", query: "path=legacy&serviceName=livestreamcontent"},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			input := "vless://11111111-1111-1111-1111-111111111111@edge.example.com:443?type=grpc&security=reality&encryption=none&" + test.query
+			nodes, err := parser.ParseNodes(input, "Example Provider")
+			if err != nil {
+				t.Fatalf("parse nodes: %v", err)
+			}
+			if len(nodes) != 1 {
+				t.Fatalf("expected 1 node, got %d", len(nodes))
+			}
+
+			got := nodes[0]
+			if got.Transport != "grpc" || got.Path != "livestreamcontent" {
+				t.Fatalf("unexpected gRPC settings: transport=%q serviceName=%q", got.Transport, got.Path)
+			}
+		})
+	}
+}
+
 func TestParseVMessLink(t *testing.T) {
 	t.Parallel()
 
