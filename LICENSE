@@ -1,3 +1,19 @@
+# Fast Lane License Notice
+
+Fast Lane is **source-available software**, not OSI-approved open-source
+software. Its source code is publicly available, but commercial use is not
+granted by the license below.
+
+Original Fast Lane contributions are licensed under the unmodified PolyForm
+Noncommercial License 1.0.0 terms below. Personal and other noncommercial use,
+modification, and distribution are permitted. Commercial use requires separate
+written permission from Nikita Goryachev, the Fast Lane project owner.
+
+Some portions remain available under their upstream MIT license as described in
+`LICENSES/UPSTREAM-MIT.txt`, `NOTICE`, and `THIRD_PARTY_NOTICES.md`.
+
+---
+
 # PolyForm Noncommercial License 1.0.0
 
 <https://polyformproject.org/licenses/noncommercial/1.0.0>
