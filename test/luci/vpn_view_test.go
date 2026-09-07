@@ -344,13 +344,37 @@ func TestFastLaneVPNBackgroundLoaderHasTextSpacing(t *testing.T) {
 	}
 }
 
+func TestFastLaneVPNBottomActionMenusStayVisible(t *testing.T) {
+	t.Parallel()
+	source := readVPNViewSource(t)
+	for _, want := range []string{
+		"min-height:760px;overflow:visible",
+		".fl-table tbody tr:nth-last-child(-n+2) .fl-more-menu{top:auto;bottom:48px}",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("VPN view missing bottom-menu visibility rule %q", want)
+		}
+	}
+}
+
+func TestFastLaneVPNDestructiveMenuColorsAreDistinct(t *testing.T) {
+	t.Parallel()
+	source := readVPNViewSource(t)
+	if !strings.Contains(source, "class: 'fl-button fl-button-warning'") || !strings.Contains(source, "[ _('Hide') ]") {
+		t.Fatal("Hide action must use the warning color")
+	}
+	if !strings.Contains(source, "class: 'fl-button fl-button-danger'") || !strings.Contains(source, "[ _('Remove server') ]") {
+		t.Fatal("Remove server action must use the danger color")
+	}
+}
+
 func readVPNViewSource(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260906-latency-v19.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260907-menu-v21.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

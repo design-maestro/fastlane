@@ -6,8 +6,8 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
-msgid "0 s disables automatic checks"
-msgstr "0 с отключает автоматические проверки"
+msgid "0 min 0 s disables automatic checks"
+msgstr "0 мин 0 с отключает автоматические проверки"
 
 msgid "A file is larger than 96 KB. Split it into several provider files."
 msgstr "Один из файлов больше 96 КБ. Разделите его на несколько файлов провайдера."
@@ -555,6 +555,9 @@ msgstr "Удалить Fast Lane"
 msgid "Remove Fast Lane from the router? Settings and subscriptions will also be removed."
 msgstr "Удалить Fast Lane с роутера? Настройки и подписки тоже будут удалены."
 
+msgid "Remove server"
+msgstr "Удалить сервер"
+
 msgid "Remove file"
 msgstr "Удалить файл"
 
@@ -567,11 +570,17 @@ msgstr "Удалить подписку"
 msgid "Remove this file and all its servers?"
 msgstr "Удалить этот файл и все его серверы?"
 
+msgid "Remove this server? If it is active, the VPN will disconnect."
+msgstr "Удалить этот сервер? Если он активен, VPN будет отключён."
+
 msgid "Remove this subscription?"
 msgstr "Удалить эту подписку?"
 
 msgid "Removing file…"
 msgstr "Удаляю файл…"
+
+msgid "Removing server…"
+msgstr "Удаляю сервер…"
 
 msgid "Removing subscription…"
 msgstr "Удаляю подписку…"
@@ -626,6 +635,9 @@ msgstr "Действия с сервером"
 
 msgid "Server hidden and excluded from automatic selection."
 msgstr "Сервер скрыт и исключён из автовыбора."
+
+msgid "Server removed."
+msgstr "Сервер удалён."
 
 msgid "Server pinned manually."
 msgstr "Сервер закреплён вручную."
@@ -864,11 +876,17 @@ msgstr "дн."
 msgid "hours"
 msgstr "часы"
 
+msgid "h"
+msgstr "ч"
+
 msgid "in the list"
 msgstr "в списке"
 
 msgid "milliseconds"
 msgstr "миллисекунды"
+
+msgid "min"
+msgstr "мин"
 
 msgid "minutes"
 msgstr "минуты"
@@ -881,6 +899,9 @@ msgstr "никогда"
 
 msgid "seconds"
 msgstr "секунды"
+
+msgid "s"
+msgstr "с"
 
 msgid "through VPN"
 msgstr "через VPN"
