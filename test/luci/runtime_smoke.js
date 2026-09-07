@@ -483,6 +483,25 @@ async function smoke(section, name, run) {
 		commandSeen(['settings', 'set', 'auto.excluded-nodes', 'durev/nl']);
 	});
 
+	await smoke('VPN', 'removes one manually added server without deleting other sources', async () => {
+		const page = makeVPN();
+		page.pageData[1].push({
+			id: 'server-list', source_type: 'raw', provider_name: 'Server List',
+			nodes: [{ id: 'single', name: 'Finland', protocol: 'vless', address: 'fi.example', port: 443 }]
+		});
+		page.filter = 'server-list';
+		assert.match(treeText(page.renderTable()), /Remove server/);
+
+		window.confirm = () => false;
+		await page.handleRemoveServer('server-list', 'single');
+		assert.equal(commands.length, 0);
+
+		window.confirm = () => true;
+		await page.handleRemoveServer('server-list', 'single');
+		commandSeen(['remove', 'server-list', '--node', 'single']);
+		assert.equal(commandCount('remove server-list'), 1);
+	});
+
 	await smoke('VPN', 'keeps one server action menu open and closes it outside', async () => {
 		const page = makeVPN();
 		const event = { preventDefault() {}, stopPropagation() {} };
@@ -1086,6 +1105,15 @@ async function smoke(section, name, run) {
 		assert.equal(page.draft.strict_egress_check, false);
 		assert.equal(input.value, '9');
 		assert.equal(page.draft.refresh_interval, '1h9m0s');
+	});
+
+	await smoke('Settings', 'shows automatic checks in minutes and seconds', async () => {
+		const page = makeSettings();
+		page.draft.health_check_interval = '300s';
+		const field = page.durationField('health_check_interval', 'Automatic server check', 'hint', ['m', 's']);
+		const segments = field.children[1].children;
+		assert.deepEqual(segments.map((segment) => segment.children[0].value), ['5', '0']);
+		assert.match(treeText(field), /min.*s/);
 	});
 
 	await smoke('Settings', 'saves every changed setting in one atomic patch', async () => {

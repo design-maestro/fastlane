@@ -21,6 +21,16 @@ func ParseVLESS(raw, provider string) (domain.Node, error) {
 	}
 
 	query := parsed.Query()
+	transport := firstNonEmpty(query.Get("type"), query.Get("network"))
+	path := query.Get("path")
+	if transport == "grpc" {
+		path = firstNonEmpty(
+			query.Get("serviceName"),
+			query.Get("service_name"),
+			query.Get("grpc-service-name"),
+			path,
+		)
+	}
 	node := domain.Node{
 		Name:        parsed.Fragment,
 		Remark:      parsed.Fragment,
@@ -37,12 +47,12 @@ func ParseVLESS(raw, provider string) (domain.Node, error) {
 		ShortID:     firstNonEmpty(query.Get("sid"), query.Get("shortId")),
 		SpiderX:     firstNonEmpty(query.Get("spx"), query.Get("spiderX")),
 		Flow:        query.Get("flow"),
-		Transport:   firstNonEmpty(query.Get("type"), query.Get("network")),
-		Path:        query.Get("path"),
+		Transport:   transport,
+		Path:        path,
 		Host:        query.Get("host"),
 		RawQuery:    parsed.RawQuery,
 		Extras: map[string]string{
-			"type": firstNonEmpty(query.Get("type"), query.Get("network")),
+			"type": transport,
 		},
 	}
 

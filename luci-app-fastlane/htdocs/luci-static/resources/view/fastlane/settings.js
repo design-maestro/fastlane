@@ -1,4 +1,4 @@
 'use strict';
-'require view.fastlane.settings-20260905-updates-v6 as fastlaneSettings';
+'require view.fastlane.settings-20260907-duration-v7 as fastlaneSettings';
 
 return fastlaneSettings;
