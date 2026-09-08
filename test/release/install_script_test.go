@@ -59,6 +59,22 @@ func TestInstallScriptUsesApprovedLocalAssetsAndPreservesSettings(t *testing.T) 
 	if matches, _ := filepath.Glob(oldPath + ".fastlane-new.*"); len(matches) != 0 {
 		t.Fatal("temporary executable left behind", matches)
 	}
+	for relativePath, want := range map[string]string{
+		"etc/uci-defaults/luci-i18n-fastlane-ru":             "#!/bin/sh\nexit 0\n",
+		"usr/lib/lua/luci/i18n/fastlane.ru.lmo":              "compiled translation",
+		"usr/share/licenses/fastlane/LICENSE":                "license\n",
+		"usr/share/licenses/fastlane/NOTICE":                 "notice\n",
+		"usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md": "third party\n",
+		"usr/share/licenses/fastlane/UPSTREAM-MIT.txt":       "upstream MIT\n",
+	} {
+		data, readErr := os.ReadFile(filepath.Join(root, relativePath))
+		if readErr != nil || string(data) != want {
+			t.Fatalf("release data %s was not restored: %v %q", relativePath, readErr, data)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "usr/libexec/fastlane-release-data")); !os.IsNotExist(err) {
+		t.Fatalf("temporary release data directory was not removed: %v", err)
+	}
 }
 
 func TestInstallScriptInstallsMatchedOpenWrtTarball(t *testing.T) {
@@ -768,6 +784,12 @@ func writeTestTarball(t *testing.T, path string) {
 	addTarFile(t, tw, "./etc/init.d/fastlane", 0o755, "#!/bin/sh\nset -eu\nprintf '%s:%s\\n' \"$(basename \"$0\")\" \"${1:-}\" >> \"${FASTLANE_TEST_SERVICE_LOG:?}\"\n")
 	addTarFile(t, tw, "./usr/libexec/fastlane-cron", 0o755, string(cronHelper))
 	addTarFile(t, tw, "./usr/libexec/fastlane-geodata", 0o755, "#!/bin/sh\nset -eu\n[ -n \"${FASTLANE_TEST_GEODATA_ENV_LOG:-}\" ] || exit 0\nprintf 'asset=%s\\nbinary=%s\\nservice=%s\\nconfig=%s\\n' \"${FASTLANE_GEODATA_DIR:-}\" \"${FASTLANE_XRAY_BIN:-}\" \"${FASTLANE_XRAY_SERVICE:-}\" \"${FASTLANE_XRAY_CONFIG:-}\" >\"${FASTLANE_TEST_GEODATA_ENV_LOG}\"\n")
+	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/etc/uci-defaults/luci-i18n-fastlane-ru", 0o755, "#!/bin/sh\nexit 0\n")
+	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/lib/lua/luci/i18n/fastlane.ru.lmo", 0o644, "compiled translation")
+	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/LICENSE", 0o644, "license\n")
+	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/NOTICE", 0o644, "notice\n")
+	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md", 0o644, "third party\n")
+	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/UPSTREAM-MIT.txt", 0o644, "upstream MIT\n")
 	addTarFile(t, tw, "./www/luci-static/resources/view/fastlane/overview.js", 0o644, "'use strict';\n")
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
