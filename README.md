@@ -49,6 +49,7 @@ See [capture notes](docs/images/README.md) for screenshot provenance and verific
 - Routes LAN and any selected ISO country directly with GeoIP data; validated GeoSite rules are added where available.
 - Uses English as the base UI, includes a complete Russian translation, and follows the LuCI language unless overridden in Settings.
 - Shares one persistent state across LuCI, CLI, and TUI.
+- Provides an optional authenticated HTTP control plane for a future standalone Fast Lane client, without creating a second VPN engine.
 - Tests generated Xray configuration before replacing the last known working runtime.
 - Checks stable GitHub releases and installs an explicitly approved update from Settings in the background. [Update channel requirements and limitations](docs/updating.md).
 
@@ -56,7 +57,7 @@ See [capture notes](docs/images/README.md) for screenshot provenance and verific
 
 ```mermaid
 flowchart LR
-    UI[LuCI / CLI / TUI] --> APP[Fast Lane service]
+    UI[LuCI / CLI / TUI / optional HTTP API] --> APP[Fast Lane service]
     APP --> STORE[Atomic state in /etc/fastlane]
     APP --> XRAY[Xray runtime]
     APP --> CHECKS[Parallel HTTPS GET checks]

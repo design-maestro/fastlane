@@ -632,3 +632,43 @@ func TestSchedulerRunOnceUsesLastRefreshAttemptAfterFailure(t *testing.T) {
 		t.Fatalf("expected scheduler to skip retry before interval elapsed, got %d HTTP calls", attempts)
 	}
 }
+
+func TestSchedulerSerializesManagementOperationWithHealthPass(t *testing.T) {
+	t.Parallel()
+
+	scheduler := NewScheduler(nil)
+	healthStarted := make(chan struct{})
+	releaseHealth := make(chan struct{})
+	scheduler.SetHealthCheck(func(context.Context) {
+		close(healthStarted)
+		<-releaseHealth
+	})
+
+	healthDone := make(chan struct{})
+	go func() {
+		scheduler.RunHealthOnce(context.Background())
+		close(healthDone)
+	}()
+	<-healthStarted
+
+	managementStarted := make(chan struct{})
+	managementDone := make(chan struct{})
+	go func() {
+		_ = scheduler.RunExclusiveHealthOperation(context.Background(), func(context.Context) error {
+			close(managementStarted)
+			return nil
+		})
+		close(managementDone)
+	}()
+
+	select {
+	case <-managementStarted:
+		t.Fatal("management operation overlapped the health pass")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releaseHealth)
+	<-healthDone
+	<-managementStarted
+	<-managementDone
+}

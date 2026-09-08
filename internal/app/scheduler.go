@@ -87,6 +87,14 @@ func (s *Scheduler) RunHealthOnce(ctx context.Context) {
 	s.runHealthOnce(ctx)
 }
 
+// RunExclusiveHealthOperation serializes a management operation with periodic,
+// triggered, and recovery health passes in this daemon process.
+func (s *Scheduler) RunExclusiveHealthOperation(ctx context.Context, operation func(context.Context) error) error {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	return operation(ctx)
+}
+
 func (s *Scheduler) runRefreshLoop(ctx context.Context) {
 	s.RunOnce(ctx)
 	lastScanAt := s.now()

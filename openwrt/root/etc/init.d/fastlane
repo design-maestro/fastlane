@@ -31,10 +31,12 @@ migrate_health_runtime_files() {
 }
 
 start_service() {
-	local root tick
+	local root tick management_listen management_token_file
 
 	root="${FASTLANE_ROOT:-/etc/fastlane}"
 	tick="${FASTLANE_SCHEDULER_TICK:-1m}"
+	management_listen="${FASTLANE_MANAGEMENT_LISTEN:-}"
+	management_token_file="${FASTLANE_MANAGEMENT_TOKEN_FILE:-/etc/fastlane/management.token}"
 
 	[ -x "${FASTLANE_BIN}" ] || return 1
 	[ -x "${FASTLANE_CRON_HELPER}" ] && "${FASTLANE_CRON_HELPER}" ensure-xray-log-retention >/dev/null 2>&1 || true
@@ -42,6 +44,12 @@ start_service() {
 
 	procd_open_instance
 	procd_set_param command "${FASTLANE_BIN}" --root "${root}" daemon --tick "${tick}"
+	if [ -n "${management_listen}" ]; then
+		procd_append_param command --management-listen "${management_listen}"
+		if [ -f "${management_token_file}" ]; then
+			procd_append_param command --management-token-file "${management_token_file}"
+		fi
+	fi
 	procd_set_param respawn 3600 5 5
 	procd_set_param stdout 1
 	procd_set_param stderr 1

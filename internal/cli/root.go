@@ -27,6 +27,7 @@ type rootOptions struct {
 	showVersion bool
 	runUpgrade  bool
 	service     *app.Service
+	logger      *slog.Logger
 }
 
 // Execute runs the Fast Lane CLI.
@@ -130,6 +131,7 @@ func (o *rootOptions) initService(cmd *cobra.Command) error {
 		bootstrapLogger.Warn("harden secret storage permissions", "root", root, "config_path", configPath, "error", err.Error())
 	}
 	logger := newLogger(logLevel)
+	o.logger = logger
 	fileStore.WithLogger(logger)
 	controller := openwrt.NewXrayController()
 	firewall := openwrt.NewFirewallManager()

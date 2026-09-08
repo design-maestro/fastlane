@@ -2,13 +2,20 @@
 
 ## Runtime boundary
 
-Fast Lane is a router service with three clients: LuCI, CLI, and TUI. The clients
-submit commands and read persisted state. They do not own background refresh,
-health checks, automatic selection, or failover.
+Fast Lane is a router service with three built-in clients: LuCI, CLI, and TUI.
+An optional authenticated HTTP control plane can expose the same application
+service to a future standalone Fast Lane client. Every client submits commands
+and reads the same persisted state; none owns background refresh, health checks,
+automatic selection, or failover.
 
 On OpenWrt, `procd` runs `fastlane daemon`. The daemon survives browser navigation,
 tab suspension, and a closed admin page. A manual GET check is queued in the
 runtime directory and its progress can be read by any later LuCI session.
+
+The optional management listener is disabled by default. It contains no copied
+third-party UI and does not start another VPN engine. When explicitly enabled,
+long operations are detached from individual HTTP requests and serialized with
+the daemon's health passes. LAN exposure requires a strong access token.
 
 ## Layers
 
@@ -70,6 +77,8 @@ to another server on its own.
 ## Safety properties
 
 - Browser lifetime does not control backend jobs.
+- The optional HTTP listener cannot bind outside loopback without a strong token.
+- Management responses use API-safe subscription and node shapes without credentials.
 - State writes are atomic and lock-protected.
 - Stale probe results cannot overwrite newer user choices.
 - Invalid Xray configuration cannot replace the last-known-good runtime.

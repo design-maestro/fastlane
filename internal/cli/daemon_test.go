@@ -163,3 +163,27 @@ func TestDaemonOnceRestoresPersistedConnectionBeforeSchedulerLoop(t *testing.T) 
 		t.Fatalf("expected restored xray config to be written: %v", err)
 	}
 }
+
+func TestReadManagementAccessTokenRequiresPrivateFile(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "management.token")
+	if err := os.WriteFile(path, []byte("  0123456789abcdef0123456789abcdef  \n"), 0o600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	token, err := readManagementAccessToken(path)
+	if err != nil {
+		t.Fatalf("read private token: %v", err)
+	}
+	if token != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("unexpected token %q", token)
+	}
+
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("change token permissions: %v", err)
+	}
+	if _, err := readManagementAccessToken(path); err == nil {
+		t.Fatal("expected public token file permissions to be rejected")
+	}
+}
