@@ -36,6 +36,7 @@ const (
 	openWrtBootTimeout         = 10 * time.Minute
 	sshRetryDelay              = 2 * time.Second
 	sshRetryAttempts           = 5
+	opkgUpdateAttempts         = 3
 )
 
 func TestMain(m *testing.M) {
@@ -72,17 +73,20 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 		t.Fatalf("install xray: %v", err)
 	}
 	t.Log("Xray installed")
-	if err := harness.AssertLuCIVPNPage(ctx, "Fast Lane", "VPN", "Все серверы", "Добавить подписку", "Добавьте первую подписку"); err != nil {
+	if err := harness.AssertLuCIVPNPage(ctx, "Fast Lane", "VPN", "Добавить серверы", "Добавьте первую подписку"); err != nil {
 		t.Fatalf("browser smoke VPN empty state: %v", err)
 	}
 	if err := harness.AssertLuCIVPNAddDialog(ctx); err != nil {
 		t.Fatalf("browser smoke VPN add dialog action: %v", err)
 	}
+	if err := harness.AssertLuCIVPNToolbarLayout(ctx); err != nil {
+		t.Fatalf("browser smoke VPN toolbar layout: %v", err)
+	}
 	t.Log("LuCI VPN empty state and add dialog verified")
 	if err := harness.AssertLuCIDiagnosticsPage(ctx, "Fast Lane"); err != nil {
 		t.Fatalf("browser smoke diagnostics page: %v", err)
 	}
-	if err := harness.AssertLuCIRoutingPage(ctx, "Fast Lane", "Маршруты", "Россия напрямую", "Импорт и расширенные правила", "Проверить ссылку"); err != nil {
+	if err := harness.AssertLuCIRoutingPage(ctx, "Fast Lane", "Маршруты", "Трафик локальной страны напрямую", "Импорт и расширенные правила"); err != nil {
 		t.Fatalf("browser smoke routing page: %v", err)
 	}
 	if err := harness.AssertLuCIRoutingHAPPPreview(ctx); err != nil {
@@ -96,7 +100,7 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add subscription: %v", err)
 	}
-	if err := harness.AssertLuCIVPNPage(ctx, "Все серверы", "OpenWrt Integration", "VLESS", "Готов"); err != nil {
+	if err := harness.AssertLuCIVPNPage(ctx, "OpenWrt Integration", "VLESS", "Не проверен"); err != nil {
 		t.Fatalf("browser smoke VPN populated state: %v", err)
 	}
 	if err := harness.SetStrictEgressCheckViaLuCI(ctx, false); err != nil {
@@ -169,9 +173,13 @@ type openWRTHarness struct {
 	qemuImagePath string
 	qemuBin       string
 	fastlaneBin   string
+	translation   string
 	xrayBin       string
 	sshKeyPath    string
 	qemuCmd       *exec.Cmd
+	qemuExit      chan struct{}
+	qemuErrMu     sync.Mutex
+	qemuErr       error
 	console       *consoleLog
 	consoleStdin  io.WriteCloser
 }
@@ -207,6 +215,10 @@ func newOpenWRTHarness(t *testing.T) (*openWRTHarness, error) {
 	if err != nil {
 		return nil, err
 	}
+	translation, err := buildLuCITranslation(repoRoot, workDir)
+	if err != nil {
+		return nil, err
+	}
 
 	xrayBin, err := ensureXrayLinuxAMD64(cacheDir)
 	if err != nil {
@@ -233,6 +245,7 @@ func newOpenWRTHarness(t *testing.T) (*openWRTHarness, error) {
 		qemuImagePath: qemuImagePath,
 		qemuBin:       qemuBin,
 		fastlaneBin:   fastlaneBin,
+		translation:   translation,
 		xrayBin:       xrayBin,
 		sshKeyPath:    sshKeyPath,
 	}, nil
@@ -260,10 +273,19 @@ func (h *openWRTHarness) Start(ctx context.Context) error {
 	h.console = newConsoleLog(stdoutReader)
 	h.consoleStdin = stdin
 	h.qemuCmd = cmd
+	h.qemuExit = make(chan struct{})
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start qemu: %w", err)
 	}
+	go func() {
+		err := cmd.Wait()
+		_ = stdoutWriter.Close()
+		h.qemuErrMu.Lock()
+		h.qemuErr = err
+		h.qemuErrMu.Unlock()
+		close(h.qemuExit)
+	}()
 
 	bootCtx, cancel := context.WithTimeout(ctx, openWrtBootTimeout)
 	defer cancel()
@@ -326,8 +348,17 @@ func (h *openWRTHarness) Start(ctx context.Context) error {
 }
 
 func (h *openWRTHarness) InstallLuCI(ctx context.Context) error {
-	if err := h.sshCommand(ctx, "opkg update"); err != nil {
-		return err
+	var updateErr error
+	for attempt := 1; attempt <= opkgUpdateAttempts; attempt++ {
+		if updateErr = h.sshCommand(ctx, "opkg update"); updateErr == nil {
+			break
+		}
+		if attempt < opkgUpdateAttempts {
+			time.Sleep(sshRetryDelay)
+		}
+	}
+	if updateErr != nil {
+		return fmt.Errorf("refresh OpenWrt package indexes after %d attempts: %w", opkgUpdateAttempts, updateErr)
 	}
 	if err := h.sshCommand(ctx, "opkg install luci ca-bundle nftables kmod-nft-tproxy rpcd-mod-file"); err != nil {
 		return err
@@ -342,7 +373,7 @@ func (h *openWRTHarness) InstallLuCI(ctx context.Context) error {
 }
 
 func (h *openWRTHarness) InstallFastLane(ctx context.Context) error {
-	if err := h.sshCommand(ctx, "mkdir -p /usr/bin /usr/libexec /etc/fastlane /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/fastlane/assets /www/luci-static/resources/view/fastlane"); err != nil {
+	if err := h.sshCommand(ctx, "mkdir -p /usr/bin /usr/libexec /etc/fastlane /usr/lib/lua/luci/i18n /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/fastlane/assets /www/luci-static/resources/view/fastlane"); err != nil {
 		return err
 	}
 	if err := h.scpFile(ctx, h.fastlaneBin, fastlaneRemoteBinary); err != nil {
@@ -361,6 +392,9 @@ func (h *openWRTHarness) InstallFastLane(ctx context.Context) error {
 		return err
 	}
 	if err := h.scpFile(ctx, filepath.Join(h.repoRoot, "luci-app-fastlane", "root", "usr", "share", "rpcd", "acl.d", "luci-app-fastlane.json"), "/usr/share/rpcd/acl.d/luci-app-fastlane.json"); err != nil {
+		return err
+	}
+	if err := h.scpFile(ctx, h.translation, "/usr/lib/lua/luci/i18n/fastlane.ru.lmo"); err != nil {
 		return err
 	}
 	for _, pattern := range []struct {
@@ -409,6 +443,9 @@ func (h *openWRTHarness) InstallFastLane(ctx context.Context) error {
 		if err := h.sshCommand(ctx, "test -s "+shellQuote("/www/luci-static/resources/view/"+viewFile)); err != nil {
 			return fmt.Errorf("verify production LuCI view %s: %w", viewFile, err)
 		}
+	}
+	if err := h.sshCommand(ctx, "uci -q set luci.languages.ru='Русский (Russian)' && uci -q set luci.main.lang='ru' && uci -q commit luci"); err != nil {
+		return fmt.Errorf("enable Russian LuCI catalog: %w", err)
 	}
 	if err := h.sshCommand(ctx, "rm -f /tmp/luci-indexcache /tmp/luci-indexcache.* && rm -rf /tmp/luci-modulecache"); err != nil {
 		return err
@@ -719,7 +756,7 @@ func (h *openWRTHarness) ensureConsoleRoot(ctx context.Context, offset int) erro
 }
 
 func (h *openWRTHarness) waitForConsolePrompt(ctx context.Context, offset int) error {
-	if err := h.console.WaitForAny(ctx, offset, consoleLoginPrompt, consoleRootPrompt, "Please press Enter to activate this console."); err != nil {
+	if err := h.waitForConsoleAny(ctx, offset, consoleLoginPrompt, consoleRootPrompt, "Please press Enter to activate this console."); err != nil {
 		return fmt.Errorf("wait for OpenWrt console prompt: %w", err)
 	}
 
@@ -731,10 +768,33 @@ func (h *openWRTHarness) waitForConsolePrompt(ctx context.Context, offset int) e
 	if _, err := io.WriteString(h.consoleStdin, "\n"); err != nil {
 		return fmt.Errorf("activate OpenWrt console: %w", err)
 	}
-	if err := h.console.WaitForAny(ctx, activateStart, consoleLoginPrompt, consoleRootPrompt); err != nil {
+	if err := h.waitForConsoleAny(ctx, activateStart, consoleLoginPrompt, consoleRootPrompt); err != nil {
 		return fmt.Errorf("wait for OpenWrt login state: %w", err)
 	}
 	return nil
+}
+
+func (h *openWRTHarness) waitForConsoleAny(ctx context.Context, offset int, needles ...string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		chunk := h.console.SliceFrom(offset)
+		for _, needle := range needles {
+			if strings.Contains(chunk, needle) {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for any of %q: %w\nconsole tail:\n%s", strings.Join(needles, ", "), ctx.Err(), tail(h.console.SliceFrom(0), 4000))
+		case <-h.qemuExit:
+			h.qemuErrMu.Lock()
+			err := h.qemuErr
+			h.qemuErrMu.Unlock()
+			return fmt.Errorf("qemu exited before console became ready: %v\nconsole tail:\n%s", err, tail(h.console.SliceFrom(0), 4000))
+		case <-ticker.C:
+		}
+	}
 }
 
 func (h *openWRTHarness) waitForSSH(ctx context.Context) error {
@@ -843,8 +903,18 @@ func (h *openWRTHarness) Close() {
 		_ = h.consoleStdin.Close()
 	}
 	if h.qemuCmd != nil && h.qemuCmd.Process != nil {
-		_ = h.qemuCmd.Process.Kill()
-		_, _ = h.qemuCmd.Process.Wait()
+		select {
+		case <-h.qemuExit:
+			return
+		default:
+			_ = h.qemuCmd.Process.Kill()
+		}
+		if h.qemuExit != nil {
+			select {
+			case <-h.qemuExit:
+			case <-time.After(5 * time.Second):
+			}
+		}
 	}
 }
 
@@ -930,6 +1000,20 @@ func buildFastLaneLinuxAMD64(t *testing.T, repoRoot, workDir string) (string, er
 	)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("build fastlane linux/amd64 binary: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return outputPath, nil
+}
+
+func buildLuCITranslation(repoRoot, workDir string) (string, error) {
+	outputPath := filepath.Join(workDir, "fastlane.ru.lmo")
+	inputPath := filepath.Join(repoRoot, "luci-app-fastlane", "po", "ru", "fastlane.po")
+	cmd := exec.Command("go", "run", "./cmd/po2lmo", inputPath, outputPath)
+	cmd.Dir = repoRoot
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("compile Russian LuCI translation: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	if info, err := os.Stat(outputPath); err != nil || info.Size() == 0 {
+		return "", fmt.Errorf("compiled Russian LuCI translation is missing or empty: %v", err)
 	}
 	return outputPath, nil
 }

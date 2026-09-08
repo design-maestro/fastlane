@@ -120,7 +120,7 @@ func (h *openWRTHarness) AssertLuCIVPNAddDialog(ctx context.Context) error {
 		Exists bool   `json:"exists"`
 		Text   string `json:"text"`
 	}
-	err := h.assertLuCIPageWithActions(ctx, luciVPNPage, []string{"Добавить подписку"},
+	err := h.assertLuCIPageWithActions(ctx, luciVPNPage, []string{"Добавить серверы"},
 		chromedp.Evaluate(`(() => {
 			const button = document.querySelector('.fl-source-add');
 			if (!button || button.disabled) return false;
@@ -143,9 +143,59 @@ func (h *openWRTHarness) AssertLuCIVPNAddDialog(ctx context.Context) error {
 	if !dialog.Exists {
 		return fmt.Errorf("VPN add button did not open the dialog")
 	}
-	for _, expected := range []string{"Добавить подписку", "Название (необязательно)", "Ссылка или конфигурация", "Отмена", "Добавить"} {
+	for _, expected := range []string{"Добавить серверы", "Название", "Необязательно", "Ссылка или конфигурация", "Отмена", "Добавить"} {
 		if !strings.Contains(dialog.Text, expected) {
 			return fmt.Errorf("VPN add dialog missing %q; modal=%q", expected, summarizeForError(dialog.Text, 320))
+		}
+	}
+	return nil
+}
+
+type vpnToolbarLayout struct {
+	ViewportWidth       int     `json:"viewportWidth"`
+	PanelWidth          float64 `json:"panelWidth"`
+	ToolbarOverflow     bool    `json:"toolbarOverflow"`
+	ButtonsOutsidePanel bool    `json:"buttonsOutsidePanel"`
+	ButtonsBelowFilters bool    `json:"buttonsBelowFilters"`
+}
+
+func (h *openWRTHarness) AssertLuCIVPNToolbarLayout(ctx context.Context) error {
+	var wide, constrained vpnToolbarLayout
+	expression := `(() => {
+		const panel = document.querySelector('.fl-server-panel');
+		const toolbar = document.querySelector('.fl-toolbar');
+		const filters = document.querySelector('.fl-toolbar-actions');
+		const buttons = document.querySelector('.fl-toolbar-buttons');
+		if (!panel || !toolbar || !filters || !buttons) return {};
+		const panelRect = panel.getBoundingClientRect();
+		const filtersRect = filters.getBoundingClientRect();
+		const buttonsRect = buttons.getBoundingClientRect();
+		const buttonRects = Array.from(buttons.querySelectorAll('.fl-button')).map((item) => item.getBoundingClientRect());
+		return {
+			viewportWidth: window.innerWidth,
+			panelWidth: panelRect.width,
+			toolbarOverflow: toolbar.scrollWidth > toolbar.clientWidth + 1,
+			buttonsOutsidePanel: buttonRects.some((rect) => rect.left < panelRect.left - 1 || rect.right > panelRect.right + 1),
+			buttonsBelowFilters: buttonsRect.top >= filtersRect.bottom - 1
+		};
+	})()`
+	err := h.assertLuCIPageWithActions(ctx, luciVPNPage, []string{"Fast Lane"},
+		chromedp.EmulateViewport(1440, 1000),
+		chromedp.Sleep(200*time.Millisecond),
+		chromedp.Evaluate(expression, &wide),
+		chromedp.EmulateViewport(1024, 900),
+		chromedp.Sleep(200*time.Millisecond),
+		chromedp.Evaluate(expression, &constrained),
+	)
+	if err != nil {
+		return err
+	}
+	for _, layout := range []vpnToolbarLayout{wide, constrained} {
+		if layout.ViewportWidth == 0 || layout.PanelWidth == 0 {
+			return fmt.Errorf("VPN toolbar geometry was not measurable: %+v", layout)
+		}
+		if layout.ToolbarOverflow || layout.ButtonsOutsidePanel || !layout.ButtonsBelowFilters {
+			return fmt.Errorf("VPN toolbar escaped its panel at viewport %d (panel %.0fpx): %+v", layout.ViewportWidth, layout.PanelWidth, layout)
 		}
 	}
 	return nil
@@ -154,8 +204,11 @@ func (h *openWRTHarness) AssertLuCIVPNAddDialog(ctx context.Context) error {
 func (h *openWRTHarness) AssertLuCIRoutingHAPPPreview(ctx context.Context) error {
 	var submitted bool
 	var preview string
-	err := h.assertLuCIPageWithActions(ctx, luciRoutingPage, []string{"Проверить ссылку"},
+	err := h.assertLuCIPageWithActions(ctx, luciRoutingPage, []string{"Импорт и расширенные правила"},
 		chromedp.Evaluate(`(() => {
+			const advanced = document.querySelector('.flr-advanced');
+			if (!advanced) return false;
+			advanced.open = true;
 			const input = document.querySelector('.flr-input');
 			const button = Array.from(document.querySelectorAll('.flr-import button')).find((item) =>
 				(item.innerText || '').includes('Проверить ссылку')
@@ -168,8 +221,11 @@ func (h *openWRTHarness) AssertLuCIRoutingHAPPPreview(ctx context.Context) error
 			button.click();
 			return true;
 		})()`, &submitted),
-		chromedp.Sleep(300*time.Millisecond),
-		chromedp.Text(`.flr-preview`, &preview, chromedp.ByQuery),
+		chromedp.Sleep(500*time.Millisecond),
+		chromedp.Evaluate(`(() => {
+			const result = document.querySelector('.flr-preview');
+			return result ? (result.textContent || '') : '';
+		})()`, &preview),
 	)
 	if err != nil {
 		return err
@@ -177,7 +233,7 @@ func (h *openWRTHarness) AssertLuCIRoutingHAPPPreview(ctx context.Context) error
 	if !submitted {
 		return fmt.Errorf("routing page did not expose the HAPP import preview controls")
 	}
-	for _, expected := range []string{"OpenWrt smoke", "напряму — 1", "через VPN — 1", "блокировать — 1", "Частично применять её нельзя"} {
+	for _, expected := range []string{"OpenWrt smoke", "напрямую — 1", "через VPN — 1", "заблокировано — 1", "Частично применять её нельзя"} {
 		if !strings.Contains(preview, expected) {
 			return fmt.Errorf("routing HAPP preview missing %q; preview=%q", expected, summarizeForError(preview, 320))
 		}

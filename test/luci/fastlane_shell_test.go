@@ -58,7 +58,7 @@ func TestFastLaneShellKeepsBrandAndBackgroundConsistent(t *testing.T) {
 		}
 	}
 
-	for _, viewName := range []string{"vpn-20260907-menu-v21.js", "routing-20260906-v5.js", "diagnostics-20260904-v3.js", "settings-20260907-duration-v7.js"} {
+	for _, viewName := range []string{"vpn-20260907-menu-v22.js", "routing-20260906-v5.js", "diagnostics-20260904-v3.js", "settings-20260907-duration-v7.js"} {
 		viewPath := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", viewName)
 		viewData, err := os.ReadFile(viewPath)
 		if err != nil {
@@ -79,7 +79,7 @@ func TestFastLaneViewsUseSharedToastsInsteadOfLuCINotifications(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	for _, viewName := range []string{"vpn-20260907-menu-v21.js", "routing-20260906-v5.js", "diagnostics-20260904-v3.js", "settings-20260907-duration-v7.js"} {
+	for _, viewName := range []string{"vpn-20260907-menu-v22.js", "routing-20260906-v5.js", "diagnostics-20260904-v3.js", "settings-20260907-duration-v7.js"} {
 		path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", viewName)
 		data, err := os.ReadFile(path)
 		if err != nil {
