@@ -72,24 +72,14 @@ LuCI только отправляет команды сервису и чита
 
 ## Установка и удаление
 
-Релиза Fast Lane с тегом пока нет. Используйте актуальный исходный код и инструкции
-сборки ниже: готового установщика по ссылке `releases/latest` ещё нет.
-Сборка пакетов рассчитана на `mipsel_24kc`, `x86_64` и `aarch64_cortex-a53`.
-
-<details>
-<summary>Установка после публикации первого релиза</summary>
-
-Сначала убедитесь, что в [Releases](https://github.com/design-maestro/fastlane/releases)
-появились совместимая сборка и установщик. До появления этих файлов команды
-ниже использовать нельзя:
+Стабильные сборки публикуются в [GitHub Releases](https://github.com/design-maestro/fastlane/releases)
+для `mipsel_24kc`, `x86_64` и `aarch64_cortex-a53`. Установить последний релиз можно так:
 
 ```sh
 wget -O /tmp/fastlane-install.sh \
   "https://github.com/design-maestro/fastlane/releases/latest/download/install.sh"
 sh /tmp/fastlane-install.sh
 ```
-
-</details>
 
 Установщик добавляет недостающие зависимости, при необходимости ставит Xray,
 включает сервис Fast Lane и сохраняет `/etc/fastlane` при обновлениях.

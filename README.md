@@ -72,24 +72,15 @@ health check or automatic failover. See [Architecture](docs/architecture.md) and
 
 ## Install and remove
 
-There is no tagged Fast Lane release yet. Use the current source and the build
-instructions below; a `releases/latest` installer is not available yet.
-The packaging pipeline targets `mipsel_24kc`, `x86_64`, and `aarch64_cortex-a53`.
-
-<details>
-<summary>Installation after the first release is published</summary>
-
-First check that [Releases](https://github.com/design-maestro/fastlane/releases)
-contains a compatible build and its installer. These commands are not ready for
-use until those assets exist:
+Stable builds are published in [GitHub Releases](https://github.com/design-maestro/fastlane/releases)
+for `mipsel_24kc`, `x86_64`, and `aarch64_cortex-a53`. Install the latest release
+with:
 
 ```sh
 wget -O /tmp/fastlane-install.sh \
   "https://github.com/design-maestro/fastlane/releases/latest/download/install.sh"
 sh /tmp/fastlane-install.sh
 ```
-
-</details>
 
 The installer provisions missing dependencies, installs the bundled Xray runtime
 when necessary, enables the Fast Lane service, and preserves `/etc/fastlane`
