@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/design-maestro/fastlane/internal/domain"
 )
 
 const (
@@ -73,6 +76,10 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 		t.Fatalf("install xray: %v", err)
 	}
 	t.Log("Xray installed")
+	if err := harness.AssertManagementHTTP(ctx); err != nil {
+		t.Fatalf("management HTTP smoke: %v", err)
+	}
+	t.Log("Authenticated management HTTP verified")
 	if err := harness.AssertLuCIVPNPage(ctx, "Fast Lane", "VPN", "Добавить серверы", "Добавьте первую подписку"); err != nil {
 		t.Fatalf("browser smoke VPN empty state: %v", err)
 	}
@@ -164,24 +171,25 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 }
 
 type openWRTHarness struct {
-	t             *testing.T
-	repoRoot      string
-	workDir       string
-	cacheDir      string
-	sshPort       int
-	httpPort      int
-	qemuImagePath string
-	qemuBin       string
-	fastlaneBin   string
-	translation   string
-	xrayBin       string
-	sshKeyPath    string
-	qemuCmd       *exec.Cmd
-	qemuExit      chan struct{}
-	qemuErrMu     sync.Mutex
-	qemuErr       error
-	console       *consoleLog
-	consoleStdin  io.WriteCloser
+	t              *testing.T
+	repoRoot       string
+	workDir        string
+	cacheDir       string
+	sshPort        int
+	httpPort       int
+	managementPort int
+	qemuImagePath  string
+	qemuBin        string
+	fastlaneBin    string
+	translation    string
+	xrayBin        string
+	sshKeyPath     string
+	qemuCmd        *exec.Cmd
+	qemuExit       chan struct{}
+	qemuErrMu      sync.Mutex
+	qemuErr        error
+	console        *consoleLog
+	consoleStdin   io.WriteCloser
 }
 
 func newOpenWRTHarness(t *testing.T) (*openWRTHarness, error) {
@@ -207,6 +215,10 @@ func newOpenWRTHarness(t *testing.T) (*openWRTHarness, error) {
 		return nil, err
 	}
 	httpPort, err := freeTCPPort()
+	if err != nil {
+		return nil, err
+	}
+	managementPort, err := freeTCPPort()
 	if err != nil {
 		return nil, err
 	}
@@ -236,18 +248,19 @@ func newOpenWRTHarness(t *testing.T) (*openWRTHarness, error) {
 	}
 
 	return &openWRTHarness{
-		t:             t,
-		repoRoot:      repoRoot,
-		workDir:       workDir,
-		cacheDir:      cacheDir,
-		sshPort:       sshPort,
-		httpPort:      httpPort,
-		qemuImagePath: qemuImagePath,
-		qemuBin:       qemuBin,
-		fastlaneBin:   fastlaneBin,
-		translation:   translation,
-		xrayBin:       xrayBin,
-		sshKeyPath:    sshKeyPath,
+		t:              t,
+		repoRoot:       repoRoot,
+		workDir:        workDir,
+		cacheDir:       cacheDir,
+		sshPort:        sshPort,
+		httpPort:       httpPort,
+		managementPort: managementPort,
+		qemuImagePath:  qemuImagePath,
+		qemuBin:        qemuBin,
+		fastlaneBin:    fastlaneBin,
+		translation:    translation,
+		xrayBin:        xrayBin,
+		sshKeyPath:     sshKeyPath,
 	}, nil
 }
 
@@ -260,7 +273,7 @@ func (h *openWRTHarness) Start(ctx context.Context) error {
 		"-monitor", "none",
 		"-serial", "stdio",
 		"-drive", fmt.Sprintf("file=%s,format=raw", h.qemuImagePath),
-		"-nic", fmt.Sprintf("user,model=e1000,hostfwd=tcp::%d-:22,hostfwd=tcp::%d-:80", h.sshPort, h.httpPort),
+		"-nic", fmt.Sprintf("user,model=e1000,hostfwd=tcp::%d-:22,hostfwd=tcp::%d-:80,hostfwd=tcp::%d-:9080", h.sshPort, h.httpPort, h.managementPort),
 	)
 
 	stdin, err := cmd.StdinPipe()
@@ -517,6 +530,120 @@ func (h *openWRTHarness) InstallXray(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (h *openWRTHarness) AssertManagementHTTP(ctx context.Context) error {
+	const token = "0123456789abcdef0123456789abcdef"
+	startCommand := fmt.Sprintf(
+		"umask 077; printf '%%s\\n' %s > /etc/fastlane/management.token; FASTLANE_MANAGEMENT_LISTEN=0.0.0.0:9080 FASTLANE_MANAGEMENT_TOKEN_FILE=/etc/fastlane/management.token %s restart",
+		shellQuote(token),
+		fastlaneRemoteService,
+	)
+	if err := h.sshCommand(ctx, startCommand); err != nil {
+		return fmt.Errorf("start management listener: %w", err)
+	}
+	if err := h.sshCommand(ctx, "ls -l /etc/fastlane/management.token | grep -q '^-rw-------'"); err != nil {
+		return fmt.Errorf("verify management token permissions: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/api/v1/state", h.managementPort)
+	var unauthorized *http.Response
+	var err error
+	listenerCtx, cancelListener := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelListener()
+	for {
+		unauthorized, err = h.managementRequest(listenerCtx, http.MethodGet, endpoint, "")
+		if err == nil {
+			break
+		}
+		if listenerCtx.Err() != nil {
+			logs, _ := h.sshOutput(ctx, "logread -e fastlane | tail -20")
+			return fmt.Errorf("wait for management listener: %w; logs: %s", err, strings.TrimSpace(string(logs)))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if unauthorized.StatusCode != http.StatusUnauthorized {
+		_ = unauthorized.Body.Close()
+		return fmt.Errorf("management request without token returned %d, want %d", unauthorized.StatusCode, http.StatusUnauthorized)
+	}
+	_ = unauthorized.Body.Close()
+
+	authorized, err := h.managementRequest(ctx, http.MethodGet, endpoint, token)
+	if err != nil {
+		return err
+	}
+	var initial struct {
+		Status struct {
+			State domain.RuntimeState `json:"state"`
+		} `json:"status"`
+		Job struct {
+			Running bool `json:"running"`
+		} `json:"job"`
+	}
+	decodeErr := json.NewDecoder(authorized.Body).Decode(&initial)
+	_ = authorized.Body.Close()
+	if authorized.StatusCode != http.StatusOK || decodeErr != nil {
+		return fmt.Errorf("decode management state: status=%d error=%v", authorized.StatusCode, decodeErr)
+	}
+	if initial.Status.State.SchemaVersion == 0 || initial.Job.Running {
+		return fmt.Errorf("unexpected initial management state: %+v", initial)
+	}
+
+	jobResponse, err := h.managementRequest(ctx, http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/api/v1/jobs/health-check", h.managementPort), token)
+	if err != nil {
+		return err
+	}
+	_ = jobResponse.Body.Close()
+	if jobResponse.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("start management health job returned %d, want %d", jobResponse.StatusCode, http.StatusAccepted)
+	}
+
+	pollCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for {
+		if pollCtx.Err() != nil {
+			return fmt.Errorf("wait for management health job: %w", pollCtx.Err())
+		}
+		response, err := h.managementRequest(pollCtx, http.MethodGet, endpoint, token)
+		if err != nil {
+			return err
+		}
+		var state struct {
+			Job struct {
+				Sequence  uint64 `json:"sequence"`
+				Running   bool   `json:"running"`
+				Succeeded bool   `json:"succeeded"`
+			} `json:"job"`
+		}
+		decodeErr := json.NewDecoder(response.Body).Decode(&state)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK || decodeErr != nil {
+			return fmt.Errorf("poll management health job: status=%d error=%v", response.StatusCode, decodeErr)
+		}
+		if state.Job.Sequence > 0 && !state.Job.Running {
+			if !state.Job.Succeeded {
+				return fmt.Errorf("management health job did not succeed: %+v", state.Job)
+			}
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (h *openWRTHarness) managementRequest(ctx context.Context, method, endpoint, token string) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create management request: %w", err)
+	}
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("send management request: %w", err)
+	}
+	return response, nil
 }
 
 func (h *openWRTHarness) AddSubscription(ctx context.Context, raw string) (string, string, error) {

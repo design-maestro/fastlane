@@ -11,6 +11,9 @@ OpenWrt:
 - `/tmp/fastlane-runtime/health-check.request`
 - `/tmp/fastlane-runtime/health-check-progress.json`
 
+An optional management access token may be stored at
+`/etc/fastlane/management.token`. It must be readable only by its owner (`0600`).
+
 Local development uses `./.fastlane/`. Persistent Fast Lane directories use
 `0700`; state, locks, live Xray config, and last-known-good config use `0600`.
 
@@ -45,6 +48,40 @@ after navigation.
 Expired subscriptions remain stored and visible. They are skipped by refresh,
 GET checks, manual connection, and automatic selection until valid metadata is
 imported again.
+
+## Optional management HTTP API
+
+Fast Lane can expose the existing application service on a separate TCP port.
+This is an API-only foundation for a future standalone Fast Lane interface; it
+does not bundle or copy another project's UI and is disabled by default.
+
+Loopback development does not require a token:
+
+```sh
+fastlane daemon --management-listen 127.0.0.1:9080
+```
+
+Any LAN or wildcard bind requires an access token of at least 32 characters in
+a `0600` file. The listener currently uses plain HTTP, so expose it only on a
+trusted LAN or through an authenticated tunnel; do not port-forward it to the
+internet.
+
+```sh
+umask 077
+head -c 32 /dev/urandom | base64 > /etc/fastlane/management.token
+FASTLANE_MANAGEMENT_LISTEN=192.168.1.1:9080 \
+FASTLANE_MANAGEMENT_TOKEN_FILE=/etc/fastlane/management.token \
+/etc/init.d/fastlane restart
+```
+
+The packaged init script accepts those two per-start environment overrides. The
+listener uses the same Fast Lane state and VPN runtime as LuCI/CLI/TUI.
+Long-running requests are serialized with daemon health passes, return
+`202 Accepted`, and continue after the requesting tab closes.
+`GET /api/v1/state` exposes status,
+API-safe subscriptions, nodes, and current job state. Authentication supports a
+Bearer token or a strict `HttpOnly` session cookie created through
+`POST /api/v1/session`.
 
 ## GeoIP and GeoSite
 

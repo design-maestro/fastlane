@@ -139,7 +139,7 @@ func writeHealthCheckProgress(path string, progress healthCheckProgress) error {
 	return nil
 }
 
-func runTrackedHealthCheck(ctx context.Context, opts *rootOptions, scope string, connect bool) {
+func runTrackedHealthCheck(ctx context.Context, opts *rootOptions, scope string, connect bool) error {
 	if !connect {
 		scope = scheduledHealthScope(opts)
 	}
@@ -175,6 +175,7 @@ func runTrackedHealthCheck(ctx context.Context, opts *rootOptions, scope string,
 		progress.Status = "completed"
 	}
 	_ = writeHealthCheckProgress(healthCheckProgressPath(opts), progress)
+	return runErr
 }
 
 func scheduledHealthScope(opts *rootOptions) string {
