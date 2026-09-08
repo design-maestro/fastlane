@@ -478,6 +478,43 @@ install_fastlane_asset() {
 	done < "${tmp_dir}/files"
 }
 
+restore_release_data_file() {
+	relative_file="$1"
+	payload_root="$(root_path "usr/libexec/fastlane-release-data")"
+	staged_file="${payload_root}/${relative_file}"
+
+	[ -f "${staged_file}" ] || die "release archive is missing ${relative_file}"
+	target_file="$(root_path "${relative_file}")"
+	mkdir -p "$(dirname "${target_file}")"
+	new_file="${target_file}.fastlane-new.$$"
+	if ! cp -p "${staged_file}" "${new_file}"; then
+		rm -f "${new_file}"
+		die "could not stage ${relative_file}"
+	fi
+	if ! mv -f "${new_file}" "${target_file}"; then
+		rm -f "${new_file}"
+		die "could not replace ${relative_file}"
+	fi
+}
+
+restore_release_data() {
+	payload_root="$(root_path "usr/libexec/fastlane-release-data")"
+	[ -d "${payload_root}" ] || return 0
+
+	for relative_file in \
+		etc/uci-defaults/luci-i18n-fastlane-ru \
+		usr/lib/lua/luci/i18n/fastlane.ru.lmo \
+		usr/share/licenses/fastlane/LICENSE \
+		usr/share/licenses/fastlane/NOTICE \
+		usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md \
+		usr/share/licenses/fastlane/UPSTREAM-MIT.txt
+	do
+		restore_release_data_file "${relative_file}"
+	done
+
+	rm -rf "${payload_root}"
+}
+
 installed_fastlane_version() {
 	binary="$(root_path "usr/bin/fastlane")"
 	[ -x "${binary}" ] || return 0
@@ -655,6 +692,7 @@ download_verified_asset "${asset_url}" "${asset_path}"
 log "Extracting files into ${FASTLANE_INSTALL_ROOT}"
 mkdir -p "${FASTLANE_INSTALL_ROOT}"
 install_fastlane_asset
+restore_release_data
 
 fastlane_service="$(service_path fastlane)"
 if [ -f "${fastlane_service}" ]; then

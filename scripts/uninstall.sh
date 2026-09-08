@@ -330,6 +330,10 @@ remove_path "${fastlane_root}"
 
 remove_path "$(scope_path "/usr/share/luci/menu.d/luci-app-fastlane.json")"
 remove_path "$(scope_path "/usr/share/rpcd/acl.d/luci-app-fastlane.json")"
+remove_path "$(scope_path "/usr/lib/lua/luci/i18n/fastlane.ru.lmo")"
+remove_path "$(scope_path "/usr/share/licenses/fastlane")"
+remove_path "$(scope_path "/usr/libexec/fastlane-release-data")"
+remove_path "$(scope_path "/etc/uci-defaults/luci-i18n-fastlane-ru")"
 remove_path "$(scope_path "/www/luci-static/resources/fastlane")"
 remove_path "$(scope_path "/www/luci-static/resources/view/fastlane")"
 

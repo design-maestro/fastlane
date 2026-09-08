@@ -6,6 +6,7 @@ ARCH="${ARCH:-mipsel_24kc}"
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 BINARY_PATH="${BINARY_PATH:-${ROOT_DIR}/bin/openwrt/fastlane}"
 DATA_DIR="${PKG_DIR}/data"
+RELEASE_DATA_DIR="${PKG_DIR}/release-data"
 CONTROL_DIR="${PKG_DIR}/control"
 WORK_DIR="${PKG_DIR}/work"
 PACKAGE_NAME="${PACKAGE_NAME:-fastlane}"
@@ -217,7 +218,32 @@ create_tarball() {
 
 create_tarball "${CONTROL_DIR}" "${WORK_DIR}/control.tar.gz"
 create_tarball "${DATA_DIR}" "${WORK_DIR}/data.tar.gz"
-create_tarball "${DATA_DIR}" "${TARBALL_PATH}"
+
+# Keep the standalone release archive compatible with the validator shipped in
+# early Fast Lane development builds. The verified installer restores these
+# auxiliary files to their normal OpenWrt paths after the archive is accepted.
+rm -rf "${RELEASE_DATA_DIR}"
+mkdir -p "${RELEASE_DATA_DIR}"
+cp -R "${DATA_DIR}/." "${RELEASE_DATA_DIR}/"
+for relative_path in \
+	etc/uci-defaults/luci-i18n-fastlane-ru \
+	usr/lib/lua/luci/i18n/fastlane.ru.lmo \
+	usr/share/licenses/fastlane/LICENSE \
+	usr/share/licenses/fastlane/NOTICE \
+	usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md \
+	usr/share/licenses/fastlane/UPSTREAM-MIT.txt
+do
+	source_path="${RELEASE_DATA_DIR}/${relative_path}"
+	compat_path="${RELEASE_DATA_DIR}/usr/libexec/fastlane-release-data/${relative_path}"
+	[ -f "${source_path}" ] || {
+		printf 'missing release data file: %s\n' "${relative_path}" >&2
+		exit 1
+	}
+	mkdir -p "$(dirname "${compat_path}")"
+	cp -p "${source_path}" "${compat_path}"
+	rm -f "${source_path}"
+done
+create_tarball "${RELEASE_DATA_DIR}" "${TARBALL_PATH}"
 
 rm -f "${IPK_PATH}"
 printf '!<arch>\n' > "${IPK_PATH}"

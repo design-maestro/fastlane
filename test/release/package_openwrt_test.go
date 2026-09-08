@@ -90,6 +90,9 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	if err := updatepkg.ValidateArchive(archive); err != nil {
 		t.Fatalf("generated release archive rejected by updater: %v", err)
 	}
+	if err := validateLegacyUpdateArchive(archive); err != nil {
+		t.Fatalf("generated release archive rejected by legacy updater: %v", err)
+	}
 	control, err := os.ReadFile(filepath.Join(repoDir, "dist", "fastlane-ipk", "control", "control"))
 	if err != nil {
 		t.Fatalf("read generated package control: %v", err)
