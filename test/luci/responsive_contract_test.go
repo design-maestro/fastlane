@@ -31,8 +31,13 @@ func TestFastLaneCurrentViewsKeepMobileInteractionContracts(t *testing.T) {
 		},
 		{
 			name: "VPN",
-			path: filepath.Join("view", "fastlane", "vpn-20260907-menu-v21.js"),
+			path: filepath.Join("view", "fastlane", "vpn-20260907-menu-v22.js"),
 			required: []string{
+				".fl-server-panel{border:1px solid var(--fl-line);border-radius:8px;background:var(--fl-panel);overflow:visible;container-type:inline-size}",
+				".fl-toolbar{display:grid",
+				".fl-toolbar-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
+				"@container(max-width:850px)",
+				"@container(max-width:520px)",
 				"@media(max-width:1100px)",
 				".fl-status{grid-template-columns:1fr 1fr 1fr}",
 				"@media(max-width:760px)",

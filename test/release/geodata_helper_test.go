@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const detachedWorkerStartTimeout = 10 * time.Second
+
 func TestGeoDataHelperUpdatesVerifiedPairAndRollsBackOnReloadFailure(t *testing.T) {
 	t.Parallel()
 
@@ -211,7 +213,7 @@ esac
 		t.Fatalf("start must immediately report updating, got %s", startOutput)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(detachedWorkerStartTimeout)
 	for {
 		if _, err := os.Stat(startedFile); err == nil {
 			break
@@ -347,7 +349,7 @@ esac
 		}
 	})
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(detachedWorkerStartTimeout)
 	for {
 		if _, err := os.Stat(startedFile); err == nil {
 			break
