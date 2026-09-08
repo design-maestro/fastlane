@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	updatepkg "github.com/design-maestro/fastlane/internal/update"
 )
 
 func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
@@ -77,8 +79,16 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repoDir, "dist", "fastlane_1.2.3_x86_64.ipk")); err != nil {
 		t.Fatalf("expected ipk artifact: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(repoDir, "dist", "fastlane_1.2.3_x86_64.tar.gz")); err != nil {
+	archivePath := filepath.Join(repoDir, "dist", "fastlane_1.2.3_x86_64.tar.gz")
+	if _, err := os.Stat(archivePath); err != nil {
 		t.Fatalf("expected tarball artifact: %v", err)
+	}
+	archive, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatalf("read generated release archive: %v", err)
+	}
+	if err := updatepkg.ValidateArchive(archive); err != nil {
+		t.Fatalf("generated release archive rejected by updater: %v", err)
 	}
 	control, err := os.ReadFile(filepath.Join(repoDir, "dist", "fastlane-ipk", "control", "control"))
 	if err != nil {

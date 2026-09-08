@@ -44,7 +44,17 @@ func ValidateArchive(data []byte) error {
 		if h.Typeflag != tar.TypeReg || seen[name] {
 			return errors.New("release archive contains links or duplicate files")
 		}
-		allowed := name == "usr/bin/fastlane" || name == "etc/init.d/fastlane" || name == "etc/init.d/xray" || strings.HasPrefix(name, "usr/libexec/fastlane-") || strings.HasPrefix(name, "www/luci-static/resources/fastlane/") || strings.HasPrefix(name, "www/luci-static/resources/view/fastlane/") || name == "usr/share/luci/menu.d/luci-app-fastlane.json" || name == "usr/share/rpcd/acl.d/luci-app-fastlane.json"
+		allowed := name == "usr/bin/fastlane" ||
+			name == "etc/init.d/fastlane" ||
+			name == "etc/init.d/xray" ||
+			name == "etc/uci-defaults/luci-i18n-fastlane-ru" ||
+			name == "usr/lib/lua/luci/i18n/fastlane.ru.lmo" ||
+			strings.HasPrefix(name, "usr/libexec/fastlane-") ||
+			strings.HasPrefix(name, "usr/share/licenses/fastlane/") ||
+			strings.HasPrefix(name, "www/luci-static/resources/fastlane/") ||
+			strings.HasPrefix(name, "www/luci-static/resources/view/fastlane/") ||
+			name == "usr/share/luci/menu.d/luci-app-fastlane.json" ||
+			name == "usr/share/rpcd/acl.d/luci-app-fastlane.json"
 		if !allowed {
 			return errors.New("release archive contains files outside Fast Lane")
 		}
