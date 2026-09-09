@@ -868,6 +868,19 @@ func (s *Service) refreshSubscription(ctx context.Context, subscriptionID string
 		return domain.Subscription{}, fmt.Errorf("save subscriptions: %w", err)
 	}
 
+	settings, settingsErr := s.store.LoadSettings()
+	if settingsErr == nil {
+		remappedExclusions := remapRefreshedAutoExcludedNodes(settings.AutoExcludedNodes, sub.ID, previousNodes, nodes)
+		if !slices.Equal(remappedExclusions, settings.AutoExcludedNodes) {
+			settings.AutoExcludedNodes = remappedExclusions
+			if err := s.store.SaveSettings(settings); err != nil {
+				return domain.Subscription{}, fmt.Errorf("save refreshed hidden servers: %w", err)
+			}
+		}
+	} else {
+		s.logWarn("could not remap hidden servers after subscription refresh", "subscription_id", sub.ID, "error", settingsErr)
+	}
+
 	state, err := s.store.LoadState()
 	if err == nil {
 		if state.ActiveSubscriptionID == sub.ID {
@@ -897,12 +910,7 @@ func remapRefreshedNodeID(activeNodeID string, previousNodes, refreshedNodes []d
 	previous := previousNodes[previousIndex]
 	matches := make([]domain.Node, 0, 1)
 	for _, node := range refreshedNodes {
-		if node.Protocol == previous.Protocol &&
-			node.Address == previous.Address &&
-			node.Port == previous.Port &&
-			node.UUID == previous.UUID &&
-			node.Password == previous.Password &&
-			node.DisplayName() == previous.DisplayName() {
+		if sameRefreshedNodeIdentity(node, previous) {
 			matches = append(matches, node)
 		}
 	}
@@ -910,6 +918,48 @@ func remapRefreshedNodeID(activeNodeID string, previousNodes, refreshedNodes []d
 		return matches[0].ID
 	}
 	return activeNodeID
+}
+
+func sameRefreshedNodeIdentity(left, right domain.Node) bool {
+	return left.Protocol == right.Protocol &&
+		left.Address == right.Address &&
+		left.Port == right.Port &&
+		left.UUID == right.UUID &&
+		left.Password == right.Password &&
+		left.Encryption == right.Encryption &&
+		left.Security == right.Security &&
+		left.ServerName == right.ServerName &&
+		slices.Equal(left.ALPN, right.ALPN) &&
+		left.Fingerprint == right.Fingerprint &&
+		left.PublicKey == right.PublicKey &&
+		left.ShortID == right.ShortID &&
+		left.SpiderX == right.SpiderX &&
+		left.Flow == right.Flow &&
+		left.Transport == right.Transport &&
+		left.Path == right.Path &&
+		left.Host == right.Host
+}
+
+func remapRefreshedAutoExcludedNodes(values []string, subscriptionID string, previousNodes, refreshedNodes []domain.Node) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	remapped := make([]string, 0, len(values))
+	for _, value := range values {
+		currentSubscriptionID, nodeID, ok := domain.SplitAutoExcludedNodeKey(value)
+		if !ok || currentSubscriptionID != subscriptionID {
+			remapped = append(remapped, value)
+			continue
+		}
+
+		remapped = append(remapped, domain.AutoExcludedNodeKey(
+			currentSubscriptionID,
+			remapRefreshedNodeID(nodeID, previousNodes, refreshedNodes),
+		))
+	}
+
+	return domain.NormalizeAutoExcludedNodes(remapped)
 }
 
 // RefreshAll refreshes every stored subscription.
@@ -2578,6 +2628,9 @@ func (s *Service) setAutoExcludedNodes(value string) (domain.Settings, error) {
 
 		state, err := s.store.LoadState()
 		if err != nil || !state.Connected || state.Mode != domain.SelectionModeAuto || strings.TrimSpace(state.ActiveSubscriptionID) == "" {
+			return settings, nil
+		}
+		if !domain.IsAutoExcludedNode(settings.AutoExcludedNodes, state.ActiveSubscriptionID, state.ActiveNodeID) {
 			return settings, nil
 		}
 		scope = state.ActiveSubscriptionID

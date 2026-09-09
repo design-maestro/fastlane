@@ -61,6 +61,7 @@ function E(tag, attrs, children) {
 let queryResolver = () => null;
 let idResolver = () => null;
 let reloads = 0;
+let scrollCalls = [];
 const documentStub = {
 	documentElement: { lang: 'en' },
 	body: new FakeNode('body'),
@@ -76,6 +77,10 @@ global._ = (value) => value;
 global.window = {
 	navigator: { language: 'en' },
 	Intl,
+	pageXOffset: 0,
+	pageYOffset: 0,
+	scrollX: 0,
+	scrollY: 0,
 	listeners: {},
 	addEventListener(name, handler) { this.listeners[name] = handler; },
 	sessionStorage: {
@@ -84,6 +89,11 @@ global.window = {
 		setItem(key, value) { this.values[key] = String(value); }
 	},
 	confirm: () => true,
+	scrollTo(x, y) {
+		this.pageXOffset = this.scrollX = Number(x) || 0;
+		this.pageYOffset = this.scrollY = Number(y) || 0;
+		scrollCalls.push({ x: this.pageXOffset, y: this.pageYOffset });
+	},
 	requestAnimationFrame: (handler) => handler(),
 	setTimeout: (handler) => { handler(); return 1; },
 	clearTimeout: () => {},
@@ -269,6 +279,9 @@ function resetHarness() {
 	idResolver = () => null;
 	window.confirm = () => true;
 	window.sessionStorage.values = {};
+	window.pageXOffset = window.scrollX = 0;
+	window.pageYOffset = window.scrollY = 0;
+	scrollCalls = [];
 	uciValues.lang = 'auto';
 	poll.entries = [];
 	poll.started = false;
@@ -490,6 +503,7 @@ async function smoke(section, name, run) {
 			nodes: [{ id: 'single', name: 'Finland', protocol: 'vless', address: 'fi.example', port: 443 }]
 		});
 		page.filter = 'server-list';
+		page.activeMenuKey = 'server-list:single';
 		assert.match(treeText(page.renderTable()), /Remove server/);
 
 		window.confirm = () => false;
@@ -511,6 +525,22 @@ async function smoke(section, name, run) {
 		assert.equal(page.activeMenuKey, 'blanc:pl');
 		page.handleDocumentClick({ target: { closest: () => null } });
 		assert.equal(page.activeMenuKey, '');
+	});
+
+	await smoke('VPN', 'keeps the viewport stable while opening menus and hiding rows', async () => {
+		const page = makeVPN();
+		page.update = () => {
+			window.pageYOffset = window.scrollY = 0;
+		};
+		page.refreshView = async (scrollPosition) => page.updatePreservingScroll(scrollPosition);
+		window.pageYOffset = window.scrollY = 640;
+
+		page.handleServerMenuToggle('durev:nl', { preventDefault() {}, stopPropagation() {} });
+		assert.equal(window.pageYOffset, 640);
+		await page.handleHidden('durev', 'nl', true, { preventDefault() {}, stopPropagation() {} });
+		assert.equal(window.pageYOffset, 640);
+		assert.ok(scrollCalls.length >= 2);
+		assert.deepEqual(scrollCalls.at(-1), { x: 0, y: 640 });
 	});
 
 	await smoke('VPN', 'rolls back optimistic hide when persistence fails', async () => {

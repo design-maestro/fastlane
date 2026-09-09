@@ -152,19 +152,25 @@ func TestFastLaneVPNServerActionsUseVisibleThreeDotControl(t *testing.T) {
 	t.Parallel()
 	source := readVPNViewSource(t)
 	for _, want := range []string{
-		".fl-more summary:before{content:\"\";width:4px;height:4px",
+		".fl-more-toggle:before{content:\"\";width:4px;height:4px",
 		"box-shadow:0 -7px 0 currentColor,0 7px 0 currentColor",
 		"justify-content:flex-start!important",
 		"text-align:left!important",
 		"class: 'fl-actions-cell'",
+		"class: 'fl-more-toggle'",
 		"'aria-label': _('Server actions')",
+		"'aria-haspopup': 'menu'",
 		"handleServerMenuToggle",
-		"this.activeMenuKey === actionKey ? 'open' : null",
+		"this.activeMenuKey === actionKey ? E('div'",
 		"handleDocumentClick",
+		"updatePreservingScroll",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("VPN view missing visible server action control marker %q", want)
 		}
+	}
+	if strings.Contains(source, "E('details'") || strings.Contains(source, "E('summary'") {
+		t.Fatal("server action menu must not use native details/summary because it can move the LuCI viewport")
 	}
 }
 
@@ -374,7 +380,7 @@ func readVPNViewSource(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260907-menu-v22.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-menu-v23.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
