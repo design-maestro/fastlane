@@ -337,7 +337,7 @@ func TestSetAutoExcludedNodesDoesNotHoldStoreLockWhileProbing(t *testing.T) {
 
 	excludedDone := make(chan error, 1)
 	go func() {
-		_, err := service.SetSetting("auto.excluded-nodes", "sub-1/node-2")
+		_, err := service.SetSetting("auto.excluded-nodes", "sub-1/node-1")
 		excludedDone <- err
 	}()
 	waitForProbeStart(t, checker.started)
