@@ -348,7 +348,7 @@ body:not(.modal-overlay-active) #modal_overlay:has(.fastlane-modal){display:none
 
 // Shared GET latency scale for the active connection and server rows.
 css += '.fastlane-root .fl-latency,.fastlane-root .fl-status-cell-latency{color:var(--fl-muted)}.fastlane-root .fl-latency-good{color:var(--fl-green)}.fastlane-root .fl-latency-mid{color:var(--fl-amber)}.fastlane-root .fl-latency-slow{color:var(--fl-orange,#f0a35a)}.fastlane-root .fl-latency-critical,.fastlane-root .fl-latency-bad{color:var(--fl-red)}';
-css += '.fl-more-menu[hidden]{display:none!important}.fl-busy-label{min-width:0}.fl-busy-action{flex:0 0 auto;margin-left:auto;min-height:38px;padding:7px 12px}';
+css += '.fl-more-menu[hidden]{display:none!important}.fl-more-note{max-width:250px;padding:9px 12px;color:var(--fl-muted);font-size:12px;line-height:1.4;overflow-wrap:anywhere}.fl-busy-label{min-width:0}.fl-busy-action{flex:0 0 auto;margin-left:auto;min-height:38px;padding:7px 12px}';
 
 return view.extend({
 	load: function() {
@@ -778,8 +778,32 @@ return view.extend({
 		}).sort();
 	},
 
-	isHidden: function(subID, nodeID) {
+	autoHideKeywords: function() {
+		var settings = this.status().settings || {};
+		var raw = Array.isArray(settings.auto_hide_keywords) ? settings.auto_hide_keywords : [];
+		var seen = {};
+		return raw.map(function(value) { return trim(value).replace(/\s+/g, ' '); }).filter(function(value) {
+			var key = value.toLocaleLowerCase();
+			if (!key || seen[key]) return false;
+			seen[key] = true;
+			return true;
+		});
+	},
+
+	matchingAutoHideKeyword: function(node) {
+		var haystack = (trim(node && node.name) + ' ' + trim(node && node.remark)).replace(/\s+/g, ' ').toLocaleLowerCase();
+		var keywords = this.autoHideKeywords();
+		for (var i = 0; i < keywords.length; i++)
+			if (haystack.indexOf(keywords[i].toLocaleLowerCase()) >= 0) return keywords[i];
+		return '';
+	},
+
+	isManuallyHidden: function(subID, nodeID) {
 		return this.hiddenNodeKeys().indexOf(this.autoExcludedNodeKey(subID, nodeID)) >= 0;
+	},
+
+	isHidden: function(subID, nodeID, node) {
+		return this.isManuallyHidden(subID, nodeID) || this.matchingAutoHideKeyword(node) !== '';
 	},
 
 	setLocalHiddenNodeKeys: function(values) {
@@ -1153,7 +1177,9 @@ return view.extend({
 			var nodes = Array.isArray(sub.nodes) ? sub.nodes : [];
 			for (var n = 0; n < nodes.length; n++) {
 				var node = nodes[n];
-				var hidden = this.isHidden(sub.id, node.id);
+				var hiddenByKeyword = this.matchingAutoHideKeyword(node);
+				var manuallyHidden = this.isManuallyHidden(sub.id, node.id);
+				var hidden = manuallyHidden || hiddenByKeyword !== '';
 				if (this.showHidden !== hidden)
 					continue;
 				var haystack = (nodeName(node) + ' ' + sourceName(sub) + ' ' + trim(node.protocol) + ' ' + trim(node.address)).toLowerCase();
@@ -1165,7 +1191,7 @@ return view.extend({
 					continue;
 					var observed = this.pings[sub.id + ':' + node.id] || {};
 					var latency = positiveLatency(observed.latency_ms);
-				rows.push({ sub: sub, node: node, observed: observed, latency: latency, hidden: hidden });
+				rows.push({ sub: sub, node: node, observed: observed, latency: latency, hidden: hidden, manuallyHidden: manuallyHidden, hiddenByKeyword: hiddenByKeyword });
 			}
 		}
 		rows.sort(L.bind(function(a, b) {
@@ -1221,7 +1247,7 @@ return view.extend({
 		var state = status.state || {};
 		var connected = state.connected === true;
 		var hasAvailableNodes = this.subscriptions().filter(function(sub) { return !isSubscriptionExpired(sub); }).some(L.bind(function(sub) {
-			return (sub.nodes || []).some(L.bind(function(node) { return !this.isHidden(sub.id, node.id); }, this));
+			return (sub.nodes || []).some(L.bind(function(node) { return !this.isHidden(sub.id, node.id, node); }, this));
 		}, this));
 		var mode = connected ? (state.mode === 'auto' ? 'auto' : 'manual') : 'disconnected';
 		var activeSubscription = status.active_subscription;
@@ -1253,7 +1279,7 @@ return view.extend({
 				continue;
 			var totalNodes = Array.isArray(subscriptions[t].nodes) ? subscriptions[t].nodes : [];
 			for (var x = 0; x < totalNodes.length; x++) {
-				if (this.isHidden(subscriptions[t].id, totalNodes[x].id)) hiddenCount++;
+				if (this.isHidden(subscriptions[t].id, totalNodes[x].id, totalNodes[x])) hiddenCount++;
 				else total++;
 			}
 		}
@@ -1266,7 +1292,7 @@ return view.extend({
 		for (var i = 0; i < subscriptions.length; i++) {
 			var sub = subscriptions[i];
 			var subActive = !this.showHidden && (this.filter === sub.id || (availableSubscriptions.length === 1 && this.filter === 'all' && !isSubscriptionExpired(sub)));
-			var visibleCount = (sub.nodes || []).filter(L.bind(function(node) { return !this.isHidden(sub.id, node.id); }, this)).length;
+			var visibleCount = (sub.nodes || []).filter(L.bind(function(node) { return !this.isHidden(sub.id, node.id, node); }, this)).length;
 			var subMeta = sub.last_error ? _('Update failed') : (sub.last_updated_at ? _('Updated') + ' ' + formatTime(sub.last_updated_at) : _('Ready'));
 			var expiry = subscriptionExpiryPresentation(sub.expires_at);
 			tabs.push(E('button', { class: 'fl-tab ' + (subActive ? 'fl-tab-active' : ''), role: 'tab', 'aria-selected': subActive ? 'true' : 'false', click: ui.createHandlerFn(this, 'handleFilter', sub.id), 'aria-label': sourceName(sub) + (sub.last_error ? ': ' + _('update failed') : '') }, [
@@ -1321,7 +1347,8 @@ return view.extend({
 				E('td', { class: 'fl-actions-cell', 'data-label': _('Actions') }, [ expired ? '' : E('div', { class: 'fl-more' + (this.activeMenuKey === actionKey ? ' fl-more-open' : ''), 'data-menu-key': actionKey }, [
 					E('button', { type: 'button', class: 'fl-more-toggle', 'aria-label': _('Server actions'), 'aria-haspopup': 'menu', 'aria-expanded': this.activeMenuKey === actionKey ? 'true' : 'false', click: ui.createHandlerFn(this, 'handleServerMenuToggle', actionKey) }),
 					E('div', { class: 'fl-more-menu', role: 'menu', hidden: this.activeMenuKey === actionKey ? null : 'hidden', click: function(ev) { ev.stopPropagation(); } }, [
-						row.hidden ? E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, false) }, [ _('Restore') ]) : E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id) }, [ active && state.mode === 'manual' ? _('Pinned') : _('Connect') ]),
+							row.hiddenByKeyword ? E('div', { class: 'fl-more-note' }, [ _('Hidden by rule') + ': “' + row.hiddenByKeyword + '”' ]) : '',
+							row.hiddenByKeyword ? E('a', { class: 'fl-button', href: L.url('admin/services/fastlane/settings') }, [ _('Edit hide rules') ]) : (row.manuallyHidden ? E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, false) }, [ _('Restore') ]) : E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id) }, [ active && state.mode === 'manual' ? _('Pinned') : _('Connect') ])),
 						row.hidden ? '' : E('button', { class: 'fl-button', disabled: testing ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleURLTest', row.sub.id, row.node.id) }, [ testing ? _('Checking…') : _('Check ping (GET)') ]),
 						row.hidden ? '' : E('button', { class: 'fl-button fl-button-warning', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, true) }, [ _('Hide') ]),
 						row.sub.id === 'server-list' ? E('button', { class: 'fl-button fl-button-danger', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRemoveServer', row.sub.id, row.node.id) }, [ _('Remove server') ]) : ''

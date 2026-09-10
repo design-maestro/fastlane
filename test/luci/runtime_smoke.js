@@ -180,6 +180,7 @@ const statusFixture = {
 	settings: {
 		auto_mode: true,
 		auto_excluded_nodes: ['durev/ee'],
+		auto_hide_keywords: [],
 		country_routing: { enabled: false, country_code: 'RU' }
 	},
 	active_subscription: subscriptionsFixture[0],
@@ -193,6 +194,7 @@ const settingsFixture = {
 	url_test_timeout: '15s',
 	switch_cooldown: '5m0s',
 	latency_threshold: '50ms',
+	auto_hide_keywords: [],
 	strict_egress_check: true,
 	country_routing: { enabled: false, country_code: 'RU' },
 	firewall: { enabled: true, mode: 'split', split: { default_action: 'proxy', bypass: { services: ['roborock'], domains: [], cidrs: [] }, excluded_sources: ['192.168.1.50'] } }
@@ -232,6 +234,11 @@ function defaultResolver(commandPath, args) {
 	if (joined === '--json inspect health-check-cancel') return { code: 0, stdout: JSON.stringify({ status: 'cancelling' }), stderr: '' };
 	if (joined.startsWith('--json inspect health-check --subscription ')) return { code: 0, stdout: JSON.stringify({ status: 'queued', scope: args.at(-1) }), stderr: '' };
 	if (joined === '--json settings get') return { code: 0, stdout: JSON.stringify(settingsFixture), stderr: '' };
+	if (args[0] === '--json' && args[1] === 'settings' && args[2] === 'set' && args[3] === 'auto.hide-keywords') {
+		const result = clone(settingsFixture);
+		result.auto_hide_keywords = String(args[4] || '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+		return { code: 0, stdout: JSON.stringify(result), stderr: '' };
+	}
 	if (joined === '--json services list') return { code: 0, stdout: JSON.stringify(routingServicesFixture), stderr: '' };
 	if (joined.startsWith('--json services set ')) return { code: 0, stdout: JSON.stringify({ name: args[3] }), stderr: '' };
 	if (joined.startsWith('--json services delete ')) return { code: 0, stdout: 'Deleted\n', stderr: '' };
@@ -515,6 +522,19 @@ async function smoke(section, name, run) {
 		assert.equal(page.isHidden('durev', 'ee'), false);
 		await restore;
 		commandSeen(['settings', 'set', 'auto.excluded-nodes', 'durev/nl']);
+	});
+
+	await smoke('VPN', 'hides matching server titles and subtitles with persistent keywords', async () => {
+		const page = makeVPN();
+		page.pageData[0].settings.auto_excluded_nodes = [];
+		page.pageData[0].settings.auto_hide_keywords = ['LTE'];
+		page.pageData[1][0].nodes[0].name = 'Netherlands · LTE Reserve';
+		const matched = page.pageData[1][0].nodes[0];
+		assert.equal(page.isHidden('durev', 'nl', matched), true);
+		assert.deepEqual(page.visibleRows().map((row) => row.node.id), ['pl', 'ee']);
+		page.handleFilter('hidden');
+		assert.equal(page.visibleRows()[0].hiddenByKeyword, 'LTE');
+		assert.match(treeText(page.renderTable()), /Hidden by rule.*LTE.*Edit hide rules/);
 	});
 
 	await smoke('VPN', 'removes one manually added server without deleting other sources', async () => {
@@ -1106,7 +1126,7 @@ async function smoke(section, name, run) {
 		const page = loadPage('settings');
 		const data = await page.load();
 		const text = treeText(page.render(data));
-		for (const expected of ['Subscription update', 'Automatic server check', 'URL test address', 'URL test timeout', 'Pause between switches', 'Minimum improvement', 'Strict internet check', 'Interface language']) assert.match(text, new RegExp(expected));
+		for (const expected of ['Subscription update', 'Automatic server check', 'URL test address', 'URL test timeout', 'Pause between switches', 'Minimum improvement', 'Strict internet check', 'Hide by keywords', 'Interface language']) assert.match(text, new RegExp(expected));
 		commandSeen(['--json', 'settings', 'get']);
 	});
 
@@ -1189,6 +1209,20 @@ async function smoke(section, name, run) {
 		const segments = field.children[1].children;
 		assert.deepEqual(segments.map((segment) => segment.children[0].value), ['5', '0']);
 		assert.match(treeText(field), /min.*s/);
+	});
+
+	await smoke('Settings', 'adds and removes persistent hide keywords as chips', async () => {
+		const page = makeSettings();
+		const input = { value: ' LTE ' };
+		await page.handleAutoHideKeywordKeydown({ key: 'Enter', target: input, preventDefault() {} });
+		commandSeen(['--json', 'settings', 'set', 'auto.hide-keywords', 'LTE']);
+		assert.equal(input.value, '');
+		assert.deepEqual(page.autoHideKeywords(), ['LTE']);
+		assert.match(treeText(page.renderAutoHideKeywordChips()), /LTE.*×/);
+		commands = [];
+		await page.handleAutoHideKeywordRemove('LTE', { preventDefault() {}, stopPropagation() {} });
+		commandSeen(['--json', 'settings', 'set', 'auto.hide-keywords', '']);
+		assert.deepEqual(page.autoHideKeywords(), []);
 	});
 
 	await smoke('Settings', 'saves every changed setting in one atomic patch', async () => {

@@ -34,7 +34,7 @@ func newSettingsCmd(opts *rootOptions) *cobra.Command {
 				}
 
 				text := fmt.Sprintf(
-					"refresh-interval=%s\nhealth-check-interval=%s\nurl-test-url=%s\nurl-test-timeout=%s\nswitch-cooldown=%s\nlatency-threshold=%s\nstrict-egress-check=%t\ncountry-routing-enabled=%t\ncountry-routing-country=%s\nauto-mode=%t\nauto-excluded-nodes=%s\nmode=%s\nlog-level=%s\nfirewall-enabled=%t\nfirewall-mode=%s\nfirewall-port=%d\nfirewall-default-action=%s\nfirewall-targets=%s\nfirewall-target-services=%s\nfirewall-target-domains=%s\nfirewall-target-cidrs=%s\nfirewall-split-proxy=%s\nfirewall-split-bypass=%s\nfirewall-split-excluded-sources=%s\nfirewall-hosts=%s\nfirewall-block-quic=%t\nfirewall-disable-ipv6=%t\nzapret-enabled=%t\nzapret-selectors=%s\nzapret-domains=%s\nzapret-failback-success-threshold=%d",
+					"refresh-interval=%s\nhealth-check-interval=%s\nurl-test-url=%s\nurl-test-timeout=%s\nswitch-cooldown=%s\nlatency-threshold=%s\nstrict-egress-check=%t\ncountry-routing-enabled=%t\ncountry-routing-country=%s\nauto-mode=%t\nauto-excluded-nodes=%s\nauto-hide-keywords=%s\nmode=%s\nlog-level=%s\nfirewall-enabled=%t\nfirewall-mode=%s\nfirewall-port=%d\nfirewall-default-action=%s\nfirewall-targets=%s\nfirewall-target-services=%s\nfirewall-target-domains=%s\nfirewall-target-cidrs=%s\nfirewall-split-proxy=%s\nfirewall-split-bypass=%s\nfirewall-split-excluded-sources=%s\nfirewall-hosts=%s\nfirewall-block-quic=%t\nfirewall-disable-ipv6=%t\nzapret-enabled=%t\nzapret-selectors=%s\nzapret-domains=%s\nzapret-failback-success-threshold=%d",
 					settings.RefreshInterval,
 					settings.HealthCheckInterval,
 					settings.URLTestURL,
@@ -46,6 +46,7 @@ func newSettingsCmd(opts *rootOptions) *cobra.Command {
 					settings.CountryRouting.CountryCode,
 					settings.AutoMode,
 					strings.Join(settings.AutoExcludedNodes, ", "),
+					strings.Join(settings.AutoHideKeywords, ", "),
 					settings.Mode,
 					settings.LogLevel,
 					settings.Firewall.Enabled,

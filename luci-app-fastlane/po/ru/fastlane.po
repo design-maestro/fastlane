@@ -81,6 +81,33 @@ msgstr "Автоматически использует язык LuCI. Для о
 msgid "Automatic selection"
 msgstr "Автовыбор"
 
+msgid "Could not update server hide rules."
+msgstr "Не удалось обновить правила скрытия серверов."
+
+msgid "Edit hide rules"
+msgstr "Изменить правила скрытия"
+
+msgid "Hidden by rule"
+msgstr "Скрыт по правилу"
+
+msgid "Hide by keywords"
+msgstr "Скрывать по ключевым словам"
+
+msgid "Matches server titles and subtitles. Rules apply immediately and remain after subscription updates."
+msgstr "Ищет совпадения в названии и подписи сервера. Правила применяются сразу и сохраняются после обновления подписок."
+
+msgid "Remove hide rule"
+msgstr "Удалить правило скрытия"
+
+msgid "Server hide rules updated."
+msgstr "Правила скрытия серверов обновлены."
+
+msgid "This hide rule already exists."
+msgstr "Такое правило скрытия уже есть."
+
+msgid "Type a word and press Enter"
+msgstr "Введите слово и нажмите Enter"
+
 msgid "Automatic selection started in the background. You can close the page."
 msgstr "Автовыбор запущен в фоне. Можно закрыть страницу."
 

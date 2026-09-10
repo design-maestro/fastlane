@@ -312,7 +312,7 @@ func (s *Service) evaluateAutoSelectionAll(ctx context.Context, subscriptions []
 		}
 
 		selectable := autoSelectableNodes(sub, settings)
-		if domain.IsAutoExcludedNode(settings.AutoExcludedNodes, sub.ID, currentNodeID) && sub.ID == state.ActiveSubscriptionID {
+		if autoNodeExcluded(sub, currentNodeID, settings) && sub.ID == state.ActiveSubscriptionID {
 			forceHealthFailure(health, currentNodeID, "current node is excluded from auto mode", s.currentTime().UTC(), failureThreshold)
 		}
 		if len(selectable) == 0 {
@@ -426,7 +426,7 @@ func (s *Service) evaluateAutoSelection(ctx context.Context, sub domain.Subscrip
 	if state.ActiveSubscriptionID == sub.ID && activeTransport == domain.TransportModeProxy {
 		currentNodeID = state.ActiveNodeID
 	}
-	currentNodeExcluded := domain.IsAutoExcludedNode(settings.AutoExcludedNodes, sub.ID, currentNodeID)
+	currentNodeExcluded := autoNodeExcluded(sub, currentNodeID, settings)
 
 	candidateNodes := autoSelectableNodes(sub, settings)
 	if len(candidateNodes) == 0 {
@@ -513,19 +513,30 @@ func autoSelectableNodes(sub domain.Subscription, settings domain.Settings) []do
 	if sub.IsExpired(time.Now().UTC()) {
 		return nil
 	}
-	if len(settings.AutoExcludedNodes) == 0 {
+	if len(settings.AutoExcludedNodes) == 0 && len(settings.AutoHideKeywords) == 0 {
 		return sub.Nodes
 	}
 
 	nodes := make([]domain.Node, 0, len(sub.Nodes))
 	for _, node := range sub.Nodes {
-		if domain.IsAutoExcludedNode(settings.AutoExcludedNodes, sub.ID, node.ID) {
+		if domain.IsNodeExcludedFromAuto(settings, sub.ID, node) {
 			continue
 		}
 		nodes = append(nodes, node)
 	}
 
 	return nodes
+}
+
+func autoNodeExcluded(sub domain.Subscription, nodeID string, settings domain.Settings) bool {
+	if nodeID == "" {
+		return false
+	}
+	node, ok := sub.NodeByID(nodeID)
+	if !ok {
+		node = domain.Node{ID: nodeID}
+	}
+	return domain.IsNodeExcludedFromAuto(settings, sub.ID, node)
 }
 
 func (s *Service) commitAutoSelection(ctx context.Context, sub domain.Subscription, currentState domain.RuntimeState, decision autoSelectionDecision) (domain.Node, error) {

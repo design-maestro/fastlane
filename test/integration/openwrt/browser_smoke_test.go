@@ -94,6 +94,8 @@ var (
 			".fls-grid",
 			".fls-input",
 			".fls-toggle input",
+			".fls-keyword-field",
+			".fls-chip-list",
 		},
 	}
 )

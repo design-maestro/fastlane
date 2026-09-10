@@ -295,7 +295,7 @@ func healthCheckNodeCount(opts *rootOptions, scope string) int {
 			continue
 		}
 		for _, node := range sub.Nodes {
-			if !domain.IsAutoExcludedNode(settings.AutoExcludedNodes, sub.ID, node.ID) {
+			if !domain.IsNodeExcludedFromAuto(settings, sub.ID, node) {
 				total++
 			}
 		}

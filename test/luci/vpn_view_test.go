@@ -148,6 +148,19 @@ func TestFastLaneVPNViewCanHideAndRestoreNodes(t *testing.T) {
 	}
 }
 
+func TestFastLaneVPNViewAppliesPersistentKeywordHideRules(t *testing.T) {
+	t.Parallel()
+	source := readVPNViewSource(t)
+	for _, want := range []string{
+		"auto_hide_keywords", "matchingAutoHideKeyword", "isManuallyHidden",
+		"Hidden by rule", "Edit hide rules", "row.hiddenByKeyword",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("VPN view missing keyword-hide marker %q", want)
+		}
+	}
+}
+
 func TestFastLaneVPNServerActionsUseVisibleThreeDotControl(t *testing.T) {
 	t.Parallel()
 	source := readVPNViewSource(t)
@@ -413,7 +426,7 @@ func readVPNViewSource(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-menu-v25.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-hide-keywords-v26.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

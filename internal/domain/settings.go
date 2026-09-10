@@ -75,6 +75,7 @@ type Settings struct {
 	SwitchCooldown      Duration         `json:"switch_cooldown"`
 	LatencyThreshold    Duration         `json:"latency_threshold"`
 	AutoExcludedNodes   []string         `json:"auto_excluded_nodes"`
+	AutoHideKeywords    []string         `json:"auto_hide_keywords"`
 	DNS                 DNSSettings      `json:"dns"`
 	Firewall            FirewallSettings `json:"firewall"`
 	Zapret              ZapretSettings   `json:"zapret"`
@@ -238,6 +239,7 @@ func DefaultSettings() Settings {
 		SwitchCooldown:      NewDuration(5 * time.Minute),
 		LatencyThreshold:    NewDuration(50 * time.Millisecond),
 		AutoExcludedNodes:   nil,
+		AutoHideKeywords:    nil,
 		DNS:                 DefaultDNSSettings(),
 		Firewall: FirewallSettings{
 			Enabled:         true,
@@ -580,6 +582,59 @@ func IsAutoExcludedNode(values []string, subscriptionID, nodeID string) bool {
 	}
 
 	return false
+}
+
+// NormalizeAutoHideKeywords trims and deduplicates persistent server hide rules.
+// The first spelling entered by the user is preserved for display in the UI.
+func NormalizeAutoHideKeywords(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.Join(strings.Fields(value), " ")
+		key := strings.ToLower(value)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// MatchingAutoHideKeyword returns the first keyword found in the node title or
+// remark. Provider names and addresses are deliberately excluded so a rule only
+// affects labels the user can see on the server itself.
+func MatchingAutoHideKeyword(values []string, node Node) string {
+	haystack := strings.ToLower(strings.Join(strings.Fields(node.Name+" "+node.Remark), " "))
+	if haystack == "" {
+		return ""
+	}
+
+	for _, value := range NormalizeAutoHideKeywords(values) {
+		if strings.Contains(haystack, strings.ToLower(value)) {
+			return value
+		}
+	}
+	return ""
+}
+
+// IsNodeExcludedFromAuto combines one-off server hiding with persistent keyword
+// rules used after subscription refreshes.
+func IsNodeExcludedFromAuto(settings Settings, subscriptionID string, node Node) bool {
+	return IsAutoExcludedNode(settings.AutoExcludedNodes, subscriptionID, node.ID) ||
+		MatchingAutoHideKeyword(settings.AutoHideKeywords, node) != ""
 }
 
 // CanonicalZapretSettings normalizes Zapret settings for persisted compatibility.

@@ -2479,8 +2479,8 @@ func (s *Service) SetSetting(key, value string) (domain.Settings, error) {
 			return snapshot.settings, nil
 		}
 	}
-	if key == "auto.excluded-nodes" {
-		return s.setAutoExcludedNodes(value)
+	if key == "auto.excluded-nodes" || key == "auto.hide-keywords" {
+		return s.setAutoExclusions(key, value)
 	}
 
 	return runStoreWriteLockedResult(s, func() (domain.Settings, error) {
@@ -2613,7 +2613,7 @@ func (s *Service) PatchSettings(values map[string]string) (domain.Settings, erro
 	})
 }
 
-func (s *Service) setAutoExcludedNodes(value string) (domain.Settings, error) {
+func (s *Service) setAutoExclusions(key, value string) (domain.Settings, error) {
 	var snapshot autoSelectionSnapshot
 	scope := ""
 	settings, err := runStoreWriteLockedResult(s, func() (domain.Settings, error) {
@@ -2621,7 +2621,14 @@ func (s *Service) setAutoExcludedNodes(value string) (domain.Settings, error) {
 		if err != nil {
 			return domain.Settings{}, fmt.Errorf("load settings: %w", err)
 		}
-		settings.AutoExcludedNodes = domain.NormalizeAutoExcludedNodes(parseStringList(value))
+		switch key {
+		case "auto.excluded-nodes":
+			settings.AutoExcludedNodes = domain.NormalizeAutoExcludedNodes(parseStringList(value))
+		case "auto.hide-keywords":
+			settings.AutoHideKeywords = domain.NormalizeAutoHideKeywords(parseAutoHideKeywords(value))
+		default:
+			return domain.Settings{}, fmt.Errorf("unsupported auto exclusion setting %q", key)
+		}
 		if err := s.store.SaveSettings(settings); err != nil {
 			return domain.Settings{}, fmt.Errorf("save settings: %w", err)
 		}
@@ -2630,14 +2637,27 @@ func (s *Service) setAutoExcludedNodes(value string) (domain.Settings, error) {
 		if err != nil || !state.Connected || state.Mode != domain.SelectionModeAuto || strings.TrimSpace(state.ActiveSubscriptionID) == "" {
 			return settings, nil
 		}
-		if !domain.IsAutoExcludedNode(settings.AutoExcludedNodes, state.ActiveSubscriptionID, state.ActiveNodeID) {
+		snapshot, err = s.captureAutoSelectionSnapshotLocked()
+		if err != nil {
+			return domain.Settings{}, err
+		}
+		activeNode := domain.Node{ID: state.ActiveNodeID}
+		for _, sub := range snapshot.subscriptions {
+			if sub.ID != state.ActiveSubscriptionID {
+				continue
+			}
+			if node, ok := sub.NodeByID(state.ActiveNodeID); ok {
+				activeNode = node
+			}
+			break
+		}
+		if !domain.IsNodeExcludedFromAuto(settings, state.ActiveSubscriptionID, activeNode) {
 			return settings, nil
 		}
 		scope = state.ActiveSubscriptionID
 		if state.AutoScope == autoScopeAll {
 			scope = autoScopeAll
 		}
-		snapshot, err = s.captureAutoSelectionSnapshotLocked()
 		return settings, err
 	})
 	if err != nil || scope == "" {
@@ -2757,6 +2777,8 @@ func (s *Service) setSetting(key, value string) (domain.Settings, error) {
 		reapplyRuntime = settings.CountryRouting.Enabled
 	case "auto.excluded-nodes":
 		settings.AutoExcludedNodes = domain.NormalizeAutoExcludedNodes(parseStringList(value))
+	case "auto.hide-keywords":
+		settings.AutoHideKeywords = domain.NormalizeAutoHideKeywords(parseAutoHideKeywords(value))
 	case "auto-mode":
 		enableAuto, err := parseBooleanSetting(key, value)
 		if err != nil {
@@ -4591,6 +4613,12 @@ func parseStringList(raw string) []string {
 		out = append(out, part)
 	}
 	return out
+}
+
+func parseAutoHideKeywords(raw string) []string {
+	return strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r'
+	})
 }
 
 func normalizeStringList(values []string) []string {

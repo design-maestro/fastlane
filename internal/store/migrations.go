@@ -94,6 +94,7 @@ func decodeSettings(data []byte, path string) (domain.Settings, error) {
 		SwitchCooldown      *domain.Duration      `json:"switch_cooldown"`
 		LatencyThreshold    *domain.Duration      `json:"latency_threshold"`
 		AutoExcludedNodes   *[]string             `json:"auto_excluded_nodes"`
+		AutoHideKeywords    *[]string             `json:"auto_hide_keywords"`
 		DNS                 *rawDNSSettings       `json:"dns"`
 		Firewall            *rawFirewallSettings  `json:"firewall"`
 		Zapret              *rawZapretSettings    `json:"zapret"`
@@ -141,6 +142,9 @@ func decodeSettings(data []byte, path string) (domain.Settings, error) {
 	}
 	if raw.AutoExcludedNodes != nil {
 		settings.AutoExcludedNodes = append([]string(nil), (*raw.AutoExcludedNodes)...)
+	}
+	if raw.AutoHideKeywords != nil {
+		settings.AutoHideKeywords = append([]string(nil), (*raw.AutoHideKeywords)...)
 	}
 	if raw.AutoMode != nil {
 		settings.AutoMode = *raw.AutoMode
@@ -340,6 +344,7 @@ func decodeSettings(data []byte, path string) (domain.Settings, error) {
 	}
 
 	settings.AutoExcludedNodes = domain.NormalizeAutoExcludedNodes(settings.AutoExcludedNodes)
+	settings.AutoHideKeywords = domain.NormalizeAutoHideKeywords(settings.AutoHideKeywords)
 	canonicalCountryRouting, countryErr := domain.CanonicalCountryRouting(settings.CountryRouting)
 	if countryErr != nil {
 		return domain.Settings{}, fmt.Errorf("decode country routing: %w", countryErr)

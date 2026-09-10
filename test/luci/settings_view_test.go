@@ -21,6 +21,20 @@ func TestFastLaneSettingsExposeOperationalControls(t *testing.T) {
 	}
 }
 
+func TestFastLaneSettingsManagePersistentHideKeywordsAsChips(t *testing.T) {
+	t.Parallel()
+	source := readSettingsViewSource(t)
+	for _, want := range []string{
+		"auto.hide-keywords", "auto_hide_keywords", "handleAutoHideKeywordKeydown",
+		"handleAutoHideKeywordRemove", "renderAutoHideKeywordChips", "fls-chip-remove",
+		"Type a word and press Enter", "Matches server titles and subtitles",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("settings view missing keyword-chip marker %q", want)
+		}
+	}
+}
+
 func TestFastLaneSettingsAreDarkOnly(t *testing.T) {
 	t.Parallel()
 	source := readSettingsViewSource(t)
@@ -189,7 +203,7 @@ func readSettingsViewSource(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260907-duration-v7.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260910-hide-keywords-v8.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
