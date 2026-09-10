@@ -33,6 +33,7 @@ type RuntimeState struct {
 	AutoScope                  string                `json:"auto_scope,omitempty"`
 	ActiveSubscriptionID       string                `json:"active_subscription_id"`
 	ActiveNodeID               string                `json:"active_node_id"`
+	ActiveNodeName             string                `json:"active_node_name,omitempty"`
 	Mode                       SelectionMode         `json:"mode"`
 	Connected                  bool                  `json:"connected"`
 	ActiveTransport            TransportMode         `json:"active_transport"`

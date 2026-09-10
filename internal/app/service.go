@@ -549,6 +549,7 @@ func (s *Service) disconnectRuntime(ctx context.Context) error {
 func (s *Service) persistDisconnectedState(state domain.RuntimeState) error {
 	state.ActiveSubscriptionID = ""
 	state.ActiveNodeID = ""
+	state.ActiveNodeName = ""
 	state.Mode = domain.SelectionModeDisconnected
 	state.Connected = false
 	if effectiveActiveTransport(state) != domain.TransportModeDirect {
@@ -884,7 +885,14 @@ func (s *Service) refreshSubscription(ctx context.Context, subscriptionID string
 	state, err := s.store.LoadState()
 	if err == nil {
 		if state.ActiveSubscriptionID == sub.ID {
-			state.ActiveNodeID = remapRefreshedNodeID(state.ActiveNodeID, previousNodes, nodes)
+			previousNodeID := state.ActiveNodeID
+			if previousNode, ok := nodeByID(previousNodes, previousNodeID); ok {
+				state.ActiveNodeName = previousNode.DisplayName()
+			}
+			state.ActiveNodeID = remapRefreshedNodeID(previousNodeID, previousNodes, nodes)
+			if refreshedNode, ok := nodeByID(nodes, state.ActiveNodeID); ok {
+				state.ActiveNodeName = refreshedNode.DisplayName()
+			}
 		}
 		if state.LastRefreshAt == nil {
 			state.LastRefreshAt = make(map[string]time.Time)
@@ -894,6 +902,14 @@ func (s *Service) refreshSubscription(ctx context.Context, subscriptionID string
 	}
 
 	return sub, nil
+}
+
+func nodeByID(nodes []domain.Node, nodeID string) (domain.Node, bool) {
+	index := slices.IndexFunc(nodes, func(node domain.Node) bool { return node.ID == nodeID })
+	if index < 0 {
+		return domain.Node{}, false
+	}
+	return nodes[index], true
 }
 
 func remapRefreshedNodeID(activeNodeID string, previousNodes, refreshedNodes []domain.Node) string {
@@ -1320,6 +1336,7 @@ func (s *Service) disconnect(ctx context.Context) error {
 	}
 	state.ActiveNodeID = ""
 	state.ActiveSubscriptionID = ""
+	state.ActiveNodeName = ""
 	state.AutoScope = ""
 	state.Mode = domain.SelectionModeDisconnected
 	state.Connected = false
@@ -1391,6 +1408,16 @@ func (s *Service) Status() (StatusSnapshot, error) {
 		snapshot.ActiveSubscription = &sub
 		if node, ok := sub.NodeByID(state.ActiveNodeID); ok {
 			snapshot.ActiveNode = &node
+		} else if state.Connected && strings.TrimSpace(state.ActiveNodeName) != "" {
+			// A refreshed subscription can legitimately stop listing the node that
+			// Xray is still using. Keep the last applied display name so the UI does
+			// not claim that VPN is connected to an unknown server.
+			snapshot.ActiveNode = &domain.Node{
+				ID:             state.ActiveNodeID,
+				SubscriptionID: state.ActiveSubscriptionID,
+				Name:           state.ActiveNodeName,
+				Remark:         state.ActiveNodeName,
+			}
 		}
 	}
 
@@ -4018,6 +4045,7 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 
 	state.ActiveSubscriptionID = sub.ID
 	state.ActiveNodeID = node.ID
+	state.ActiveNodeName = node.DisplayName()
 	state.Mode = mode
 	if mode != domain.SelectionModeAuto {
 		state.AutoScope = ""

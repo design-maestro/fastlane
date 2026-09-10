@@ -310,7 +310,7 @@ func TestFastLaneVPNMovesCountryEmojiIntoFlagMarker(t *testing.T) {
 		"fl-server-flag-emoji",
 		"fl-server-flag-glyph",
 		".fastlane-root .fl-server-flag-glyph{transform:translateY(2px)}",
-		"emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(location.code)",
+		"emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(presentation.code)",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("VPN view missing country emoji normalization marker %q", want)
@@ -426,7 +426,7 @@ func readVPNViewSource(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-hide-keywords-v26.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-hide-keywords-v27.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

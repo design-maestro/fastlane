@@ -250,6 +250,15 @@ function nodeLocation(node) {
 	return { code: code, country: countryCatalog.name(code), city: details.join(' · ') };
 }
 
+function nodePresentation(node) {
+	var location = nodeLocation(node);
+	return {
+		code: location.code,
+		title: location.country,
+		description: location.city || trim(node && node.address) + ':' + String(node && node.port || '')
+	};
+}
+
 function nodeFlag(node) {
 	var haystack = (nodeName(node) + ' ' + trim(node && node.address)).toLowerCase();
 	var flags = {
@@ -791,7 +800,13 @@ return view.extend({
 	},
 
 	matchingAutoHideKeyword: function(node) {
-		var haystack = (trim(node && node.name) + ' ' + trim(node && node.remark)).replace(/\s+/g, ' ').toLocaleLowerCase();
+		var presentation = nodePresentation(node);
+		// Match the exact title and description rendered in the server row. A
+		// provider may send only a flag while the UI renders a localized country.
+		var haystack = [
+			trim(presentation.title),
+			trim(presentation.description)
+		].join(' ').replace(/\s+/g, ' ').toLocaleLowerCase();
 		var keywords = this.autoHideKeywords();
 		for (var i = 0; i < keywords.length; i++)
 			if (haystack.indexOf(keywords[i].toLocaleLowerCase()) >= 0) return keywords[i];
@@ -1332,13 +1347,12 @@ return view.extend({
 							: unavailable ? _('Unavailable')
 								: checked ? (slow ? _('Slow') : _('Ready'))
 									: _('Not checked');
-			var location = nodeLocation(row.node);
-			var emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(location.code);
+			var presentation = nodePresentation(row.node);
+			var emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(presentation.code);
 			var marker = emoji
 				? E('div', { class: 'fl-server-mark fl-server-flag-emoji', 'aria-hidden': 'true' }, [ E('span', { class: 'fl-server-flag-glyph' }, [ emoji ]) ])
 				: E('div', { class: 'fl-server-mark' }, [ icon(active ? 'bolt' : 'server') ]);
-			var secondary = location.city || trim(row.node.address) + ':' + String(row.node.port || '');
-			var cells = [ E('td', { 'data-label': _('Server') }, [ E('div', { class: 'fl-server' }, [ marker, E('div', { class: 'fl-server-text' }, [ E('div', { class: 'fl-server-name' }, [ location.country ]), E('div', { class: 'fl-server-address' }, [ secondary ]) ]) ]) ]) ];
+			var cells = [ E('td', { 'data-label': _('Server') }, [ E('div', { class: 'fl-server' }, [ marker, E('div', { class: 'fl-server-text' }, [ E('div', { class: 'fl-server-name' }, [ presentation.title ]), E('div', { class: 'fl-server-address' }, [ presentation.description ]) ]) ]) ]) ];
 			if (all) cells.push(E('td', { class: 'fl-meta-cell fl-meta-source', 'data-label': _('Source') }, [ E('span', { class: 'fl-source' }, [ sourceName(row.sub) ]) ]));
 			cells.push(
 				E('td', { class: 'fl-meta-cell', 'data-label': _('Protocol') }, [ E('span', { class: 'fl-protocol' }, [ trim(row.node.protocol) || '—' ]) ]),
