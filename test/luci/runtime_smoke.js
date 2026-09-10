@@ -229,6 +229,7 @@ function defaultResolver(commandPath, args) {
 	if (joined === '--json status') return { code: 0, stdout: JSON.stringify(statusFixture), stderr: '' };
 	if (joined === '--json list subscriptions') return { code: 0, stdout: JSON.stringify(subscriptionsFixture), stderr: '' };
 	if (joined === '--json inspect health-check-status') return { code: 0, stdout: JSON.stringify({ status: 'idle' }), stderr: '' };
+	if (joined === '--json inspect health-check-cancel') return { code: 0, stdout: JSON.stringify({ status: 'cancelling' }), stderr: '' };
 	if (joined.startsWith('--json inspect health-check --subscription ')) return { code: 0, stdout: JSON.stringify({ status: 'queued', scope: args.at(-1) }), stderr: '' };
 	if (joined === '--json settings get') return { code: 0, stdout: JSON.stringify(settingsFixture), stderr: '' };
 	if (joined === '--json services list') return { code: 0, stdout: JSON.stringify(routingServicesFixture), stderr: '' };
@@ -367,6 +368,26 @@ async function smoke(section, name, run) {
 		commandSeen(['--json', 'inspect', 'health-check-status']);
 		assert.equal(poll.started, true);
 		assert.equal(poll.entries[0].interval, 5);
+	});
+
+	await smoke('VPN', 'does not rebuild unchanged UI and defers changed data while a menu is open', async () => {
+		const page = loadPage('vpn');
+		const data = await page.load();
+		page.render(data);
+		let updates = 0;
+		page.updatePreservingScroll = () => { updates++; };
+		await poll.entries[0].handler();
+		assert.equal(updates, 0);
+
+		page.activeMenuKey = 'durev:nl';
+		resolver = async (commandPath, args) => {
+			if (args.join(' ') === '--json inspect health-check-status')
+				return { code: 0, stdout: JSON.stringify({ status: 'running', total: 3, done: 1 }), stderr: '' };
+			return defaultResolver(commandPath, args);
+		};
+		await poll.entries[0].handler();
+		assert.equal(updates, 0);
+		assert.equal(page.pendingBackgroundRender, true);
 	});
 
 	await smoke('VPN', 'keeps independent read failures visible without breaking render', async () => {
@@ -529,14 +550,25 @@ async function smoke(section, name, run) {
 
 	await smoke('VPN', 'keeps the viewport stable while opening menus and hiding rows', async () => {
 		const page = makeVPN();
+		let updates = 0;
 		page.update = () => {
+			updates++;
 			window.pageYOffset = window.scrollY = 0;
 		};
 		page.refreshView = async (scrollPosition) => page.updatePreservingScroll(scrollPosition);
 		window.pageYOffset = window.scrollY = 640;
+		const toggle = new FakeNode('button');
+		const menuNode = new FakeNode('div');
+		menuNode.hidden = true;
+		const wrapper = new FakeNode('div');
+		wrapper.querySelector = (selector) => selector === '.fl-more-toggle' ? toggle : (selector === '.fl-more-menu' ? menuNode : null);
+		const button = { closest: () => wrapper };
 
-		page.handleServerMenuToggle('durev:nl', { preventDefault() {}, stopPropagation() {} });
+		page.handleServerMenuToggle('durev:nl', { currentTarget: button, preventDefault() {}, stopPropagation() {} });
 		assert.equal(window.pageYOffset, 640);
+		assert.equal(updates, 0);
+		assert.equal(menuNode.hidden, false);
+		assert.equal(toggle.attributes['aria-expanded'], 'true');
 		await page.handleHidden('durev', 'nl', true, { preventDefault() {}, stopPropagation() {} });
 		assert.equal(window.pageYOffset, 640);
 		assert.ok(scrollCalls.length >= 2);
@@ -708,6 +740,15 @@ async function smoke(section, name, run) {
 		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all']);
 		assert.equal(commandCount('--json inspect url-test'), 0);
 		assert.ok(toasts.some((toast) => toast.type === 'success' && /close the page/.test(toast.message)));
+	});
+
+	await smoke('VPN', 'renders and invokes router-side cancellation for a background GET check', async () => {
+		const page = makeVPN();
+		page.pageData[2] = { status: 'running', total: 3, done: 1 };
+		assert.match(treeText(page.renderContent()), /Stop check/);
+		await page.handleCancelHealthCheck();
+		commandSeen(['--json', 'inspect', 'health-check-cancel']);
+		assert.ok(toasts.some((toast) => toast.type === 'success' && /stopped/.test(toast.message)));
 	});
 
 	await smoke('VPN', 'queues a selected subscription without narrowing top-level auto mode', async () => {

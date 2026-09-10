@@ -137,6 +137,8 @@ function persistedObservation(value) {
 	if (!value || typeof value !== 'object')
 		return null;
 	var checkedAt = trim(value.last_checked_at);
+	if (!checkedAt)
+		return null;
 	var latency = positiveLatency(durationMilliseconds(value.last_latency));
 	var lastCheckFailed = Number(value.consecutive_failures || 0) > 0 || trim(value.last_failure_reason) !== '';
 	var healthy = checkedAt !== '' && value.healthy === true && !lastCheckFailed && latency != null;
@@ -155,6 +157,8 @@ function sessionObservation(value) {
 		return null;
 	var latency = positiveLatency(value.latency_ms);
 	var checkedAt = trim(value.checked_at);
+	if (!checkedAt)
+		return null;
 	var lastCheckFailed = value.healthy === false || Number(value.consecutive_failures || 0) > 0 || trim(value.last_failure_reason) !== '';
 	var healthy = value.healthy === true && !lastCheckFailed && latency != null;
 	var normalized = Object.assign({}, value, {
@@ -344,6 +348,7 @@ body:not(.modal-overlay-active) #modal_overlay:has(.fastlane-modal){display:none
 
 // Shared GET latency scale for the active connection and server rows.
 css += '.fastlane-root .fl-latency,.fastlane-root .fl-status-cell-latency{color:var(--fl-muted)}.fastlane-root .fl-latency-good{color:var(--fl-green)}.fastlane-root .fl-latency-mid{color:var(--fl-amber)}.fastlane-root .fl-latency-slow{color:var(--fl-orange,#f0a35a)}.fastlane-root .fl-latency-critical,.fastlane-root .fl-latency-bad{color:var(--fl-red)}';
+css += '.fl-more-menu[hidden]{display:none!important}.fl-busy-label{min-width:0}.fl-busy-action{flex:0 0 auto;margin-left:auto;min-height:38px;padding:7px 12px}';
 
 return view.extend({
 	load: function() {
@@ -360,6 +365,8 @@ return view.extend({
 		this.pings = this.readPings();
 		this.testingNodes = this.testingNodes || {};
 		this.activeMenuKey = '';
+		this.activeMenuElement = null;
+		this.pendingBackgroundRender = false;
 		this.batchTesting = false;
 		this.batchDone = 0;
 		this.batchTotal = 0;
@@ -517,7 +524,15 @@ return view.extend({
 			if (this.busy || this.backgroundRefreshPromise)
 				return Promise.resolve();
 			this.backgroundRefreshPromise = this.fetchData()
-				.then(L.bind(function() { this.update(); }, this))
+				.then(L.bind(function() {
+					if (this.dataFingerprint() === this.lastRenderedDataFingerprint)
+						return;
+					if (this.activeMenuKey) {
+						this.pendingBackgroundRender = true;
+						return;
+					}
+					this.updatePreservingScroll();
+				}, this))
 				.finally(L.bind(function() { this.backgroundRefreshPromise = null; }, this));
 			return this.backgroundRefreshPromise;
 		}, this);
@@ -546,23 +561,58 @@ return view.extend({
 
 	update: function() {
 		var target = document.getElementById('fastlane-content');
-		if (target)
+		if (target) {
 			dom.content(target, this.renderContent());
+			this.activeMenuElement = null;
+			this.pendingBackgroundRender = false;
+			this.lastRenderedDataFingerprint = this.dataFingerprint();
+		}
+	},
+
+	dataFingerprint: function() {
+		try {
+			return JSON.stringify([ this.pageData || [], this.pings || {}, this.fetchErrors || {} ]);
+		}
+		catch (err) {
+			return '';
+		}
 	},
 
 	captureScrollPosition: function() {
 		var root = document.documentElement || {};
 		var body = document.body || {};
+		var elements = [];
+		var seen = [];
+		var current = document.getElementById('fastlane-content');
+		while (current) {
+			if (seen.indexOf(current) < 0 && (Number(current.scrollTop) || Number(current.scrollLeft))) {
+				seen.push(current);
+				elements.push({ element: current, top: Number(current.scrollTop) || 0, left: Number(current.scrollLeft) || 0 });
+			}
+			current = current.parentElement || current.parentNode;
+		}
+		var scrollingElement = document.scrollingElement;
+		if (scrollingElement && seen.indexOf(scrollingElement) < 0 && (Number(scrollingElement.scrollTop) || Number(scrollingElement.scrollLeft)))
+			elements.push({ element: scrollingElement, top: Number(scrollingElement.scrollTop) || 0, left: Number(scrollingElement.scrollLeft) || 0 });
 		return {
 			x: Number(window.pageXOffset || window.scrollX || root.scrollLeft || body.scrollLeft || 0),
-			y: Number(window.pageYOffset || window.scrollY || root.scrollTop || body.scrollTop || 0)
+			y: Number(window.pageYOffset || window.scrollY || root.scrollTop || body.scrollTop || 0),
+			elements: elements
 		};
 	},
 
 	restoreScrollPosition: function(position) {
 		if (!position || typeof window.scrollTo !== 'function')
 			return;
-		var restore = function() { window.scrollTo(position.x, position.y); };
+		var restore = function() {
+			window.scrollTo(position.x, position.y);
+			(position.elements || []).forEach(function(saved) {
+				if (!saved.element)
+					return;
+				saved.element.scrollTop = saved.top;
+				saved.element.scrollLeft = saved.left;
+			});
+		};
 		restore();
 		if (typeof window.requestAnimationFrame === 'function')
 			window.requestAnimationFrame(restore);
@@ -616,10 +666,49 @@ return view.extend({
 		this.update();
 	},
 
+	setServerMenuElementOpen: function(element, open) {
+		if (!element)
+			return;
+		if (element.classList) {
+			if (open) element.classList.add('fl-more-open');
+			else element.classList.remove('fl-more-open');
+		}
+		var toggle = element.querySelector ? element.querySelector('.fl-more-toggle') : null;
+		var menu = element.querySelector ? element.querySelector('.fl-more-menu') : null;
+		if (toggle && toggle.setAttribute)
+			toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+		if (menu) {
+			menu.hidden = !open;
+			if (open && menu.removeAttribute)
+				menu.removeAttribute('hidden');
+			else if (!open && menu.setAttribute)
+				menu.setAttribute('hidden', 'hidden');
+		}
+	},
+
+	closeServerMenu: function() {
+		var element = this.activeMenuElement;
+		if (!element && document.querySelector)
+			element = document.querySelector('#fastlane-content .fl-more-open');
+		this.setServerMenuElementOpen(element, false);
+		this.activeMenuElement = null;
+		this.activeMenuKey = '';
+	},
+
 	handleServerMenuToggle: function(key, ev) {
 		if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-		this.activeMenuKey = this.activeMenuKey === key ? '' : key;
-		this.updatePreservingScroll();
+		var shouldOpen = this.activeMenuKey !== key;
+		this.closeServerMenu();
+		if (!shouldOpen) {
+			if (this.pendingBackgroundRender)
+				this.updatePreservingScroll();
+			return;
+		}
+		var target = ev && ev.currentTarget;
+		var element = target && target.closest ? target.closest('.fl-more') : (target && target.parentNode);
+		this.activeMenuKey = key;
+		this.activeMenuElement = element || null;
+		this.setServerMenuElementOpen(element, true);
 	},
 
 	handleDocumentClick: function(ev) {
@@ -628,8 +717,11 @@ return view.extend({
 		var target = ev && ev.target;
 		if (target && target.closest && target.closest('.fl-more'))
 			return;
-		this.activeMenuKey = '';
-		this.updatePreservingScroll();
+		this.closeServerMenu();
+		if (this.pendingBackgroundRender) {
+			this.pendingBackgroundRender = false;
+			this.updatePreservingScroll();
+		}
 	},
 
 	renderError: function(key, value, fallback, retry) {
@@ -836,6 +928,15 @@ return view.extend({
 			_('Queuing GET check…'),
 			this.execJSON([ '--json', 'inspect', 'health-check', '--subscription', scope ]),
 			_('Background GET check started. You can close the page.')
+		);
+	},
+
+	handleCancelHealthCheck: function(ev) {
+		if (ev) ev.preventDefault();
+		return this.runAction(
+			_('Stopping background check…'),
+			this.execJSON([ '--json', 'inspect', 'health-check-cancel' ]),
+			_('Background GET check stopped.')
 		);
 	},
 
@@ -1217,14 +1318,14 @@ return view.extend({
 				E('td', { class: 'fl-meta-cell', 'data-label': _('Protocol') }, [ E('span', { class: 'fl-protocol' }, [ trim(row.node.protocol) || '—' ]) ]),
 				E('td', { class: 'fl-meta-cell', 'data-label': _('Ping (GET)') }, [ testing ? E('span', { class: 'fl-testing-label' }, [ E('span', { class: 'fl-inline-loader' }), _('Checking') ]) : E('span', { class: 'fl-latency ' + this.latencyClass(row.latency, row.observed), title: (slow ? _('The server is available, but latency is very high.') + ' ' : '') + (row.observed.url || _('HTTPS GET through this server, bypassing the active VPN')) }, [ formatLatency(row.latency) ]) ]),
 				E('td', { class: 'fl-meta-cell fl-meta-status', 'data-label': _('Status') }, [ E('span', { class: 'fl-node-status ' + (active && !unavailable ? 'fl-node-status-active' : '') + (unavailable ? ' fl-node-status-bad' : '') + (expired ? ' fl-node-status-expired' : '') }, [ testing ? E('span', { class: 'fl-inline-loader' }) : E('span', { class: 'fl-node-status-dot' }), statusText ]) ]),
-				E('td', { class: 'fl-actions-cell', 'data-label': _('Actions') }, [ expired ? '' : E('div', { class: 'fl-more' + (this.activeMenuKey === actionKey ? ' fl-more-open' : '') }, [
+				E('td', { class: 'fl-actions-cell', 'data-label': _('Actions') }, [ expired ? '' : E('div', { class: 'fl-more' + (this.activeMenuKey === actionKey ? ' fl-more-open' : ''), 'data-menu-key': actionKey }, [
 					E('button', { type: 'button', class: 'fl-more-toggle', 'aria-label': _('Server actions'), 'aria-haspopup': 'menu', 'aria-expanded': this.activeMenuKey === actionKey ? 'true' : 'false', click: ui.createHandlerFn(this, 'handleServerMenuToggle', actionKey) }),
-					this.activeMenuKey === actionKey ? E('div', { class: 'fl-more-menu', role: 'menu', click: function(ev) { ev.stopPropagation(); } }, [
+					E('div', { class: 'fl-more-menu', role: 'menu', hidden: this.activeMenuKey === actionKey ? null : 'hidden', click: function(ev) { ev.stopPropagation(); } }, [
 						row.hidden ? E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, false) }, [ _('Restore') ]) : E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id) }, [ active && state.mode === 'manual' ? _('Pinned') : _('Connect') ]),
 						row.hidden ? '' : E('button', { class: 'fl-button', disabled: testing ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleURLTest', row.sub.id, row.node.id) }, [ testing ? _('Checking…') : _('Check ping (GET)') ]),
 						row.hidden ? '' : E('button', { class: 'fl-button fl-button-warning', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, true) }, [ _('Hide') ]),
 						row.sub.id === 'server-list' ? E('button', { class: 'fl-button fl-button-danger', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRemoveServer', row.sub.id, row.node.id) }, [ _('Remove server') ]) : ''
-					]) : ''
+					])
 				]) ])
 			);
 			var rowAttrs = { class: (active ? 'fl-active-row ' : '') + (row.hidden ? 'fl-hidden-row ' : '') + (expired ? 'fl-expired-row' : ''), 'aria-current': active ? 'true' : null };
@@ -1272,16 +1373,22 @@ return view.extend({
 			this.toastErrors[errorKey] = true;
 		}
 		var background = this.backgroundCheck();
-		var backgroundActive = background.status === 'queued' || background.status === 'running';
+		var backgroundActive = background.status === 'queued' || background.status === 'running' || background.status === 'cancelling';
 		var backgroundLabel = background.status === 'queued'
 			? _('GET check queued on the router…')
-			: _('The router is checking servers in the background') + (Number(background.total) > 0 ? ': ' + Number(background.done || 0) + ' / ' + Number(background.total) : '') + '…';
+			: (background.status === 'cancelling'
+				? _('Stopping background check…')
+				: _('The router is checking servers in the background') + (Number(background.total) > 0 ? ': ' + Number(background.done || 0) + ' / ' + Number(background.total) : '') + '…');
 		return E('div', {}, [
 			fastlaneShell.renderHeader('vpn'),
 			E('main', { class: 'fl-shell' }, [
 			this.renderStatus(),
 			this.busy ? E('div', { class: 'fl-busy', role: 'status', 'aria-live': 'polite' }, [ this.busy ]) : '',
-			backgroundActive ? E('div', { class: 'fl-busy', role: 'status', 'aria-live': 'polite' }, [ E('span', { class: 'fl-inline-loader' }), backgroundLabel ]) : '',
+			backgroundActive ? E('div', { class: 'fl-busy', role: 'status', 'aria-live': 'polite' }, [
+				E('span', { class: 'fl-inline-loader' }),
+				E('span', { class: 'fl-busy-label' }, [ backgroundLabel ]),
+				E('button', { class: 'fl-button fl-button-warning fl-busy-action', disabled: this.busy || background.status === 'cancelling' ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleCancelHealthCheck') }, [ _('Stop check') ])
+			]) : '',
 			selectedExpired ? E('div', { class: 'fl-expired-note' }, [ _('This subscription has expired. Its servers remain viewable but are excluded from updates, GET checks, and automatic selection.') ]) : '',
 			E('section', { class: 'fl-sourcebar', 'aria-label': _('Server sources') }, [
 				E('div', { class: 'fl-tabs', role: 'tablist', 'aria-label': _('Server sources') }, this.renderTabs()),
@@ -1311,7 +1418,9 @@ return view.extend({
 
 	render: function(data) {
 		this.pageData = data;
-		return E('div', { class: 'fastlane-root' }, [ E('style', {}, [ css ]), fastlaneShell.renderStyles(), E('div', { id: 'fastlane-content' }, [ this.renderContent() ]) ]);
+		var content = this.renderContent();
+		this.lastRenderedDataFingerprint = this.dataFingerprint();
+		return E('div', { class: 'fastlane-root' }, [ E('style', {}, [ css ]), fastlaneShell.renderStyles(), E('div', { id: 'fastlane-content' }, [ content ]) ]);
 	},
 
 	handleSave: null,

@@ -232,7 +232,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		SchemaVersion:       11,
 		RefreshInterval:     NewDuration(time.Hour),
-		HealthCheckInterval: NewDuration(5 * time.Minute),
+		HealthCheckInterval: NewDuration(30 * time.Minute),
 		URLTestURL:          "https://www.gstatic.com/generate_204",
 		URLTestTimeout:      NewDuration(5 * time.Second),
 		SwitchCooldown:      NewDuration(5 * time.Minute),

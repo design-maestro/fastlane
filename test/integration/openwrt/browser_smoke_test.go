@@ -201,6 +201,120 @@ func (h *openWRTHarness) AssertLuCIVPNToolbarLayout(ctx context.Context) error {
 	return nil
 }
 
+type vpnMenuScrollSnapshot struct {
+	WindowY     float64 `json:"windowY"`
+	DocumentTop float64 `json:"documentTop"`
+	ButtonTop   float64 `json:"buttonTop"`
+	MenuVisible bool    `json:"menuVisible"`
+}
+
+func (h *openWRTHarness) AssertLuCIVPNMenuKeepsScrollPosition(ctx context.Context) error {
+	var before, after vpnMenuScrollSnapshot
+	openMenu := `(() => {
+		const panel = document.querySelector('.fl-server-panel');
+		const button = document.querySelector('.fl-more-toggle');
+		if (!panel || !button) return {};
+		panel.style.marginTop = '1200px';
+		button.scrollIntoView({ block: 'center' });
+		const documentTop = document.scrollingElement ? document.scrollingElement.scrollTop : 0;
+		const snapshot = {
+			windowY: window.scrollY || window.pageYOffset || 0,
+			documentTop,
+			buttonTop: button.getBoundingClientRect().top,
+			menuVisible: false
+		};
+		button.click();
+		return snapshot;
+	})()`
+	afterPoll := `(() => {
+		const button = document.querySelector('.fl-more-toggle');
+		const menu = button && button.closest('.fl-more') && button.closest('.fl-more').querySelector('.fl-more-menu');
+		return {
+			windowY: window.scrollY || window.pageYOffset || 0,
+			documentTop: document.scrollingElement ? document.scrollingElement.scrollTop : 0,
+			buttonTop: button ? button.getBoundingClientRect().top : 0,
+			menuVisible: !!menu && !menu.hidden && getComputedStyle(menu).display !== 'none'
+		};
+	})()`
+	err := h.assertLuCIPageWithActions(ctx, luciVPNPage, []string{"OpenWrt Integration"},
+		chromedp.EmulateViewport(1024, 900),
+		chromedp.Evaluate(openMenu, &before),
+		// Cross the five-second UI polling boundary: unchanged background data
+		// must not rebuild the table or close/move its open action menu.
+		chromedp.Sleep(6*time.Second),
+		chromedp.Evaluate(afterPoll, &after),
+	)
+	if err != nil {
+		return err
+	}
+	if before.WindowY <= 0 && before.DocumentTop <= 0 {
+		return fmt.Errorf("VPN menu scroll smoke did not reach a non-zero scroll position: %+v", before)
+	}
+	if !after.MenuVisible {
+		return fmt.Errorf("VPN action menu closed during background polling: before=%+v after=%+v", before, after)
+	}
+	if difference := before.WindowY - after.WindowY; difference < -1 || difference > 1 {
+		return fmt.Errorf("VPN action menu changed window scroll position: before=%+v after=%+v", before, after)
+	}
+	if difference := before.DocumentTop - after.DocumentTop; difference < -1 || difference > 1 {
+		return fmt.Errorf("VPN action menu changed document scroll position: before=%+v after=%+v", before, after)
+	}
+	if difference := before.ButtonTop - after.ButtonTop; difference < -1 || difference > 1 {
+		return fmt.Errorf("VPN action menu moved its trigger: before=%+v after=%+v", before, after)
+	}
+	return nil
+}
+
+func (h *openWRTHarness) AssertLuCIVPNCanCancelBackgroundCheck(ctx context.Context, subscriptionID string) error {
+	if _, err := h.sshOutput(ctx, fastlaneRemoteBinary+" settings set url-test-timeout 30s"); err != nil {
+		return fmt.Errorf("extend URL-test timeout for cancellation smoke: %w", err)
+	}
+	defer func() {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = h.sshOutput(restoreCtx, fastlaneRemoteBinary+" settings set url-test-timeout 5s")
+	}()
+	if _, err := h.sshOutput(ctx, fastlaneRemoteBinary+" --json inspect health-check --subscription "+shellQuote(subscriptionID)); err != nil {
+		return fmt.Errorf("queue cancellable background check: %w", err)
+	}
+
+	var clicked bool
+	err := h.assertLuCIPageWithActions(ctx, luciVPNPage, []string{"OpenWrt Integration"},
+		chromedp.WaitVisible(`.fl-busy-action`, chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const button = document.querySelector('.fl-busy-action');
+			if (!button || button.disabled) return false;
+			button.click();
+			return true;
+		})()`, &clicked),
+		chromedp.Sleep(time.Second),
+	)
+	if err != nil {
+		return err
+	}
+	if !clicked {
+		return fmt.Errorf("VPN page did not expose an enabled background-check stop button")
+	}
+
+	verifyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		output, err := h.sshOutput(verifyCtx, fastlaneRemoteBinary+" --json inspect health-check-status")
+		if err == nil {
+			var progress struct {
+				Status string `json:"status"`
+			}
+			if json.Unmarshal(output, &progress) == nil && progress.Status == "cancelled" {
+				return nil
+			}
+		}
+		if verifyCtx.Err() != nil {
+			return fmt.Errorf("background health check did not reach cancelled state: %w", verifyCtx.Err())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func (h *openWRTHarness) AssertLuCIRoutingHAPPPreview(ctx context.Context) error {
 	var submitted bool
 	var preview string

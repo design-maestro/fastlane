@@ -110,6 +110,14 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 	if err := harness.AssertLuCIVPNPage(ctx, "OpenWrt Integration", "VLESS", "Не проверен"); err != nil {
 		t.Fatalf("browser smoke VPN populated state: %v", err)
 	}
+	if err := harness.AssertLuCIVPNMenuKeepsScrollPosition(ctx); err != nil {
+		t.Fatalf("browser smoke VPN action menu scroll stability: %v", err)
+	}
+	t.Log("LuCI VPN action menu stayed open at the same scroll position across polling")
+	if err := harness.AssertLuCIVPNCanCancelBackgroundCheck(ctx, subID); err != nil {
+		t.Fatalf("browser smoke VPN background-check cancellation: %v", err)
+	}
+	t.Log("LuCI VPN background health check cancelled on the router")
 	if err := harness.SetStrictEgressCheckViaLuCI(ctx, false); err != nil {
 		t.Fatalf("disable strict egress check through LuCI for unroutable integration fixture: %v", err)
 	}

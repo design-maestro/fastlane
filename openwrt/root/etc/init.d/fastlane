@@ -18,7 +18,7 @@ migrate_health_runtime_files() {
 	fi
 	mkdir -p "${FASTLANE_RUNTIME_ROOT}"
 	chmod 700 "${FASTLANE_RUNTIME_ROOT}"
-	for file in health-check.request health-check-progress.json; do
+	for file in health-check.request health-check-progress.json health-check.cancel; do
 		source="${root}/${file}"
 		target="${FASTLANE_RUNTIME_ROOT}/${file}"
 		[ -f "${source}" ] || continue

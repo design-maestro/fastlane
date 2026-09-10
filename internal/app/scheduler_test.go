@@ -440,6 +440,35 @@ func TestSchedulerConnectionWatchSkipsWhileHealthPassIsRunning(t *testing.T) {
 	}
 }
 
+func TestSchedulerConnectionWatchBacksOffRepeatedRecoveryScans(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	scheduler := NewScheduler(nil)
+	scheduler.now = func() time.Time { return now }
+	scheduler.recoveryRetryEvery = 5 * time.Minute
+	scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
+		return true, "still unavailable", nil
+	}
+	healthCalls := 0
+	scheduler.healthCheck = func(context.Context) {
+		healthCalls++
+	}
+
+	scheduler.runConnectionWatchOnce(context.Background())
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
+	if healthCalls != 1 {
+		t.Fatalf("recovery scan repeated before cooldown: %d", healthCalls)
+	}
+
+	now = now.Add(5 * time.Minute)
+	scheduler.runConnectionWatchOnce(context.Background())
+	if healthCalls != 2 {
+		t.Fatalf("recovery scan did not resume after cooldown: %d", healthCalls)
+	}
+}
+
 func TestSchedulerRefreshLoopPicksUpSubMinuteGlobalInterval(t *testing.T) {
 	fileStore := storepkg.NewFileStore(t.TempDir())
 	settings := domain.DefaultSettings()
