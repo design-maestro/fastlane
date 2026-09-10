@@ -440,6 +440,28 @@ func TestLoadSettingsPreservesAutoExcludedNodesForCurrentSchema(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsPreservesAutoHideKeywordsForCurrentSchema(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	fileStore := store.NewFileStore(root)
+	settingsJSON := `{
+  "schema_version": 11,
+  "auto_hide_keywords": [" LTE ", "lte", "Россия"]
+}`
+	if err := os.WriteFile(filepath.Join(root, "settings.json"), []byte(settingsJSON), 0o644); err != nil {
+		t.Fatalf("write settings file: %v", err)
+	}
+
+	settings, err := fileStore.LoadSettings()
+	if err != nil {
+		t.Fatalf("load settings: %v", err)
+	}
+	if want := []string{"LTE", "Россия"}; !reflect.DeepEqual(settings.AutoHideKeywords, want) {
+		t.Fatalf("unexpected auto hide keywords: want=%v got=%v", want, settings.AutoHideKeywords)
+	}
+}
+
 func TestLoadSettingsMigratesRussiaDirectToCountryRouting(t *testing.T) {
 	t.Parallel()
 

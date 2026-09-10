@@ -99,7 +99,7 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 	if err := harness.AssertLuCIRoutingHAPPPreview(ctx); err != nil {
 		t.Fatalf("browser smoke routing HAPP preview: %v", err)
 	}
-	if err := harness.AssertLuCISettingsPage(ctx, "Fast Lane", "Настройки Fast Lane", "Подписки и проверки", "Автовыбор", "Адрес URL-теста", "Строгая проверка интернета", "Сохранить"); err != nil {
+	if err := harness.AssertLuCISettingsPage(ctx, "Fast Lane", "Настройки Fast Lane", "Подписки и проверки", "Автовыбор", "Адрес URL-теста", "Строгая проверка интернета", "Скрывать по ключевым словам", "Сохранить"); err != nil {
 		t.Fatalf("browser smoke settings page: %v", err)
 	}
 

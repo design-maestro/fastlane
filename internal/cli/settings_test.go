@@ -79,7 +79,7 @@ func TestSettingsGetIncludesURLTestContract(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute settings get: %v", err)
 	}
-	for _, want := range []string{"url-test-url=https://", "url-test-timeout=5s", "strict-egress-check=true"} {
+	for _, want := range []string{"url-test-url=https://", "url-test-timeout=5s", "strict-egress-check=true", "auto-hide-keywords="} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("settings output missing %q:\n%s", want, stdout.String())
 		}

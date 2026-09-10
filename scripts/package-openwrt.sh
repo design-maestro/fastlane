@@ -99,10 +99,10 @@ cp "${ROOT_DIR}/luci-app-fastlane/htdocs/luci-static/resources/fastlane/"*.js \
 cp "${ROOT_DIR}/luci-app-fastlane/htdocs/luci-static/resources/fastlane/assets/"*.png \
 	"${DATA_DIR}/www/luci-static/resources/fastlane/assets/"
 for view_name in \
-	vpn.js vpn-20260910-menu-v25.js \
+	vpn.js vpn-20260910-hide-keywords-v26.js \
 	routing.js routing-20260906-v5.js \
 	diagnostics.js diagnostics-20260904-v3.js \
-	settings.js settings-20260907-duration-v7.js
+	settings.js settings-20260910-hide-keywords-v8.js
 do
 	cp "${ROOT_DIR}/luci-app-fastlane/htdocs/luci-static/resources/view/fastlane/${view_name}" \
 		"${DATA_DIR}/www/luci-static/resources/view/fastlane/${view_name}"

@@ -11,6 +11,17 @@ var binary = '/usr/bin/fastlane';
 // Long-running release operations belong to the router, not this view.
 var uninstaller = '/usr/libexec/fastlane-uninstall';
 function trim(value) { return value == null ? '' : String(value).trim(); }
+function normalizeAutoHideKeywords(values) {
+	var seen = {};
+	return (Array.isArray(values) ? values : []).map(function(value) {
+		return trim(value).replace(/\s+/g, ' ');
+	}).filter(function(value) {
+		var key = value.toLocaleLowerCase();
+		if (!key || seen[key]) return false;
+		seen[key] = true;
+		return true;
+	});
+}
 function normalizeDuration(value) { return trim(value).replace(/\s+/g, ''); }
 function durationMilliseconds(value) {
 	var normalized = normalizeDuration(value);
@@ -53,7 +64,7 @@ function durationUnitLabel(unit) {
 }
 
 var css = `
-.fastlane-settings{--panel:var(--fl-panel);--line:var(--fl-line);--text:var(--fl-text);--muted:var(--fl-muted);--blue:var(--fl-green-dim);background:transparent;color:var(--text);min-height:680px;font-family:inherit}.fastlane-settings *{box-sizing:border-box}.fls-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px}.fls-head h2{margin:0;font-size:24px}.fls-head p{margin:4px 0 0;color:var(--muted)}.fls-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.fls-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px}.fls-card h3{margin:0 0 5px;font-size:17px}.fls-card>p{margin:0 0 16px;color:var(--muted);font-size:12px;line-height:1.45}.fls-fields{display:grid;gap:13px}.fls-field{display:grid;grid-template-columns:minmax(180px,1fr) minmax(170px,240px);gap:16px;align-items:center}.fls-field-toggle{align-items:center}.fls-field label{font-weight:700}.fls-hint{display:block;color:var(--muted);font-weight:400;font-size:11px;margin-top:3px}.fls-input{width:100%;height:44px!important;border:1px solid var(--line)!important;background:#050d10!important;color:var(--text)!important;border-radius:11px!important;padding:9px 11px!important}.fls-select{appearance:auto}.fls-duration{display:flex;align-items:center;gap:12px;width:100%;height:44px;border:1px solid var(--line);background:#050d10;color:var(--text);border-radius:11px;padding:9px 11px;cursor:text}.fls-duration-segment{display:inline-flex;align-items:baseline;gap:3px}.fls-duration-input{position:static!important;top:auto!important;left:auto!important;width:4ch!important;height:auto!important;margin:0!important;border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;color:var(--text)!important;font:inherit!important;font-variant-numeric:tabular-nums;text-align:right;outline:0!important;box-shadow:none!important}.fls-duration-unit{color:var(--muted);font-weight:600;pointer-events:none}.fls-toggle{display:inline-flex;align-items:center;justify-content:flex-end;gap:10px;min-height:22px;white-space:nowrap;line-height:22px}.fls-field-toggle>.fls-toggle{min-height:22px;padding-top:0}.fls-toggle input{position:static!important;top:auto!important;left:auto!important;width:22px!important;height:22px!important;margin:0!important;flex:0 0 auto;vertical-align:middle!important}.fls-toggle span{display:block;line-height:22px}.fls-actions{display:flex;gap:8px;flex-wrap:wrap}.fls-button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;border:1px solid var(--line);background:#0d1c21;color:var(--text);border-radius:11px;padding:10px 14px;font-weight:750;cursor:pointer;text-decoration:none}.fls-button:focus-visible,.fls-input:focus-visible,.fls-toggle input:focus-visible{outline:2px solid var(--fl-green);outline-offset:3px}.fls-duration:focus-within{border-color:var(--fl-green);outline:2px solid var(--fl-green);outline-offset:3px}.fls-button:disabled{opacity:.48;cursor:not-allowed}.fls-primary{background:var(--blue);border-color:var(--blue)}.fls-danger{color:var(--fl-red);border-color:color-mix(in srgb,var(--fl-red) 55%,var(--line))}.fls-manage{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:18px}.fls-manage-copy{min-width:0}.fls-manage-copy p{margin:5px 0 0;color:var(--muted);font-size:12px;line-height:1.45}.fls-manage-actions{display:flex;gap:10px;flex:0 0 auto}.fls-geo{display:grid;gap:12px}.fls-geo-status{border:1px solid var(--fl-line-strong);border-radius:13px;padding:14px;color:var(--muted);font-size:12px;line-height:1.5}.fls-ready{color:var(--fl-green);border-color:#245c4a}.fls-geo-actions{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}@media(max-width:850px){.fls-head{align-items:flex-start;flex-direction:column}.fls-grid{grid-template-columns:1fr}.fls-field{grid-template-columns:1fr}.fls-toggle{justify-content:flex-start}.fls-manage{align-items:stretch;flex-direction:column}.fls-manage-actions{flex-direction:column}.fls-manage-actions .fls-button{width:100%}}
+.fastlane-settings{--panel:var(--fl-panel);--line:var(--fl-line);--text:var(--fl-text);--muted:var(--fl-muted);--blue:var(--fl-green-dim);background:transparent;color:var(--text);min-height:680px;font-family:inherit}.fastlane-settings *{box-sizing:border-box}.fls-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px}.fls-head h2{margin:0;font-size:24px}.fls-head p{margin:4px 0 0;color:var(--muted)}.fls-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.fls-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px}.fls-card h3{margin:0 0 5px;font-size:17px}.fls-card>p{margin:0 0 16px;color:var(--muted);font-size:12px;line-height:1.45}.fls-fields{display:grid;gap:13px}.fls-field{display:grid;grid-template-columns:minmax(180px,1fr) minmax(170px,240px);gap:16px;align-items:center}.fls-field-toggle{align-items:center}.fls-field label{font-weight:700}.fls-hint{display:block;color:var(--muted);font-weight:400;font-size:11px;margin-top:3px}.fls-input{width:100%;height:44px!important;border:1px solid var(--line)!important;background:#050d10!important;color:var(--text)!important;border-radius:11px!important;padding:9px 11px!important}.fls-select{appearance:auto}.fls-duration{display:flex;align-items:center;gap:12px;width:100%;height:44px;border:1px solid var(--line);background:#050d10;color:var(--text);border-radius:11px;padding:9px 11px;cursor:text}.fls-duration-segment{display:inline-flex;align-items:baseline;gap:3px}.fls-duration-input{position:static!important;top:auto!important;left:auto!important;width:4ch!important;height:auto!important;margin:0!important;border:0!important;border-radius:0!important;padding:0!important;background:transparent!important;color:var(--text)!important;font:inherit!important;font-variant-numeric:tabular-nums;text-align:right;outline:0!important;box-shadow:none!important}.fls-duration-unit{color:var(--muted);font-weight:600;pointer-events:none}.fls-toggle{display:inline-flex;align-items:center;justify-content:flex-end;gap:10px;min-height:22px;white-space:nowrap;line-height:22px}.fls-field-toggle>.fls-toggle{min-height:22px;padding-top:0}.fls-toggle input{position:static!important;top:auto!important;left:auto!important;width:22px!important;height:22px!important;margin:0!important;flex:0 0 auto;vertical-align:middle!important}.fls-toggle span{display:block;line-height:22px}.fls-keyword-field{align-items:start}.fls-keyword-field>label{padding-top:11px}.fls-keyword-control{display:grid;gap:9px;min-width:0}.fls-chip-list{display:flex;flex-wrap:wrap;gap:7px}.fls-chip{display:inline-flex;align-items:center;gap:7px;max-width:100%;min-height:32px;padding:4px 5px 4px 10px;border:1px solid color-mix(in srgb,var(--fl-green) 38%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--fl-green) 10%,#050d10);color:var(--text);font-size:12px;font-weight:650}.fls-chip-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fls-chip-remove{display:grid;place-items:center;width:24px;height:24px;margin:0;border:0;border-radius:50%;padding:0;background:transparent;color:var(--muted);font:18px/1 inherit;cursor:pointer}.fls-chip-remove:hover{background:rgba(255,255,255,.08);color:var(--text)}.fls-chip-remove:focus-visible{outline:2px solid var(--fl-green);outline-offset:1px}.fls-actions{display:flex;gap:8px;flex-wrap:wrap}.fls-button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;border:1px solid var(--line);background:#0d1c21;color:var(--text);border-radius:11px;padding:10px 14px;font-weight:750;cursor:pointer;text-decoration:none}.fls-button:focus-visible,.fls-input:focus-visible,.fls-toggle input:focus-visible{outline:2px solid var(--fl-green);outline-offset:3px}.fls-duration:focus-within{border-color:var(--fl-green);outline:2px solid var(--fl-green);outline-offset:3px}.fls-button:disabled{opacity:.48;cursor:not-allowed}.fls-primary{background:var(--blue);border-color:var(--blue)}.fls-danger{color:var(--fl-red);border-color:color-mix(in srgb,var(--fl-red) 55%,var(--line))}.fls-manage{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:18px}.fls-manage-copy{min-width:0}.fls-manage-copy p{margin:5px 0 0;color:var(--muted);font-size:12px;line-height:1.45}.fls-manage-actions{display:flex;gap:10px;flex:0 0 auto}.fls-geo{display:grid;gap:12px}.fls-geo-status{border:1px solid var(--fl-line-strong);border-radius:13px;padding:14px;color:var(--muted);font-size:12px;line-height:1.5}.fls-ready{color:var(--fl-green);border-color:#245c4a}.fls-geo-actions{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}@media(max-width:850px){.fls-head{align-items:flex-start;flex-direction:column}.fls-grid{grid-template-columns:1fr}.fls-field{grid-template-columns:1fr}.fls-keyword-field>label{padding-top:0}.fls-toggle{justify-content:flex-start}.fls-manage{align-items:stretch;flex-direction:column}.fls-manage-actions{flex-direction:column}.fls-manage-actions .fls-button{width:100%}}
 `;
 
 css += '.fls-update{align-items:flex-start}.fls-update .fls-manage-copy{flex:1}.fls-update-actions{flex-wrap:wrap;justify-content:flex-end;max-width:52%}.fls-update .fls-primary{color:var(--fl-bg)}@media(max-width:850px){.fls-update{align-items:stretch}.fls-update-actions{width:100%;max-width:none;justify-content:flex-start}}';
@@ -163,6 +174,71 @@ return view.extend({
 		if (label) label.textContent = this.draft[key] ? _('On') : _('Off');
 	},
 
+	autoHideKeywords: function() {
+		return normalizeAutoHideKeywords(this.draft && this.draft.auto_hide_keywords);
+	},
+
+	renderAutoHideKeywordChips: function() {
+		return this.autoHideKeywords().map(L.bind(function(keyword) {
+			return E('span', { class: 'fls-chip' }, [
+				E('span', { class: 'fls-chip-text', title: keyword }, [ keyword ]),
+				E('button', { type: 'button', class: 'fls-chip-remove', disabled: this.keywordSaving ? 'disabled' : null, 'aria-label': _('Remove hide rule') + ': ' + keyword, click: ui.createHandlerFn(this, 'handleAutoHideKeywordRemove', keyword) }, [ '×' ])
+			]);
+		}, this));
+	},
+
+	syncAutoHideKeywordControls: function() {
+		if (this.keywordInput) this.keywordInput.disabled = !!this.keywordSaving;
+		if (this.keywordList) dom.content(this.keywordList, this.renderAutoHideKeywordChips());
+	},
+
+	persistAutoHideKeywords: function(values, previous) {
+		values = normalizeAutoHideKeywords(values);
+		previous = normalizeAutoHideKeywords(previous);
+		this.draft.auto_hide_keywords = values.slice();
+		this.keywordSaving = true;
+		this.setSaving(true);
+		this.syncAutoHideKeywordControls();
+		return this.execJSON([ '--json', 'settings', 'set', 'auto.hide-keywords', values.join('\n') ]).then(L.bind(function(settings) {
+			var saved = normalizeAutoHideKeywords(settings && settings.auto_hide_keywords);
+			this.settings.auto_hide_keywords = saved.slice();
+			this.draft.auto_hide_keywords = saved.slice();
+			fastlaneShell.showToast(_('Server hide rules updated.'), 'success');
+		}, this)).catch(L.bind(function(err) {
+			this.settings.auto_hide_keywords = previous.slice();
+			this.draft.auto_hide_keywords = previous.slice();
+			fastlaneShell.showToast(_('Could not update server hide rules.'), 'error', err.message || String(err));
+		}, this)).then(L.bind(function() {
+			this.keywordSaving = false;
+			this.setSaving(false);
+			this.syncAutoHideKeywordControls();
+		}, this));
+	},
+
+	handleAutoHideKeywordKeydown: function(ev) {
+		if (!ev || ev.key !== 'Enter') return Promise.resolve();
+		ev.preventDefault();
+		if (this.keywordSaving || this.saving) return Promise.resolve();
+		var keyword = trim(ev.target && ev.target.value).replace(/\s+/g, ' ');
+		if (!keyword) return Promise.resolve();
+		var previous = this.autoHideKeywords();
+		var duplicate = previous.some(function(value) { return value.toLocaleLowerCase() === keyword.toLocaleLowerCase(); });
+		if (ev.target) ev.target.value = '';
+		if (duplicate) {
+			fastlaneShell.showToast(_('This hide rule already exists.'), 'info');
+			return Promise.resolve();
+		}
+		return this.persistAutoHideKeywords(previous.concat([ keyword ]), previous);
+	},
+
+	handleAutoHideKeywordRemove: function(keyword, ev) {
+		if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+		if (this.keywordSaving || this.saving) return Promise.resolve();
+		var previous = this.autoHideKeywords();
+		var lowered = trim(keyword).toLocaleLowerCase();
+		return this.persistAutoHideKeywords(previous.filter(function(value) { return value.toLocaleLowerCase() !== lowered; }), previous);
+	},
+
 	setSaving: function(saving) {
 		this.saving = !!saving;
 		if (!this.settingsRoot || !this.settingsRoot.querySelectorAll) return;
@@ -218,6 +294,7 @@ return view.extend({
 
 	handleSaveSettings: function(ev) {
 		if (ev) ev.preventDefault();
+		if (this.keywordSaving) return Promise.resolve();
 		if (this.updateRequest || (this.updateState && this.updateState.status === 'installing')) {
 			fastlaneShell.showToast(_('Wait for the installation to finish before saving settings.'), 'error');
 			return Promise.resolve();
@@ -277,6 +354,15 @@ return view.extend({
 		]);
 	},
 
+	autoHideKeywordField: function() {
+		this.keywordInput = E('input', { class: 'fls-input', type: 'text', maxlength: '64', placeholder: _('Type a word and press Enter'), disabled: this.keywordSaving ? 'disabled' : null, keydown: L.bind(this.handleAutoHideKeywordKeydown, this) });
+		this.keywordList = E('div', { class: 'fls-chip-list', 'aria-live': 'polite' }, this.renderAutoHideKeywordChips());
+		return E('div', { class: 'fls-field fls-keyword-field' }, [
+			E('label', {}, [ _('Hide by keywords'), E('span', { class: 'fls-hint' }, [ _('Matches server titles and subtitles. Rules apply immediately and remain after subscription updates.') ]) ]),
+			E('div', { class: 'fls-keyword-control' }, [ this.keywordInput, this.keywordList ])
+		]);
+	},
+
 	render: function(data) {
 		this.settings = this.settings || data || {};
 		this.draft = this.draft || Object.assign({}, this.settings);
@@ -302,7 +388,8 @@ return view.extend({
 				E('section', { class: 'fls-card' }, [ E('h3', {}, [ _('Automatic selection') ]), E('p', {}, [ _('Fast Lane avoids reconnecting for insignificant latency differences.') ]), E('div', { class: 'fls-fields' }, [
 					this.durationField('switch_cooldown', _('Pause between switches'), _('Prevents constant server hopping'), [ 'm', 's' ]),
 					this.durationField('latency_threshold', _('Minimum improvement'), _('How much faster a new server must be'), [ 'ms' ]),
-					E('div', { class: 'fls-field fls-field-toggle' }, [ E('label', {}, [ _('Strict internet check'), E('span', { class: 'fls-hint' }, [ _('Restore the previous server if HTTPS does not work after connecting') ]) ]), E('label', { class: 'fls-toggle' }, [ E('input', { type: 'checkbox', 'data-setting-key': 'strict_egress_check', checked: this.draft.strict_egress_check ? 'checked' : null, change: L.bind(this.handleBool, this, 'strict_egress_check') }), E('span', { 'data-toggle-label': 'strict_egress_check' }, [ this.draft.strict_egress_check ? _('On') : _('Off') ]) ]) ])
+					E('div', { class: 'fls-field fls-field-toggle' }, [ E('label', {}, [ _('Strict internet check'), E('span', { class: 'fls-hint' }, [ _('Restore the previous server if HTTPS does not work after connecting') ]) ]), E('label', { class: 'fls-toggle' }, [ E('input', { type: 'checkbox', 'data-setting-key': 'strict_egress_check', checked: this.draft.strict_egress_check ? 'checked' : null, change: L.bind(this.handleBool, this, 'strict_egress_check') }), E('span', { 'data-toggle-label': 'strict_egress_check' }, [ this.draft.strict_egress_check ? _('On') : _('Off') ]) ]) ]),
+					this.autoHideKeywordField()
 				]) ]),
 				E('section', { class: 'fls-card fls-manage' }, [
 					E('div', { class: 'fls-manage-copy' }, [ E('h3', {}, [ _('Interface language') ]), E('p', {}, [ _('Automatic follows the LuCI language. Other languages fall back to English.') ]) ]),
