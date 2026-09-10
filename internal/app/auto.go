@@ -88,6 +88,30 @@ func (s *Service) RunAutoFailover(ctx context.Context, failureReason string) err
 	if err != nil {
 		return err
 	}
+	if snapshot.state.Mode != domain.SelectionModeAuto {
+		return nil
+	}
+	return s.runAutoFailoverWithSnapshot(ctx, failureReason, snapshot)
+}
+
+// RunConnectionFailover recovers either selection mode without changing the
+// user's mode. Auto uses the cached fast path; manual pins the replacement.
+func (s *Service) RunConnectionFailover(ctx context.Context, failureReason string) error {
+	snapshot, err := s.captureAutoSelectionSnapshot()
+	if err != nil {
+		return err
+	}
+	switch snapshot.state.Mode {
+	case domain.SelectionModeAuto:
+		return s.runAutoFailoverWithSnapshot(ctx, failureReason, snapshot)
+	case domain.SelectionModeManual:
+		return s.runManualFailoverWithSnapshot(ctx, failureReason, snapshot)
+	default:
+		return nil
+	}
+}
+
+func (s *Service) runAutoFailoverWithSnapshot(ctx context.Context, failureReason string, snapshot autoSelectionSnapshot) error {
 	state := snapshot.state
 	if state.ZapretTest.Active || state.Mode != domain.SelectionModeAuto || state.ActiveSubscriptionID == "" {
 		return nil
@@ -142,10 +166,85 @@ func (s *Service) RunAutoFailover(ctx context.Context, failureReason string) err
 	})
 }
 
+func (s *Service) runManualFailoverWithSnapshot(ctx context.Context, failureReason string, snapshot autoSelectionSnapshot) error {
+	state := snapshot.state
+	if state.ZapretTest.Active || state.Mode != domain.SelectionModeManual || state.ActiveSubscriptionID == "" || state.ActiveNodeID == "" {
+		return nil
+	}
+	if failureReason == "" {
+		failureReason = "active manual route failed"
+	}
+
+	state.Health = cloneHealthMap(state.Health)
+	forceHealthFailure(
+		state.Health,
+		state.ActiveNodeID,
+		failureReason,
+		s.currentTime().UTC(),
+		switchPolicyFromSettings(snapshot.settings).FailureThreshold,
+	)
+	failoverSnapshot := snapshot
+	failoverSnapshot.state = state
+	failoverSnapshot.settings.AutoExcludedNodes = domain.NormalizeAutoExcludedNodes(append(
+		append([]string(nil), failoverSnapshot.settings.AutoExcludedNodes...),
+		domain.AutoExcludedNodeKey(state.ActiveSubscriptionID, state.ActiveNodeID),
+	))
+
+	prepared, err := s.prepareAutoSelectionWithProbes(ctx, autoScopeAll, failoverSnapshot, false)
+	if err != nil {
+		return err
+	}
+	if !prepared.decision.HasHealthyCandidate || prepared.decision.SelectedNode.ID == "" {
+		prepared, err = s.prepareAutoSelectionWithProbes(ctx, autoScopeAll, failoverSnapshot, true)
+		if err != nil {
+			return err
+		}
+	}
+	if !prepared.decision.HasHealthyCandidate || prepared.decision.SelectedNode.ID == "" || prepared.selectedSub.ID == "" {
+		return fmt.Errorf("no different healthy manual fallback is available")
+	}
+
+	return runStoreWriteLocked(s, func() error {
+		current, err := s.autoSelectionSnapshotCurrentLocked(snapshot)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return errAutoSelectionSnapshotChanged
+		}
+		if err := s.applyNodeSelection(ctx, prepared.selectedSub, prepared.decision.SelectedNode, domain.SelectionModeManual, selectionOptionsForState(snapshot.state)); err != nil {
+			return err
+		}
+		updated, err := s.store.LoadState()
+		if err != nil {
+			return fmt.Errorf("load manual failover state: %w", err)
+		}
+		updated.Health = prepared.decision.Health
+		updated.Mode = domain.SelectionModeManual
+		updated.AutoScope = ""
+		updated.LastSwitchAt = s.currentTime().UTC()
+		updated.LastFailureReason = failureReason
+		if err := s.saveState(updated); err != nil {
+			return fmt.Errorf("save manual failover state: %w", err)
+		}
+		return nil
+	})
+}
+
 // AutoRecoveryNeeded checks the live selected route without changing it. A
 // failed result is used by the daemon to trigger cached failover followed by a
 // full background reselection.
 func (s *Service) AutoRecoveryNeeded(ctx context.Context) (bool, string, error) {
+	return s.connectionRecoveryNeeded(ctx, false)
+}
+
+// ConnectionRecoveryNeeded checks both auto and manually pinned routes. Manual
+// mode is only allowed to move after the active route has actually failed.
+func (s *Service) ConnectionRecoveryNeeded(ctx context.Context) (bool, string, error) {
+	return s.connectionRecoveryNeeded(ctx, true)
+}
+
+func (s *Service) connectionRecoveryNeeded(ctx context.Context, includeManual bool) (bool, string, error) {
 	if s == nil || s.store == nil {
 		return false, "", fmt.Errorf("store is not configured")
 	}
@@ -153,11 +252,12 @@ func (s *Service) AutoRecoveryNeeded(ctx context.Context) (bool, string, error) 
 	if err != nil {
 		return false, "", fmt.Errorf("load state: %w", err)
 	}
-	if state.Mode != domain.SelectionModeAuto || state.ZapretTest.Active {
+	modeSupported := state.Mode == domain.SelectionModeAuto || (includeManual && state.Mode == domain.SelectionModeManual)
+	if !modeSupported || state.ZapretTest.Active {
 		return false, "", nil
 	}
 	if !state.Connected || state.ActiveSubscriptionID == "" || state.ActiveNodeID == "" {
-		return true, "auto route is disconnected", nil
+		return true, "active route is disconnected", nil
 	}
 	sub, err := s.subscriptionByID(state.ActiveSubscriptionID)
 	if err != nil {

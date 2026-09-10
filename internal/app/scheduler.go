@@ -193,10 +193,10 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 	if s.recoveryCheck != nil {
 		needed, reason, err = s.recoveryCheck(ctx)
 	} else if s.service != nil {
-		needed, reason, err = s.service.AutoRecoveryNeeded(ctx)
+		needed, reason, err = s.service.ConnectionRecoveryNeeded(ctx)
 	}
 	if err != nil {
-		s.logWarn("check active auto route", "error", err.Error())
+		s.logWarn("check active route", "error", err.Error())
 		return
 	}
 	if !needed {
@@ -208,19 +208,19 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 		return
 	}
 	s.lastRecoveryAt = now
-	s.logWarn("active auto route failed; starting cached failover", "reason", reason)
+	s.logWarn("active route failed; starting failover", "reason", reason)
 	failoverAttempted := false
 	if s.recoveryFailover != nil {
 		failoverAttempted = true
 		err = s.recoveryFailover(ctx, reason)
 	} else if s.service != nil {
 		failoverAttempted = true
-		err = s.service.RunAutoFailover(ctx, reason)
+		err = s.service.RunConnectionFailover(ctx, reason)
 	}
 	if err != nil {
-		s.logWarn("cached auto failover", "error", err.Error())
+		s.logWarn("connection failover", "error", err.Error())
 	}
-	s.logInfo("starting full auto health check after failover")
+	s.logInfo("starting post-failover health check")
 	healthCtx := ctx
 	if failoverAttempted && err == nil {
 		healthCtx = withPostFailoverOptimization(ctx)

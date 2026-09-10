@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/design-maestro/fastlane/internal/backend"
 	"github.com/design-maestro/fastlane/internal/domain"
 	"github.com/design-maestro/fastlane/internal/probe"
 )
@@ -143,6 +144,112 @@ func TestRunAutoFailoverUsesCachedStableCandidateWithoutPoolProbe(t *testing.T) 
 	}
 	if store.state.Health[current.ID].InstabilityPenalty == 0 {
 		t.Fatal("expected failed active node to retain a recent instability penalty")
+	}
+}
+
+func TestRunConnectionFailoverKeepsManualModeAndUsesCachedFallbackAcrossSources(t *testing.T) {
+	t.Parallel()
+
+	current := domain.Node{ID: "current", SubscriptionID: "sub-1", Name: "Pinned", Protocol: domain.ProtocolVLESS, Address: "current.example.com", Port: 443}
+	fallback := domain.Node{ID: "fallback", SubscriptionID: "sub-2", Name: "Fallback", Protocol: domain.ProtocolVLESS, Address: "fallback.example.com", Port: 443}
+	store := &memoryStore{
+		subs: []domain.Subscription{
+			{ID: "sub-1", DisplayName: "Primary", Nodes: []domain.Node{current}},
+			{ID: "sub-2", DisplayName: "Reserve", Nodes: []domain.Node{fallback}},
+		},
+		settings: domain.DefaultSettings(),
+		state: domain.RuntimeState{
+			ActiveSubscriptionID: "sub-1",
+			ActiveNodeID:         current.ID,
+			Mode:                 domain.SelectionModeManual,
+			Connected:            true,
+			ActiveTransport:      domain.TransportModeProxy,
+			Health: map[string]domain.NodeHealth{
+				current.ID:  {NodeID: current.ID, Healthy: true, LastLatency: domain.NewDuration(50 * time.Millisecond), SuccessCount: 10},
+				fallback.ID: {NodeID: fallback.ID, Healthy: true, LastLatency: domain.NewDuration(80 * time.Millisecond), SuccessCount: 10},
+			},
+		},
+	}
+	checker := &countingProbeChecker{results: map[string]probe.Result{}, counts: map[string]int{}}
+	backend := &recordingBackend{}
+	service := NewService(Dependencies{Store: store, Backend: backend, Checker: checker})
+
+	if err := service.RunConnectionFailover(context.Background(), "active GET failed: timeout"); err != nil {
+		t.Fatalf("run manual failover: %v", err)
+	}
+	if checker.total() != 0 {
+		t.Fatalf("cached manual failover unexpectedly probed %d nodes", checker.total())
+	}
+	if store.state.ActiveSubscriptionID != "sub-2" || store.state.ActiveNodeID != fallback.ID {
+		t.Fatalf("expected cross-source fallback, got %+v", store.state)
+	}
+	if store.state.Mode != domain.SelectionModeManual || !store.state.Connected {
+		t.Fatalf("manual mode was not preserved after failover: %+v", store.state)
+	}
+	if len(backend.requests) != 1 {
+		t.Fatalf("expected one manual fallback apply, got %d", len(backend.requests))
+	}
+}
+
+func TestRunConnectionFailoverProbesFallbackWhenManualCacheIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	current := domain.Node{ID: "current", SubscriptionID: "sub-1", Name: "Pinned", Protocol: domain.ProtocolVLESS, Address: "current.example.com", Port: 443}
+	fallback := domain.Node{ID: "fallback", SubscriptionID: "sub-1", Name: "Fallback", Protocol: domain.ProtocolVLESS, Address: "fallback.example.com", Port: 443}
+	store := &memoryStore{
+		subs:     []domain.Subscription{{ID: "sub-1", DisplayName: "Demo", Nodes: []domain.Node{current, fallback}}},
+		settings: domain.DefaultSettings(),
+		state: domain.RuntimeState{
+			ActiveSubscriptionID: "sub-1",
+			ActiveNodeID:         current.ID,
+			Mode:                 domain.SelectionModeManual,
+			Connected:            true,
+			ActiveTransport:      domain.TransportModeProxy,
+			Health:               map[string]domain.NodeHealth{},
+		},
+	}
+	checker := &countingProbeChecker{
+		results: map[string]probe.Result{fallback.ID: {Healthy: true, Latency: 70 * time.Millisecond}},
+		counts:  map[string]int{},
+	}
+	service := NewService(Dependencies{Store: store, Backend: &recordingBackend{}, Checker: checker})
+
+	if err := service.RunConnectionFailover(context.Background(), "backend is not running"); err != nil {
+		t.Fatalf("run probed manual failover: %v", err)
+	}
+	if checker.counts[current.ID] != 0 || checker.counts[fallback.ID] != 1 {
+		t.Fatalf("unexpected recovery probes: %+v", checker.counts)
+	}
+	if store.state.ActiveNodeID != fallback.ID || store.state.Mode != domain.SelectionModeManual || !store.state.Connected {
+		t.Fatalf("manual probed fallback was not committed: %+v", store.state)
+	}
+}
+
+func TestConnectionRecoveryNeededChecksManuallyPinnedRoute(t *testing.T) {
+	t.Parallel()
+
+	store := &memoryStore{
+		subs:     []domain.Subscription{{ID: "sub-1", Nodes: []domain.Node{{ID: "node-1"}}}},
+		settings: domain.DefaultSettings(),
+		state: domain.RuntimeState{
+			ActiveSubscriptionID: "sub-1",
+			ActiveNodeID:         "node-1",
+			Mode:                 domain.SelectionModeManual,
+			Connected:            true,
+			ActiveTransport:      domain.TransportModeProxy,
+		},
+	}
+	service := NewService(Dependencies{
+		Store:   store,
+		Backend: &recordingBackend{status: backend.RuntimeStatus{Running: false, ServiceState: "stopped"}},
+	})
+
+	needed, reason, err := service.ConnectionRecoveryNeeded(context.Background())
+	if err != nil {
+		t.Fatalf("check manual recovery: %v", err)
+	}
+	if !needed || reason != "backend is not running" {
+		t.Fatalf("manual failure was not detected: needed=%t reason=%q", needed, reason)
 	}
 }
 
