@@ -6,6 +6,11 @@ import (
 	"github.com/design-maestro/fastlane/internal/domain"
 )
 
+const (
+	instabilityPenaltyPerFailure = 3
+	maxInstabilityPenalty        = 20
+)
+
 // UpdateHealth folds a probe result into the rolling health state.
 func UpdateHealth(previous domain.NodeHealth, success bool, latency time.Duration, checkedAt time.Time, failureReason string, failureThreshold int) domain.NodeHealth {
 	updated := previous
@@ -20,12 +25,26 @@ func UpdateHealth(previous domain.NodeHealth, success bool, latency time.Duratio
 		updated.SuccessCount++
 		updated.ConsecutiveSuccesses++
 		updated.ConsecutiveFailures = 0
+		if updated.InstabilityPenalty > 0 {
+			updated.InstabilityPenalty--
+		}
 		updated.LastFailureReason = ""
-		if updated.AverageLatency.Duration() == 0 {
+		previousAverage := updated.AverageLatency.Duration()
+		if previousAverage == 0 {
 			updated.AverageLatency = domain.NewDuration(latency)
 		} else {
-			avg := updated.AverageLatency.Duration()
-			updated.AverageLatency = domain.NewDuration((avg*4 + latency) / 5)
+			deviation := latency - previousAverage
+			if deviation < 0 {
+				deviation = -deviation
+			}
+			variation := updated.LatencyVariation.Duration()
+			if variation == 0 {
+				variation = deviation
+			} else {
+				variation = (variation*4 + deviation) / 5
+			}
+			updated.LatencyVariation = domain.NewDuration(variation)
+			updated.AverageLatency = domain.NewDuration((previousAverage*4 + latency) / 5)
 		}
 		return updated
 	}
@@ -34,6 +53,7 @@ func UpdateHealth(previous domain.NodeHealth, success bool, latency time.Duratio
 	updated.FailureCount++
 	updated.ConsecutiveFailures++
 	updated.ConsecutiveSuccesses = 0
+	updated.InstabilityPenalty = min(updated.InstabilityPenalty+instabilityPenaltyPerFailure, maxInstabilityPenalty)
 	updated.LastFailureReason = failureReason
 	if updated.AverageLatency.Duration() == 0 {
 		updated.AverageLatency = domain.NewDuration(latency)

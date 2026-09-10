@@ -39,17 +39,16 @@ func ShouldSwitch(current, candidate domain.NodeHealth, now, lastSwitch time.Tim
 		return true, "current node unhealthy"
 	}
 
-	if now.Sub(lastSwitch) < policy.Cooldown {
-		return false, "cooldown active"
+	currentLatency := selectionLatency(current)
+	candidateLatency := selectionLatency(candidate)
+	if policy.HealthyLatencyCeiling > 0 &&
+		currentLatency > policy.HealthyLatencyCeiling &&
+		candidateLatency > 0 && candidateLatency < currentLatency {
+		return true, fmt.Sprintf("current latency %s exceeds ceiling", currentLatency)
 	}
 
-	currentLatency := current.AverageLatency.Duration()
-	if currentLatency <= 0 {
-		currentLatency = current.LastLatency.Duration()
-	}
-	candidateLatency := candidate.AverageLatency.Duration()
-	if candidateLatency <= 0 {
-		candidateLatency = candidate.LastLatency.Duration()
+	if now.Sub(lastSwitch) < policy.Cooldown {
+		return false, "cooldown active"
 	}
 
 	if currentLatency > 0 &&

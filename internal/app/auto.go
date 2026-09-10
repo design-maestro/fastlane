@@ -13,6 +13,19 @@ const autoScopeAll = "all"
 
 const activeGETFailureReasonPrefix = "active GET failed: "
 
+type autoHealthContextKey uint8
+
+const postFailoverOptimizationKey autoHealthContextKey = iota
+
+func withPostFailoverOptimization(ctx context.Context) context.Context {
+	return context.WithValue(ctx, postFailoverOptimizationKey, true)
+}
+
+func isPostFailoverOptimization(ctx context.Context) bool {
+	requested, _ := ctx.Value(postFailoverOptimizationKey).(bool)
+	return requested
+}
+
 type autoSelectionDecision struct {
 	CurrentNodeID       string
 	CandidateNode       domain.Node
@@ -67,8 +80,71 @@ func (s *Service) RunAutoHealthCheck(ctx context.Context) error {
 	})
 }
 
+// RunAutoFailover immediately moves an unhealthy auto route to the best
+// previously measured candidate. It intentionally skips the full pool probe;
+// the scheduler starts that pass after this fast recovery attempt completes.
+func (s *Service) RunAutoFailover(ctx context.Context, failureReason string) error {
+	snapshot, err := s.captureAutoSelectionSnapshot()
+	if err != nil {
+		return err
+	}
+	state := snapshot.state
+	if state.ZapretTest.Active || state.Mode != domain.SelectionModeAuto || state.ActiveSubscriptionID == "" {
+		return nil
+	}
+
+	state.Health = cloneHealthMap(state.Health)
+	if failureReason == "" {
+		failureReason = "active auto route failed"
+	}
+	forceHealthFailure(
+		state.Health,
+		state.ActiveNodeID,
+		failureReason,
+		s.currentTime().UTC(),
+		switchPolicyFromSettings(snapshot.settings).FailureThreshold,
+	)
+
+	scope := state.ActiveSubscriptionID
+	if state.AutoScope == autoScopeAll {
+		scope = autoScopeAll
+	}
+	for _, sub := range snapshot.subscriptions {
+		if sub.ID == state.ActiveSubscriptionID && sub.IsExpired(s.currentTime().UTC()) {
+			scope = autoScopeAll
+			break
+		}
+	}
+
+	failoverSnapshot := snapshot
+	failoverSnapshot.state = state
+	prepared, err := s.prepareAutoSelectionWithProbes(ctx, scope, failoverSnapshot, false)
+	if err != nil {
+		return err
+	}
+	if !prepared.decision.HasHealthyCandidate || prepared.decision.SelectedNode.ID == "" {
+		return fmt.Errorf("no previously healthy auto candidate is available")
+	}
+	if prepared.decision.SelectedNode.ID == state.ActiveNodeID && prepared.selectedSub.ID == state.ActiveSubscriptionID {
+		return fmt.Errorf("no different previously healthy auto candidate is available")
+	}
+
+	return runStoreWriteLocked(s, func() error {
+		current, err := s.autoSelectionSnapshotCurrentLocked(snapshot)
+		if err != nil {
+			return err
+		}
+		if !current {
+			return errAutoSelectionSnapshotChanged
+		}
+		_, err = s.commitPreparedAutoSelection(ctx, prepared)
+		return err
+	})
+}
+
 // AutoRecoveryNeeded checks the live selected route without changing it. A
-// failed result is used by the daemon to trigger an immediate full reselection.
+// failed result is used by the daemon to trigger cached failover followed by a
+// full background reselection.
 func (s *Service) AutoRecoveryNeeded(ctx context.Context) (bool, string, error) {
 	if s == nil || s.store == nil {
 		return false, "", fmt.Errorf("store is not configured")
@@ -293,7 +369,11 @@ func (s *Service) evaluateAutoSelectionAll(ctx context.Context, subscriptions []
 	}
 
 	currentHealth := health[currentNodeID]
-	shouldSwitch, reason := probe.ShouldSwitch(currentHealth, candidateHealth, s.currentTime().UTC(), state.LastSwitchAt, switchPolicyFromSettings(settings))
+	policy := switchPolicyFromSettings(settings)
+	if isPostFailoverOptimization(ctx) {
+		policy.Cooldown = 0
+	}
+	shouldSwitch, reason := probe.ShouldSwitch(currentHealth, candidateHealth, s.currentTime().UTC(), state.LastSwitchAt, policy)
 	selectedNode := candidateNode
 	if !shouldSwitch && currentNodeID != "" {
 		if activeNode, ok := currentSub.NodeByID(currentNodeID); ok {
@@ -402,7 +482,11 @@ func (s *Service) evaluateAutoSelection(ctx context.Context, sub domain.Subscrip
 	}
 
 	currentHealth := health[currentNodeID]
-	shouldSwitch, reason := probe.ShouldSwitch(currentHealth, candidateHealth, time.Now().UTC(), state.LastSwitchAt, switchPolicyFromSettings(settings))
+	policy := switchPolicyFromSettings(settings)
+	if isPostFailoverOptimization(ctx) {
+		policy.Cooldown = 0
+	}
+	shouldSwitch, reason := probe.ShouldSwitch(currentHealth, candidateHealth, time.Now().UTC(), state.LastSwitchAt, policy)
 
 	selectedNode := candidateNode
 	if !shouldSwitch && currentNodeID != "" {
@@ -591,15 +675,10 @@ func forceHealthFailure(health map[string]domain.NodeHealth, nodeID, reason stri
 
 	updated := health[nodeID]
 	updated.NodeID = nodeID
-	updated.LastCheckedAt = checkedAt
-	updated.FailureCount++
-	updated.ConsecutiveFailures++
+	updated = probe.UpdateHealth(updated, false, updated.LastLatency.Duration(), checkedAt, reason, 1)
 	if updated.ConsecutiveFailures < failureThreshold {
 		updated.ConsecutiveFailures = failureThreshold
 	}
-	updated.ConsecutiveSuccesses = 0
-	updated.Healthy = false
-	updated.LastFailureReason = reason
 	updated.Score = probe.CalculateScore(updated, probe.DefaultScoreConfig()).Score
 	health[nodeID] = updated
 }

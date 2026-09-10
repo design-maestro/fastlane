@@ -87,6 +87,7 @@ func TestUpdateHealthSuccessClearsFailuresAndTracksAverage(t *testing.T) {
 		ConsecutiveSuccesses: 0,
 		LastFailureReason:    "dial tcp timeout",
 		AverageLatency:       domain.NewDuration(200 * time.Millisecond),
+		InstabilityPenalty:   2,
 	}
 
 	updated := probe.UpdateHealth(previous, true, 100*time.Millisecond, time.Date(2026, 3, 25, 8, 0, 0, 0, time.UTC), "", probe.DefaultSwitchPolicy().FailureThreshold)
@@ -104,6 +105,12 @@ func TestUpdateHealthSuccessClearsFailuresAndTracksAverage(t *testing.T) {
 	}
 	if updated.AverageLatency.Duration() != 180*time.Millisecond {
 		t.Fatalf("unexpected average latency: %s", updated.AverageLatency.Duration())
+	}
+	if updated.LatencyVariation.Duration() != 100*time.Millisecond {
+		t.Fatalf("unexpected latency variation: %s", updated.LatencyVariation.Duration())
+	}
+	if updated.InstabilityPenalty != 1 {
+		t.Fatalf("expected instability penalty to decay, got %d", updated.InstabilityPenalty)
 	}
 }
 
@@ -126,6 +133,9 @@ func TestUpdateHealthFailurePreservesHealthyNodeUntilThreshold(t *testing.T) {
 	}
 	if updated.ConsecutiveFailures != 1 {
 		t.Fatalf("expected one consecutive failure, got %d", updated.ConsecutiveFailures)
+	}
+	if updated.InstabilityPenalty != 3 {
+		t.Fatalf("expected recent failure penalty, got %d", updated.InstabilityPenalty)
 	}
 	if updated.LastFailureReason != "connection refused" {
 		t.Fatalf("unexpected failure reason: %q", updated.LastFailureReason)
@@ -191,6 +201,172 @@ func TestSelectBestNodeFailsOnEmptyInput(t *testing.T) {
 
 	if _, _, err := probe.SelectBestNode(nil, nil, probe.DefaultScoreConfig()); err == nil {
 		t.Fatal("expected empty node list to fail")
+	}
+}
+
+func TestSelectBestNodePrefersFreshLatencyOverHistory(t *testing.T) {
+	t.Parallel()
+
+	nodes := []domain.Node{
+		{ID: "historically-stable", Name: "Historically stable"},
+		{ID: "fresh-fast", Name: "Fresh fast"},
+	}
+	health := map[string]domain.NodeHealth{
+		"historically-stable": {
+			NodeID:               "historically-stable",
+			Healthy:              true,
+			LastLatency:          domain.NewDuration(321 * time.Millisecond),
+			AverageLatency:       domain.NewDuration(40 * time.Millisecond),
+			SuccessCount:         9_000,
+			ConsecutiveSuccesses: 9_000,
+		},
+		"fresh-fast": {
+			NodeID:               "fresh-fast",
+			Healthy:              true,
+			LastLatency:          domain.NewDuration(26 * time.Millisecond),
+			AverageLatency:       domain.NewDuration(120 * time.Millisecond),
+			SuccessCount:         1,
+			ConsecutiveSuccesses: 1,
+		},
+	}
+
+	best, _, err := probe.SelectBestNode(nodes, health, probe.DefaultScoreConfig())
+	if err != nil {
+		t.Fatalf("select best node: %v", err)
+	}
+	if best.ID != "fresh-fast" {
+		t.Fatalf("expected fresh 26ms node, got %s", best.ID)
+	}
+}
+
+func TestSelectBestNodePenalizesUnstableFastNode(t *testing.T) {
+	t.Parallel()
+
+	nodes := []domain.Node{
+		{ID: "stable", Name: "Stable"},
+		{ID: "flaky", Name: "Flaky"},
+	}
+	health := map[string]domain.NodeHealth{
+		"stable": {
+			NodeID:               "stable",
+			Healthy:              true,
+			LastLatency:          domain.NewDuration(75 * time.Millisecond),
+			AverageLatency:       domain.NewDuration(70 * time.Millisecond),
+			SuccessCount:         95,
+			FailureCount:         5,
+			ConsecutiveSuccesses: 12,
+		},
+		"flaky": {
+			NodeID:               "flaky",
+			Healthy:              true,
+			LastLatency:          domain.NewDuration(45 * time.Millisecond),
+			AverageLatency:       domain.NewDuration(50 * time.Millisecond),
+			SuccessCount:         5,
+			FailureCount:         5,
+			ConsecutiveSuccesses: 1,
+		},
+	}
+
+	best, _, err := probe.SelectBestNode(nodes, health, probe.DefaultScoreConfig())
+	if err != nil {
+		t.Fatalf("select best node: %v", err)
+	}
+	if best.ID != "stable" {
+		t.Fatalf("expected stable node to outrank flaky low-latency node, got %s", best.ID)
+	}
+}
+
+func TestSelectBestNodePenalizesLatencyVariation(t *testing.T) {
+	t.Parallel()
+
+	nodes := []domain.Node{{ID: "steady"}, {ID: "jumpy"}}
+	health := map[string]domain.NodeHealth{
+		"steady": {
+			NodeID:           "steady",
+			Healthy:          true,
+			LastLatency:      domain.NewDuration(70 * time.Millisecond),
+			AverageLatency:   domain.NewDuration(70 * time.Millisecond),
+			LatencyVariation: domain.NewDuration(5 * time.Millisecond),
+			SuccessCount:     20,
+		},
+		"jumpy": {
+			NodeID:           "jumpy",
+			Healthy:          true,
+			LastLatency:      domain.NewDuration(60 * time.Millisecond),
+			AverageLatency:   domain.NewDuration(60 * time.Millisecond),
+			LatencyVariation: domain.NewDuration(100 * time.Millisecond),
+			SuccessCount:     20,
+		},
+	}
+
+	best, _, err := probe.SelectBestNode(nodes, health, probe.DefaultScoreConfig())
+	if err != nil {
+		t.Fatalf("select best node: %v", err)
+	}
+	if best.ID != "steady" {
+		t.Fatalf("expected steady node to outrank jumpy node, got %s", best.ID)
+	}
+}
+
+func TestSelectBestNodeKeepsRecentlyFailedNodeDemotedAfterOneRecovery(t *testing.T) {
+	t.Parallel()
+
+	failed := domain.NodeHealth{
+		NodeID:         "recently-failed",
+		Healthy:        true,
+		LastLatency:    domain.NewDuration(20 * time.Millisecond),
+		AverageLatency: domain.NewDuration(20 * time.Millisecond),
+		SuccessCount:   100,
+	}
+	failed = probe.UpdateHealth(failed, false, 3*time.Second, time.Now().UTC(), "timeout", 1)
+	failed = probe.UpdateHealth(failed, true, 20*time.Millisecond, time.Now().UTC(), "", 1)
+	steady := domain.NodeHealth{
+		NodeID:               "steady",
+		Healthy:              true,
+		LastLatency:          domain.NewDuration(70 * time.Millisecond),
+		AverageLatency:       domain.NewDuration(70 * time.Millisecond),
+		SuccessCount:         100,
+		ConsecutiveSuccesses: 10,
+	}
+
+	best, _, err := probe.SelectBestNode(
+		[]domain.Node{{ID: failed.NodeID}, {ID: steady.NodeID}},
+		map[string]domain.NodeHealth{failed.NodeID: failed, steady.NodeID: steady},
+		probe.DefaultScoreConfig(),
+	)
+	if err != nil {
+		t.Fatalf("select best node: %v", err)
+	}
+	if best.ID != steady.NodeID {
+		t.Fatalf("expected recent failure to prevent an immediate bounce, got %s", best.ID)
+	}
+}
+
+func TestSelectBestNodeAlwaysPrefersHealthyCandidate(t *testing.T) {
+	t.Parallel()
+
+	nodes := []domain.Node{{ID: "failed-fast"}, {ID: "healthy-slow"}}
+	health := map[string]domain.NodeHealth{
+		"failed-fast": {
+			NodeID:              "failed-fast",
+			Healthy:             false,
+			LastLatency:         domain.NewDuration(20 * time.Millisecond),
+			ConsecutiveFailures: 1,
+		},
+		"healthy-slow": {
+			NodeID:       "healthy-slow",
+			Healthy:      true,
+			LastLatency:  domain.NewDuration(15 * time.Second),
+			SuccessCount: 1,
+		},
+	}
+
+	best, _, err := probe.SelectBestNode(nodes, health, probe.DefaultScoreConfig())
+	if err != nil {
+		t.Fatalf("select best node: %v", err)
+	}
+	if best.ID != "healthy-slow" {
+		t.Fatalf("expected healthy candidate to outrank failed node, got %s", best.ID)
 	}
 }
 
