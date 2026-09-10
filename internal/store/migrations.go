@@ -373,6 +373,7 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 		AutoScope                  *string                       `json:"auto_scope"`
 		ActiveSubscriptionID       *string                       `json:"active_subscription_id"`
 		ActiveNodeID               *string                       `json:"active_node_id"`
+		ActiveNodeName             *string                       `json:"active_node_name"`
 		Mode                       *domain.SelectionMode         `json:"mode"`
 		Connected                  *bool                         `json:"connected"`
 		ActiveTransport            *domain.TransportMode         `json:"active_transport"`
@@ -408,6 +409,9 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 	}
 	if raw.ActiveNodeID != nil {
 		state.ActiveNodeID = *raw.ActiveNodeID
+	}
+	if raw.ActiveNodeName != nil {
+		state.ActiveNodeName = *raw.ActiveNodeName
 	}
 	if raw.Mode != nil {
 		state.Mode = *raw.Mode

@@ -537,6 +537,38 @@ async function smoke(section, name, run) {
 		assert.match(treeText(page.renderTable()), /Hidden by rule.*LTE.*Edit hide rules/);
 	});
 
+	await smoke('VPN', 'hides a flag-only server by its rendered localized country name', async () => {
+		const page = makeVPN();
+		const originalCountryName = countries.name;
+		countries.name = (code) => code === 'RU' ? 'Россия' : originalCountryName(code);
+		try {
+			page.pageData[0].settings.auto_excluded_nodes = [];
+			page.pageData[0].settings.auto_hide_keywords = ['Россия'];
+			page.pageData[1][0].nodes[0] = {
+				id: 'ru-bypass', name: '🇷🇺 Обход №2', remark: '🇷🇺 Обход №2',
+				protocol: 'vless', address: 'ru.example', port: 443
+			};
+			const matched = page.pageData[1][0].nodes[0];
+			assert.equal(page.isHidden('durev', 'ru-bypass', matched), true);
+			assert.equal(page.visibleRows().some((row) => row.node.id === 'ru-bypass'), false);
+		} finally {
+			countries.name = originalCountryName;
+		}
+	});
+
+	await smoke('VPN', 'hides a server when the keyword appears in its rendered description', async () => {
+		const page = makeVPN();
+		page.pageData[0].settings.auto_excluded_nodes = [];
+		page.pageData[0].settings.auto_hide_keywords = ['Обход'];
+		page.pageData[1][0].nodes[0] = {
+			id: 'ru-bypass', name: '🇷🇺 Обход №2', remark: '🇷🇺 Обход №2',
+			protocol: 'vless', address: 'ru.example', port: 443
+		};
+		const matched = page.pageData[1][0].nodes[0];
+		assert.equal(page.isHidden('durev', 'ru-bypass', matched), true);
+		assert.equal(page.visibleRows().some((row) => row.node.id === 'ru-bypass'), false);
+	});
+
 	await smoke('VPN', 'removes one manually added server without deleting other sources', async () => {
 		const page = makeVPN();
 		page.pageData[1].push({

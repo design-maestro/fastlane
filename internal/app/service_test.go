@@ -1554,6 +1554,11 @@ func TestRefreshSubscriptionRemapsHiddenNodeWhenProviderRenamesIt(t *testing.T) 
 		t.Fatalf("expected one original node, got %+v", added.Nodes)
 	}
 	originalNodeID := added.Nodes[0].ID
+	store.state.Connected = true
+	store.state.ActiveSubscriptionID = added.ID
+	store.state.ActiveNodeID = originalNodeID
+	store.state.Mode = domain.SelectionModeManual
+	store.state.ActiveTransport = domain.TransportModeProxy
 	store.settings.AutoExcludedNodes = domain.NormalizeAutoExcludedNodes([]string{
 		domain.AutoExcludedNodeKey(added.ID, originalNodeID),
 		"other-sub/other-node",
@@ -1576,6 +1581,9 @@ func TestRefreshSubscriptionRemapsHiddenNodeWhenProviderRenamesIt(t *testing.T) 
 	want = domain.NormalizeAutoExcludedNodes(want)
 	if !reflect.DeepEqual(store.settings.AutoExcludedNodes, want) {
 		t.Fatalf("hidden node was not remapped after refresh:\nwant: %+v\n got: %+v", want, store.settings.AutoExcludedNodes)
+	}
+	if store.state.ActiveNodeID != refreshedNodeID || store.state.ActiveNodeName != "Renamed node" {
+		t.Fatalf("active node presentation was not remapped after refresh: %+v", store.state)
 	}
 }
 

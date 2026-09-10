@@ -146,6 +146,37 @@ func TestStatusOnlyReturnsHealthForCurrentSubscriptionNodes(t *testing.T) {
 	}
 }
 
+func TestStatusKeepsLastAppliedNodeNameWhenRefreshRemovesActiveNode(t *testing.T) {
+	t.Parallel()
+
+	store := &memoryStore{
+		settings: domain.DefaultSettings(),
+		state: domain.RuntimeState{
+			ActiveSubscriptionID: "sub-current",
+			ActiveNodeID:         "node-before-refresh",
+			ActiveNodeName:       "Россия · Обход №2",
+			Mode:                 domain.SelectionModeManual,
+			Connected:            true,
+			ActiveTransport:      domain.TransportModeProxy,
+		},
+		subs: []domain.Subscription{{
+			ID:    "sub-current",
+			Nodes: []domain.Node{{ID: "node-after-refresh", Name: "Finland"}},
+		}},
+	}
+
+	status, err := NewService(Dependencies{Store: store}).Status()
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.ActiveSubscription == nil {
+		t.Fatal("expected active subscription")
+	}
+	if status.ActiveNode == nil || status.ActiveNode.Name != "Россия · Обход №2" {
+		t.Fatalf("expected last applied node name, got %+v", status.ActiveNode)
+	}
+}
+
 func TestRestoreRuntimeLogsFailure(t *testing.T) {
 	t.Parallel()
 
