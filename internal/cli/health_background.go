@@ -18,6 +18,7 @@ import (
 const (
 	healthCheckRequestFile  = "health-check.request"
 	healthCheckProgressFile = "health-check-progress.json"
+	healthCheckCancelFile   = "health-check.cancel"
 	healthCheckRuntimeRoot  = "/tmp/fastlane-runtime"
 )
 
@@ -60,15 +61,20 @@ func healthCheckProgressPath(opts *rootOptions) string {
 	return filepath.Join(healthRoot(opts), healthCheckProgressFile)
 }
 
+func healthCheckCancelPath(opts *rootOptions) string {
+	return filepath.Join(healthRoot(opts), healthCheckCancelFile)
+}
+
 func queueHealthCheck(opts *rootOptions, scope string) (healthCheckProgress, error) {
 	scope = strings.TrimSpace(scope)
 	if scope == "" {
 		scope = "all"
 	}
 	progressPath := healthCheckProgressPath(opts)
-	if current, err := readHealthCheckProgress(progressPath); err == nil && current.Status == "running" {
+	if current, err := readHealthCheckProgress(progressPath); err == nil && (current.Status == "running" || current.Status == "cancelling") {
 		return current, nil
 	}
+	_ = os.Remove(healthCheckCancelPath(opts))
 	progress := healthCheckProgress{Status: "queued", Scope: scope}
 	if err := writeHealthCheckProgress(progressPath, progress); err != nil {
 		return healthCheckProgress{}, err
@@ -83,6 +89,42 @@ func queueHealthCheck(opts *rootOptions, scope string) (healthCheckProgress, err
 	}
 	if err := os.Rename(temporary, requestPath); err != nil {
 		return healthCheckProgress{}, fmt.Errorf("queue health-check request: %w", err)
+	}
+	return progress, nil
+}
+
+func cancelHealthCheck(opts *rootOptions) (healthCheckProgress, error) {
+	progressPath := healthCheckProgressPath(opts)
+	progress, err := readHealthCheckProgress(progressPath)
+	if err != nil {
+		return healthCheckProgress{}, err
+	}
+	if progress.Status != "queued" && progress.Status != "running" && progress.Status != "cancelling" {
+		return progress, nil
+	}
+
+	wasQueued := progress.Status == "queued"
+	_ = os.Remove(healthCheckRequestPath(opts))
+	cancelPath := healthCheckCancelPath(opts)
+	if err := os.MkdirAll(filepath.Dir(cancelPath), 0o700); err != nil {
+		return healthCheckProgress{}, fmt.Errorf("create health-check directory: %w", err)
+	}
+	temporary := cancelPath + ".tmp"
+	if err := os.WriteFile(temporary, []byte("cancel\n"), 0o600); err != nil {
+		return healthCheckProgress{}, fmt.Errorf("write health-check cancellation: %w", err)
+	}
+	if err := os.Rename(temporary, cancelPath); err != nil {
+		return healthCheckProgress{}, fmt.Errorf("queue health-check cancellation: %w", err)
+	}
+
+	if wasQueued {
+		progress.Status = "cancelled"
+		progress.FinishedAt = time.Now().UTC()
+	} else {
+		progress.Status = "cancelling"
+	}
+	if err := writeHealthCheckProgress(progressPath, progress); err != nil {
+		return healthCheckProgress{}, err
 	}
 	return progress, nil
 }
@@ -141,6 +183,9 @@ func writeHealthCheckProgress(path string, progress healthCheckProgress) error {
 
 func runTrackedHealthCheck(ctx context.Context, opts *rootOptions, scope string, connect bool) error {
 	if !connect {
+		// A cancelled queued request can leave a marker behind when the daemon
+		// never consumed it. It must not cancel an unrelated scheduled pass.
+		_ = os.Remove(healthCheckCancelPath(opts))
 		scope = scheduledHealthScope(opts)
 	}
 	scope = normalizeHealthScope(scope)
@@ -148,7 +193,9 @@ func runTrackedHealthCheck(ctx context.Context, opts *rootOptions, scope string,
 	total := healthCheckNodeCount(opts, scope)
 	progress := healthCheckProgress{Status: "running", Scope: scope, StartedAt: startedAt, Total: total, Results: make(map[string]domain.NodeHealth)}
 	_ = writeHealthCheckProgress(healthCheckProgressPath(opts), progress)
-	ctx = app.WithAutoHealthProgress(ctx, func(health domain.NodeHealth) {
+	runCtx, stopCancellationWatch := watchHealthCheckCancellation(ctx, healthCheckCancelPath(opts))
+	defer stopCancellationWatch()
+	runCtx = app.WithAutoHealthProgress(runCtx, func(health domain.NodeHealth) {
 		progress.Results[health.NodeID] = health
 		progress.Done = len(progress.Results)
 		progress.Healthy = 0
@@ -163,12 +210,16 @@ func runTrackedHealthCheck(ctx context.Context, opts *rootOptions, scope string,
 
 	var runErr error
 	if connect {
-		_, runErr = opts.service.ConnectAuto(ctx, scope)
+		_, runErr = opts.service.ConnectAuto(runCtx, scope)
 	} else {
-		runErr = opts.service.RunAutoHealthCheck(ctx)
+		runErr = opts.service.RunAutoHealthCheck(runCtx)
 	}
 	progress.FinishedAt = time.Now().UTC()
-	if runErr != nil {
+	if errors.Is(runErr, context.Canceled) || errors.Is(runCtx.Err(), context.Canceled) {
+		progress.Status = "cancelled"
+		progress.Error = ""
+		runErr = nil
+	} else if runErr != nil {
 		progress.Status = "failed"
 		progress.Error = runErr.Error()
 	} else {
@@ -176,6 +227,45 @@ func runTrackedHealthCheck(ctx context.Context, opts *rootOptions, scope string,
 	}
 	_ = writeHealthCheckProgress(healthCheckProgressPath(opts), progress)
 	return runErr
+}
+
+func watchHealthCheckCancellation(ctx context.Context, cancelPath string) (context.Context, func()) {
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if consumeHealthCheckCancellation(cancelPath) {
+			cancel()
+			return
+		}
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-runCtx.Done():
+				return
+			case <-ticker.C:
+				if consumeHealthCheckCancellation(cancelPath) {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+
+	return runCtx, func() {
+		cancel()
+		<-done
+		_ = os.Remove(cancelPath)
+	}
+}
+
+func consumeHealthCheckCancellation(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	err := os.Remove(path)
+	return err == nil || errors.Is(err, os.ErrNotExist)
 }
 
 func scheduledHealthScope(opts *rootOptions) string {

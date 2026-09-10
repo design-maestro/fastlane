@@ -23,6 +23,8 @@ type Scheduler struct {
 	triggeredHealthCheck   func(context.Context, string)
 	recoveryCheck          func(context.Context) (bool, string, error)
 	healthMu               sync.Mutex
+	lastHealthRunAt        time.Time
+	recoveryRetryEvery     time.Duration
 	refreshConfigPollEvery time.Duration
 	healthConfigPollEvery  time.Duration
 
@@ -193,6 +195,10 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 	if !needed {
 		return
 	}
+	now := s.now()
+	if !s.lastHealthRunAt.IsZero() && now.Before(s.lastHealthRunAt.Add(s.recoveryRetryInterval())) {
+		return
+	}
 	s.logWarn("active auto route failed; starting immediate reselection", "reason", reason)
 	s.runHealthOnceLocked(ctx)
 }
@@ -264,6 +270,7 @@ func (s *Scheduler) runHealthOnce(ctx context.Context) {
 }
 
 func (s *Scheduler) runHealthOnceLocked(ctx context.Context) {
+	s.lastHealthRunAt = s.now()
 	if s.healthCheck != nil {
 		s.healthCheck(ctx)
 		return
@@ -276,6 +283,7 @@ func (s *Scheduler) runHealthOnceLocked(ctx context.Context) {
 func (s *Scheduler) runTriggeredHealthOnce(ctx context.Context, scope string) {
 	s.healthMu.Lock()
 	defer s.healthMu.Unlock()
+	s.lastHealthRunAt = s.now()
 	if s.triggeredHealthCheck != nil {
 		s.triggeredHealthCheck(ctx, scope)
 		return
@@ -287,6 +295,25 @@ func (s *Scheduler) runTriggeredHealthOnce(ctx context.Context, scope string) {
 	if err := s.service.RunAutoHealthCheck(ctx); err != nil {
 		s.logWarn("triggered auto health check", "error", err.Error())
 	}
+}
+
+func (s *Scheduler) recoveryRetryInterval() time.Duration {
+	if s.recoveryRetryEvery > 0 {
+		return s.recoveryRetryEvery
+	}
+
+	retryEvery := time.Minute
+	if s.service == nil || s.service.store == nil {
+		return retryEvery
+	}
+	settings, err := s.service.store.LoadSettings()
+	if err != nil {
+		return retryEvery
+	}
+	if cooldown := settings.SwitchCooldown.Duration(); cooldown > retryEvery {
+		retryEvery = cooldown
+	}
+	return retryEvery
 }
 
 func (s *Scheduler) healthConfigPollInterval() time.Duration {

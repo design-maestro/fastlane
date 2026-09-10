@@ -90,6 +90,9 @@ msgstr "Фоновая GET-проверка запущена. Можно зак�
 msgid "Background update interval"
 msgstr "Интервал фонового обновления"
 
+msgid "Background GET check stopped."
+msgstr "Фоновая GET-проверка остановлена."
+
 msgid "Background updates run automatically; every action can also be started manually on the VPN page."
 msgstr "Фоновые обновления запускаются автоматически; каждое действие также можно запустить вручную на странице VPN."
 
@@ -113,6 +116,12 @@ msgstr "Проверить пинг (GET)"
 
 msgid "Check running in background"
 msgstr "Проверка идёт в фоне"
+
+msgid "Stop check"
+msgstr "Остановить проверку"
+
+msgid "Stopping background check…"
+msgstr "Останавливаем фоновую проверку…"
 
 msgid "Check the link and router internet access."
 msgstr "Проверьте ссылку и доступ роутера к интернету."

@@ -65,6 +65,12 @@ func TestDefaultSettingsAreSane(t *testing.T) {
 	if settings.SwitchCooldown.Duration() <= 0 {
 		t.Fatal("switch cooldown must be positive")
 	}
+	if settings.HealthCheckInterval.Duration() != 30*time.Minute {
+		t.Fatalf("unexpected default health-check interval: %s", settings.HealthCheckInterval.Duration())
+	}
+	if settings.HealthCheckInterval.Duration() != 30*time.Minute {
+		t.Fatalf("unexpected default health-check interval: %s", settings.HealthCheckInterval.Duration())
+	}
 
 	if settings.Mode != domain.SelectionModeManual {
 		t.Fatalf("unexpected default mode: %s", settings.Mode)

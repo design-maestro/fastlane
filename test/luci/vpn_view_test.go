@@ -161,7 +161,9 @@ func TestFastLaneVPNServerActionsUseVisibleThreeDotControl(t *testing.T) {
 		"'aria-label': _('Server actions')",
 		"'aria-haspopup': 'menu'",
 		"handleServerMenuToggle",
-		"this.activeMenuKey === actionKey ? E('div'",
+		"setServerMenuElementOpen",
+		"class: 'fl-more-menu', role: 'menu', hidden:",
+		".fl-more-menu[hidden]{display:none!important}",
 		"handleDocumentClick",
 		"updatePreservingScroll",
 	} {
@@ -171,6 +173,37 @@ func TestFastLaneVPNServerActionsUseVisibleThreeDotControl(t *testing.T) {
 	}
 	if strings.Contains(source, "E('details'") || strings.Contains(source, "E('summary'") {
 		t.Fatal("server action menu must not use native details/summary because it can move the LuCI viewport")
+	}
+}
+
+func TestFastLaneVPNBackgroundCheckCanBeCancelledWithoutBrowserOwnership(t *testing.T) {
+	t.Parallel()
+	source := readVPNViewSource(t)
+	for _, want := range []string{
+		"handleCancelHealthCheck",
+		"'inspect', 'health-check-cancel'",
+		"Stop check",
+		"background.status === 'cancelling'",
+		"Background GET check stopped.",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("VPN view missing background cancellation marker %q", want)
+		}
+	}
+}
+
+func TestFastLaneVPNPollingAvoidsMenuDestroyingRerenders(t *testing.T) {
+	t.Parallel()
+	source := readVPNViewSource(t)
+	for _, want := range []string{
+		"dataFingerprint: function()",
+		"this.dataFingerprint() === this.lastRenderedDataFingerprint",
+		"this.pendingBackgroundRender = true",
+		"this.setServerMenuElementOpen(element, true)",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("VPN view missing stable polling marker %q", want)
+		}
 	}
 }
 
@@ -380,7 +413,7 @@ func readVPNViewSource(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-menu-v23.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-menu-v24.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

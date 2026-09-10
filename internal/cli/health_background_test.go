@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,6 +34,67 @@ func TestQueueHealthCheckPersistsRequestAndProgress(t *testing.T) {
 	stored, err := readHealthCheckProgress(healthCheckProgressPath(opts))
 	if err != nil || stored.Status != "queued" || stored.Scope != "sub-1" {
 		t.Fatalf("unexpected stored progress: %+v err=%v", stored, err)
+	}
+}
+
+func TestCancelQueuedHealthCheckStopsRequestAndNextQueueClearsMarker(t *testing.T) {
+	t.Parallel()
+
+	opts := &rootOptions{rootDir: t.TempDir()}
+	if _, err := queueHealthCheck(opts, "all"); err != nil {
+		t.Fatalf("queue health check: %v", err)
+	}
+	cancelled, err := cancelHealthCheck(opts)
+	if err != nil {
+		t.Fatalf("cancel health check: %v", err)
+	}
+	if cancelled.Status != "cancelled" || cancelled.FinishedAt.IsZero() {
+		t.Fatalf("unexpected cancelled progress: %+v", cancelled)
+	}
+	if _, err := os.Stat(healthCheckRequestPath(opts)); !os.IsNotExist(err) {
+		t.Fatalf("request marker survived cancellation: %v", err)
+	}
+	if _, err := os.Stat(healthCheckCancelPath(opts)); err != nil {
+		t.Fatalf("cancellation marker missing: %v", err)
+	}
+
+	queued, err := queueHealthCheck(opts, "sub-2")
+	if err != nil {
+		t.Fatalf("queue replacement health check: %v", err)
+	}
+	if queued.Status != "queued" || queued.Scope != "sub-2" {
+		t.Fatalf("unexpected replacement progress: %+v", queued)
+	}
+	if _, err := os.Stat(healthCheckCancelPath(opts)); !os.IsNotExist(err) {
+		t.Fatalf("stale cancellation marker survived new queue: %v", err)
+	}
+}
+
+func TestCancelRunningHealthCheckCancelsWatcher(t *testing.T) {
+	t.Parallel()
+
+	opts := &rootOptions{rootDir: t.TempDir()}
+	progress := healthCheckProgress{Status: "running", Scope: "all", StartedAt: time.Now().UTC()}
+	if err := writeHealthCheckProgress(healthCheckProgressPath(opts), progress); err != nil {
+		t.Fatalf("write running progress: %v", err)
+	}
+	runCtx, stop := watchHealthCheckCancellation(context.Background(), healthCheckCancelPath(opts))
+	defer stop()
+
+	cancelling, err := cancelHealthCheck(opts)
+	if err != nil {
+		t.Fatalf("cancel running health check: %v", err)
+	}
+	if cancelling.Status != "cancelling" {
+		t.Fatalf("unexpected running cancellation state: %+v", cancelling)
+	}
+	select {
+	case <-runCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("health-check worker did not observe cancellation")
+	}
+	if _, err := os.Stat(healthCheckCancelPath(opts)); !os.IsNotExist(err) {
+		t.Fatalf("worker did not consume cancellation marker: %v", err)
 	}
 }
 

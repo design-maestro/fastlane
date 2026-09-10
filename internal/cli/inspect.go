@@ -25,11 +25,28 @@ func newInspectCmd(opts *rootOptions) *cobra.Command {
 		newInspectPingCmd(opts),
 		newInspectURLTestCmd(opts),
 		newInspectHealthCheckCmd(opts),
+		newInspectHealthCheckCancelCmd(opts),
 		newInspectHealthCheckStatusCmd(opts),
 		newInspectSpeedCmd(opts),
 	)
 
 	return cmd
+}
+
+func newInspectHealthCheckCancelCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:          "health-check-cancel",
+		Short:        "Cancel the router-side GET health check",
+		Hidden:       true,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			progress, err := cancelHealthCheck(opts)
+			if err != nil {
+				return err
+			}
+			return printOutput(cmd, opts.jsonOutput, progress, progress.Status)
+		},
+	}
 }
 
 func newInspectHealthCheckCmd(opts *rootOptions) *cobra.Command {
