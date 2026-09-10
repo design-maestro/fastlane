@@ -220,6 +220,64 @@ func TestConnectAutoAllSelectsBestNodeAcrossSubscriptions(t *testing.T) {
 	}
 }
 
+func TestConnectAutoAllEscapesDegradedCurrentNodeDespiteCandidatePenalty(t *testing.T) {
+	t.Parallel()
+
+	current := domain.Node{ID: "japan", SubscriptionID: "atlanta", Name: "Japan", Protocol: domain.ProtocolVLESS, Address: "japan.example.com", Port: 443}
+	candidate := domain.Node{ID: "finland", SubscriptionID: "vpnus", Name: "Finland", Protocol: domain.ProtocolVLESS, Address: "finland.example.com", Port: 443}
+	store := &memoryStore{
+		subs: []domain.Subscription{
+			{ID: "atlanta", DisplayName: "Atlanta", Nodes: []domain.Node{current}},
+			{ID: "vpnus", DisplayName: "VPNUS", Nodes: []domain.Node{candidate}},
+		},
+		settings: domain.DefaultSettings(),
+		state: domain.RuntimeState{
+			ActiveSubscriptionID: "atlanta",
+			ActiveNodeID:         current.ID,
+			AutoScope:            autoScopeAll,
+			Mode:                 domain.SelectionModeAuto,
+			Connected:            true,
+			LastSwitchAt:         time.Now().UTC(),
+			Health: map[string]domain.NodeHealth{
+				current.ID: {
+					NodeID:               current.ID,
+					Healthy:              true,
+					AverageLatency:       domain.NewDuration(40 * time.Millisecond),
+					SuccessCount:         1_000,
+					ConsecutiveSuccesses: 1_000,
+				},
+				candidate.ID: {
+					NodeID:               candidate.ID,
+					Healthy:              true,
+					AverageLatency:       domain.NewDuration(60 * time.Millisecond),
+					SuccessCount:         10,
+					FailureCount:         10,
+					ConsecutiveSuccesses: 1,
+					InstabilityPenalty:   20,
+				},
+			},
+		},
+	}
+	service := NewService(Dependencies{
+		Store: store,
+		Checker: fakeChecker{results: map[string]probe.Result{
+			current.ID:   {Healthy: true, Latency: 347 * time.Millisecond},
+			candidate.ID: {Healthy: true, Latency: 39 * time.Millisecond},
+		}},
+	})
+
+	selected, err := service.ConnectAuto(context.Background(), autoScopeAll)
+	if err != nil {
+		t.Fatalf("connect auto all: %v", err)
+	}
+	if selected.ID != candidate.ID {
+		t.Fatalf("expected global auto mode to leave the 347ms node for the 39ms node, got %s", selected.ID)
+	}
+	if store.state.ActiveSubscriptionID != "vpnus" || store.state.ActiveNodeID != candidate.ID {
+		t.Fatalf("unexpected selected state: %+v", store.state)
+	}
+}
+
 func TestRunAutoHealthCheckAllSwitchesProviderWhenCurrentFails(t *testing.T) {
 	t.Parallel()
 

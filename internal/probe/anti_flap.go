@@ -7,6 +7,8 @@ import (
 	"github.com/design-maestro/fastlane/internal/domain"
 )
 
+const defaultHealthyLatencyCeiling = 300 * time.Millisecond
+
 // SwitchPolicy controls anti-flap behavior.
 type SwitchPolicy struct {
 	Cooldown              time.Duration
@@ -21,7 +23,7 @@ func DefaultSwitchPolicy() SwitchPolicy {
 		Cooldown:              5 * time.Minute,
 		LatencyImprovement:    50 * time.Millisecond,
 		FailureThreshold:      3,
-		HealthyLatencyCeiling: 300 * time.Millisecond,
+		HealthyLatencyCeiling: defaultHealthyLatencyCeiling,
 	}
 }
 

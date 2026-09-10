@@ -239,6 +239,43 @@ func TestSelectBestNodePrefersFreshLatencyOverHistory(t *testing.T) {
 	}
 }
 
+func TestSelectBestNodeDoesNotKeepDegradedLatencyBecauseOfReliabilityPenalties(t *testing.T) {
+	t.Parallel()
+
+	nodes := []domain.Node{
+		{ID: "stable-but-degraded", Name: "Stable but degraded"},
+		{ID: "recently-unstable-fast", Name: "Recently unstable fast"},
+	}
+	health := map[string]domain.NodeHealth{
+		"stable-but-degraded": {
+			NodeID:               "stable-but-degraded",
+			Healthy:              true,
+			LastLatency:          domain.NewDuration(347 * time.Millisecond),
+			AverageLatency:       domain.NewDuration(40 * time.Millisecond),
+			SuccessCount:         1_000,
+			ConsecutiveSuccesses: 1_000,
+		},
+		"recently-unstable-fast": {
+			NodeID:               "recently-unstable-fast",
+			Healthy:              true,
+			LastLatency:          domain.NewDuration(39 * time.Millisecond),
+			AverageLatency:       domain.NewDuration(60 * time.Millisecond),
+			SuccessCount:         10,
+			FailureCount:         10,
+			ConsecutiveSuccesses: 1,
+			InstabilityPenalty:   20,
+		},
+	}
+
+	best, _, err := probe.SelectBestNode(nodes, health, probe.DefaultScoreConfig())
+	if err != nil {
+		t.Fatalf("select best node: %v", err)
+	}
+	if best.ID != "recently-unstable-fast" {
+		t.Fatalf("expected a healthy node below the latency ceiling, got %s", best.ID)
+	}
+}
+
 func TestSelectBestNodePenalizesUnstableFastNode(t *testing.T) {
 	t.Parallel()
 
