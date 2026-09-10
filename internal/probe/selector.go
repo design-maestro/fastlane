@@ -12,6 +12,7 @@ import (
 type ScoreConfig struct {
 	HealthyBonus                  float64
 	UnhealthyPenalty              float64
+	HealthyLatencyCeiling         time.Duration
 	FreshLatencyWeight            float64
 	AverageLatencyWeight          float64
 	LatencyVariationPenaltyWeight float64
@@ -26,6 +27,7 @@ func DefaultScoreConfig() ScoreConfig {
 	return ScoreConfig{
 		HealthyBonus:                  10_000,
 		UnhealthyPenalty:              10_000,
+		HealthyLatencyCeiling:         defaultHealthyLatencyCeiling,
 		FreshLatencyWeight:            0.7,
 		AverageLatencyWeight:          0.3,
 		LatencyVariationPenaltyWeight: 0.5,
@@ -129,6 +131,13 @@ func SelectBestNode(nodes []domain.Node, health map[string]domain.NodeHealth, cf
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].result.Healthy != candidates[j].result.Healthy {
 			return candidates[i].result.Healthy
+		}
+		leftFresh := selectionLatency(health[candidates[i].node.ID])
+		rightFresh := selectionLatency(health[candidates[j].node.ID])
+		leftAcceptable := cfg.HealthyLatencyCeiling > 0 && leftFresh > 0 && leftFresh <= cfg.HealthyLatencyCeiling
+		rightAcceptable := cfg.HealthyLatencyCeiling > 0 && rightFresh > 0 && rightFresh <= cfg.HealthyLatencyCeiling
+		if leftAcceptable != rightAcceptable {
+			return leftAcceptable
 		}
 		leftLatency := effectiveSelectionLatency(health[candidates[i].node.ID], cfg)
 		rightLatency := effectiveSelectionLatency(health[candidates[j].node.ID], cfg)
