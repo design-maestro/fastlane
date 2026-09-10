@@ -600,8 +600,12 @@ async function smoke(section, name, run) {
 
 	await smoke('VPN', 'connects in auto/manual modes and disconnects', async () => {
 		const page = makeVPN();
+		const autoButton = page.renderStatus().children[4].children[0];
+		assert.equal(autoButton.disabled, false);
+		assert.match(autoButton.attrs.title, /select the best again/);
 		await page.handleAuto();
 		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all']);
+		assert.ok(toasts.some((toast) => toast.type === 'success' && /Automatic selection started/.test(toast.message)));
 		commands = [];
 		await page.handleConnect('durev', 'nl');
 		commandSeen(['connect', '--subscription', 'durev', '--node', 'nl']);

@@ -878,9 +878,9 @@ return view.extend({
 	handleAuto: function(ev) {
 		if (ev) ev.preventDefault();
 		return this.runAction(
-			_('Starting the check on the router…'),
+			_('Selecting the best server…'),
 			this.execJSON([ '--json', 'inspect', 'health-check', '--subscription', 'all' ]),
-			_('Background GET check started. You can close the page.')
+			_('Automatic selection started in the background. You can close the page.')
 		);
 	},
 
@@ -1236,7 +1236,7 @@ return view.extend({
 			E('div', { class: 'fl-status-cell' }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Source') ]), E('span', { class: 'fl-status-cell-value' }, [ activeSource ]) ]),
 			E('div', { class: 'fl-status-cell', title: _('GET: up to 100 ms is low latency; 101–200 ms is medium; 201–1000 ms is high; over 1000 ms is very high. A successful GET means the server is reachable even if it is slow. This is not a download speed test.') }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Ping (GET)') ]), E('span', { class: 'fl-status-cell-value fl-status-cell-latency ' + this.latencyClass(observed.latency_ms, observed) }, [ formatLatency(observed.latency_ms) ]) ]),
 			E('div', { class: 'fl-mode-switch', 'aria-label': _('Connection mode') }, [
-				E('button', { class: 'fl-mode-option ' + (mode === 'auto' ? 'fl-mode-option-active' : ''), disabled: this.busy || mode === 'auto' || !hasAvailableNodes ? 'disabled' : null, title: hasAvailableNodes ? '' : _('Add a subscription first'), click: ui.createHandlerFn(this, 'handleAuto') }, [ _('Auto') ]),
+				E('button', { class: 'fl-mode-option ' + (mode === 'auto' ? 'fl-mode-option-active' : ''), disabled: this.busy || !hasAvailableNodes ? 'disabled' : null, title: hasAvailableNodes ? (mode === 'auto' ? _('Check all servers and select the best again') : _('Enable automatic selection and choose the best server')) : _('Add a subscription first'), click: ui.createHandlerFn(this, 'handleAuto') }, [ _('Auto') ]),
 				E('button', { class: 'fl-mode-option ' + (mode === 'manual' ? 'fl-mode-option-active' : ''), disabled: this.busy || mode === 'manual' || !hasAvailableNodes ? 'disabled' : null, title: hasAvailableNodes ? '' : _('Add a subscription first'), click: ui.createHandlerFn(this, 'handleManualMode') }, [ _('Manual') ])
 			]),
 			E('button', { class: 'fl-button fl-button-danger fl-status-disconnect', disabled: this.busy || !connected ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleDisconnect') }, [ _('Disconnect') ])

@@ -20,7 +20,7 @@ func TestFastLaneViewsUseEnglishSourceAndCompleteRussianCatalog(t *testing.T) {
 	}
 	paths := []string{
 		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "fastlane", "fastlane-20260906-v4.js"),
-		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-menu-v24.js"),
+		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-menu-v25.js"),
 		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20260906-v5.js"),
 		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "diagnostics-20260904-v3.js"),
 		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260907-duration-v7.js"),

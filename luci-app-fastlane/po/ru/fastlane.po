@@ -81,6 +81,9 @@ msgstr "Автоматически использует язык LuCI. Для о
 msgid "Automatic selection"
 msgstr "Автовыбор"
 
+msgid "Automatic selection started in the background. You can close the page."
+msgstr "Автовыбор запущен в фоне. Можно закрыть страницу."
+
 msgid "Automatic server check"
 msgstr "Автопроверка серверов"
 
@@ -101,6 +104,12 @@ msgstr "По устройствам"
 
 msgid "By rule"
 msgstr "По правилам"
+
+msgid "Check all servers and select the best again"
+msgstr "Проверить все серверы и снова выбрать лучший"
+
+msgid "Enable automatic selection and choose the best server"
+msgstr "Включить автовыбор и выбрать лучший сервер"
 
 msgid "Cancel"
 msgstr "Отмена"
@@ -653,6 +662,9 @@ msgstr "Сервер закреплён вручную."
 
 msgid "Server restored to the list and automatic selection."
 msgstr "Сервер возвращён в список и автовыбор."
+
+msgid "Selecting the best server…"
+msgstr "Выбираю лучший сервер…"
 
 msgid "Server selection method."
 msgstr "Способ выбора сервера."

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
@@ -10,6 +11,7 @@ const (
 	maxRefreshConfigPollInterval = time.Second
 	maxHealthConfigPollInterval  = time.Second
 	connectionWatchInterval      = 15 * time.Second
+	activeGETFailureThreshold    = 3
 )
 
 // Scheduler periodically refreshes subscriptions using the global settings interval.
@@ -24,6 +26,7 @@ type Scheduler struct {
 	recoveryCheck          func(context.Context) (bool, string, error)
 	healthMu               sync.Mutex
 	lastHealthRunAt        time.Time
+	activeGETFailures      int
 	recoveryRetryEvery     time.Duration
 	refreshConfigPollEvery time.Duration
 	healthConfigPollEvery  time.Duration
@@ -193,12 +196,30 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 		return
 	}
 	if !needed {
+		s.activeGETFailures = 0
 		return
+	}
+	if strings.HasPrefix(reason, activeGETFailureReasonPrefix) {
+		s.activeGETFailures++
+		if s.activeGETFailures < activeGETFailureThreshold {
+			s.logWarn(
+				"active auto route GET failed; waiting for confirmation",
+				"attempt", s.activeGETFailures,
+				"threshold", activeGETFailureThreshold,
+				"reason", reason,
+			)
+			return
+		}
+	} else {
+		// A missing runtime, subscription, or active node is a confirmed
+		// structural failure and does not need repeated GET confirmation.
+		s.activeGETFailures = 0
 	}
 	now := s.now()
 	if !s.lastHealthRunAt.IsZero() && now.Before(s.lastHealthRunAt.Add(s.recoveryRetryInterval())) {
 		return
 	}
+	s.activeGETFailures = 0
 	s.logWarn("active auto route failed; starting immediate reselection", "reason", reason)
 	s.runHealthOnceLocked(ctx)
 }

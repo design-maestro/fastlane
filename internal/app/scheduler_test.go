@@ -469,6 +469,61 @@ func TestSchedulerConnectionWatchBacksOffRepeatedRecoveryScans(t *testing.T) {
 	}
 }
 
+func TestSchedulerConnectionWatchConfirmsTransientGETFailure(t *testing.T) {
+	t.Parallel()
+
+	scheduler := NewScheduler(nil)
+	scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
+		return true, activeGETFailureReasonPrefix + "temporary timeout", nil
+	}
+	healthCalls := 0
+	scheduler.healthCheck = func(context.Context) {
+		healthCalls++
+	}
+
+	for attempt := 1; attempt < activeGETFailureThreshold; attempt++ {
+		scheduler.runConnectionWatchOnce(context.Background())
+		if healthCalls != 0 {
+			t.Fatalf("transient GET failure triggered reselection on attempt %d", attempt)
+		}
+	}
+	scheduler.runConnectionWatchOnce(context.Background())
+	if healthCalls != 1 {
+		t.Fatalf("confirmed GET failure did not trigger reselection: %d", healthCalls)
+	}
+}
+
+func TestSchedulerConnectionWatchResetsGETFailureConfirmation(t *testing.T) {
+	t.Parallel()
+
+	needed := true
+	scheduler := NewScheduler(nil)
+	scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
+		if !needed {
+			return false, "", nil
+		}
+		return true, activeGETFailureReasonPrefix + "temporary timeout", nil
+	}
+	healthCalls := 0
+	scheduler.healthCheck = func(context.Context) {
+		healthCalls++
+	}
+
+	scheduler.runConnectionWatchOnce(context.Background())
+	needed = false
+	scheduler.runConnectionWatchOnce(context.Background())
+	needed = true
+	scheduler.runConnectionWatchOnce(context.Background())
+	scheduler.runConnectionWatchOnce(context.Background())
+	if healthCalls != 0 {
+		t.Fatalf("healthy observation did not reset GET confirmation: %d", healthCalls)
+	}
+	scheduler.runConnectionWatchOnce(context.Background())
+	if healthCalls != 1 {
+		t.Fatalf("three fresh GET failures did not trigger reselection: %d", healthCalls)
+	}
+}
+
 func TestSchedulerRefreshLoopPicksUpSubMinuteGlobalInterval(t *testing.T) {
 	fileStore := storepkg.NewFileStore(t.TempDir())
 	settings := domain.DefaultSettings()

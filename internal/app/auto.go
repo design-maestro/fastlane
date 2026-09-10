@@ -11,6 +11,8 @@ import (
 
 const autoScopeAll = "all"
 
+const activeGETFailureReasonPrefix = "active GET failed: "
+
 type autoSelectionDecision struct {
 	CurrentNodeID       string
 	CandidateNode       domain.Node
@@ -103,7 +105,7 @@ func (s *Service) AutoRecoveryNeeded(ctx context.Context) (bool, string, error) 
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := s.backendEgressProbe(probeCtx); err != nil {
-		return true, fmt.Sprintf("active GET failed: %v", err), nil
+		return true, fmt.Sprintf("%s%v", activeGETFailureReasonPrefix, err), nil
 	}
 	return false, "", nil
 }
