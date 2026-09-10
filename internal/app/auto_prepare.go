@@ -88,10 +88,14 @@ func (s *Service) captureAutoSelectionSnapshotLocked() (autoSelectionSnapshot, e
 }
 
 func (s *Service) prepareAutoSelection(ctx context.Context, subscriptionID string, snapshot autoSelectionSnapshot) (preparedAutoSelection, error) {
+	return s.prepareAutoSelectionWithProbes(ctx, subscriptionID, snapshot, true)
+}
+
+func (s *Service) prepareAutoSelectionWithProbes(ctx context.Context, subscriptionID string, snapshot autoSelectionSnapshot, runProbes bool) (preparedAutoSelection, error) {
 	all := strings.TrimSpace(subscriptionID) == "" || strings.EqualFold(strings.TrimSpace(subscriptionID), autoScopeAll)
 	prepared := preparedAutoSelection{snapshot: snapshot, all: all}
 	if all {
-		decision, selectedSub, fallbackSub, err := s.evaluateAutoSelectionAll(ctx, snapshot.subscriptions, snapshot.settings, snapshot.state, true)
+		decision, selectedSub, fallbackSub, err := s.evaluateAutoSelectionAll(ctx, snapshot.subscriptions, snapshot.settings, snapshot.state, runProbes)
 		if err != nil {
 			return preparedAutoSelection{}, err
 		}
@@ -108,7 +112,7 @@ func (s *Service) prepareAutoSelection(ctx context.Context, subscriptionID strin
 		if sub.IsExpired(s.currentTime().UTC()) {
 			return preparedAutoSelection{}, fmt.Errorf("subscription %q expired; its servers are view-only", subscriptionID)
 		}
-		decision, err := s.evaluateAutoSelection(ctx, sub, snapshot.settings, snapshot.state, true)
+		decision, err := s.evaluateAutoSelection(ctx, sub, snapshot.settings, snapshot.state, runProbes)
 		if err != nil {
 			return preparedAutoSelection{}, err
 		}

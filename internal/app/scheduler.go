@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 )
@@ -11,7 +10,6 @@ const (
 	maxRefreshConfigPollInterval = time.Second
 	maxHealthConfigPollInterval  = time.Second
 	connectionWatchInterval      = 15 * time.Second
-	activeGETFailureThreshold    = 3
 )
 
 // Scheduler periodically refreshes subscriptions using the global settings interval.
@@ -24,9 +22,9 @@ type Scheduler struct {
 	healthTrigger          func() (string, bool)
 	triggeredHealthCheck   func(context.Context, string)
 	recoveryCheck          func(context.Context) (bool, string, error)
+	recoveryFailover       func(context.Context, string) error
 	healthMu               sync.Mutex
-	lastHealthRunAt        time.Time
-	activeGETFailures      int
+	lastRecoveryAt         time.Time
 	recoveryRetryEvery     time.Duration
 	refreshConfigPollEvery time.Duration
 	healthConfigPollEvery  time.Duration
@@ -64,6 +62,12 @@ func (s *Scheduler) SetHealthCheck(check func(context.Context)) {
 func (s *Scheduler) SetHealthTrigger(trigger func() (string, bool), check func(context.Context, string)) {
 	s.healthTrigger = trigger
 	s.triggeredHealthCheck = check
+}
+
+// SetRecoveryFailover overrides the cached failover step used by the active
+// connection watcher. The full health pass still runs immediately afterwards.
+func (s *Scheduler) SetRecoveryFailover(failover func(context.Context, string) error) {
+	s.recoveryFailover = failover
 }
 
 // Start begins the background refresh loop.
@@ -196,32 +200,37 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 		return
 	}
 	if !needed {
-		s.activeGETFailures = 0
+		s.lastRecoveryAt = time.Time{}
 		return
-	}
-	if strings.HasPrefix(reason, activeGETFailureReasonPrefix) {
-		s.activeGETFailures++
-		if s.activeGETFailures < activeGETFailureThreshold {
-			s.logWarn(
-				"active auto route GET failed; waiting for confirmation",
-				"attempt", s.activeGETFailures,
-				"threshold", activeGETFailureThreshold,
-				"reason", reason,
-			)
-			return
-		}
-	} else {
-		// A missing runtime, subscription, or active node is a confirmed
-		// structural failure and does not need repeated GET confirmation.
-		s.activeGETFailures = 0
 	}
 	now := s.now()
-	if !s.lastHealthRunAt.IsZero() && now.Before(s.lastHealthRunAt.Add(s.recoveryRetryInterval())) {
+	if !s.lastRecoveryAt.IsZero() && now.Before(s.lastRecoveryAt.Add(s.recoveryRetryInterval())) {
 		return
 	}
-	s.activeGETFailures = 0
-	s.logWarn("active auto route failed; starting immediate reselection", "reason", reason)
-	s.runHealthOnceLocked(ctx)
+	s.lastRecoveryAt = now
+	s.logWarn("active auto route failed; starting cached failover", "reason", reason)
+	failoverAttempted := false
+	if s.recoveryFailover != nil {
+		failoverAttempted = true
+		err = s.recoveryFailover(ctx, reason)
+	} else if s.service != nil {
+		failoverAttempted = true
+		err = s.service.RunAutoFailover(ctx, reason)
+	}
+	if err != nil {
+		s.logWarn("cached auto failover", "error", err.Error())
+	}
+	s.logInfo("starting full auto health check after failover")
+	healthCtx := ctx
+	if failoverAttempted && err == nil {
+		healthCtx = withPostFailoverOptimization(ctx)
+	}
+	s.runHealthOnceLocked(healthCtx)
+	if failoverAttempted && err == nil {
+		// The replacement route passed its post-apply egress check. Do not let
+		// backoff suppress recovery if that different route also fails soon.
+		s.lastRecoveryAt = time.Time{}
+	}
 }
 
 func (s *Scheduler) runOnce(ctx context.Context) {
@@ -291,7 +300,6 @@ func (s *Scheduler) runHealthOnce(ctx context.Context) {
 }
 
 func (s *Scheduler) runHealthOnceLocked(ctx context.Context) {
-	s.lastHealthRunAt = s.now()
 	if s.healthCheck != nil {
 		s.healthCheck(ctx)
 		return
@@ -304,7 +312,6 @@ func (s *Scheduler) runHealthOnceLocked(ctx context.Context) {
 func (s *Scheduler) runTriggeredHealthOnce(ctx context.Context, scope string) {
 	s.healthMu.Lock()
 	defer s.healthMu.Unlock()
-	s.lastHealthRunAt = s.now()
 	if s.triggeredHealthCheck != nil {
 		s.triggeredHealthCheck(ctx, scope)
 		return

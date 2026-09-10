@@ -251,8 +251,26 @@ func TestFirewallManagerDisableRemovesDNSMasqSnippet(t *testing.T) {
 func writeExecutable(t *testing.T, path, contents string) string {
 	t.Helper()
 
-	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".fastlane-executable-*")
+	if err != nil {
+		t.Fatalf("create executable: %v", err)
+	}
+	tmpPath := tmp.Name()
+	t.Cleanup(func() { _ = os.Remove(tmpPath) })
+
+	if _, err := tmp.WriteString(contents); err != nil {
+		_ = tmp.Close()
 		t.Fatalf("write executable: %v", err)
+	}
+	if err := tmp.Chmod(0o755); err != nil {
+		_ = tmp.Close()
+		t.Fatalf("chmod executable: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatalf("close executable: %v", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		t.Fatalf("publish executable: %v", err)
 	}
 
 	return path

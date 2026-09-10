@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -469,58 +470,78 @@ func TestSchedulerConnectionWatchBacksOffRepeatedRecoveryScans(t *testing.T) {
 	}
 }
 
-func TestSchedulerConnectionWatchConfirmsTransientGETFailure(t *testing.T) {
+func TestSchedulerConnectionWatchFailsOverBeforeFullScan(t *testing.T) {
 	t.Parallel()
 
 	scheduler := NewScheduler(nil)
 	scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
 		return true, activeGETFailureReasonPrefix + "temporary timeout", nil
 	}
-	healthCalls := 0
-	scheduler.healthCheck = func(context.Context) {
-		healthCalls++
+	steps := make([]string, 0, 2)
+	postFailoverOptimization := false
+	scheduler.recoveryFailover = func(context.Context, string) error {
+		steps = append(steps, "cached failover")
+		return nil
+	}
+	scheduler.healthCheck = func(ctx context.Context) {
+		steps = append(steps, "full scan")
+		postFailoverOptimization = isPostFailoverOptimization(ctx)
 	}
 
-	for attempt := 1; attempt < activeGETFailureThreshold; attempt++ {
-		scheduler.runConnectionWatchOnce(context.Background())
-		if healthCalls != 0 {
-			t.Fatalf("transient GET failure triggered reselection on attempt %d", attempt)
-		}
-	}
 	scheduler.runConnectionWatchOnce(context.Background())
-	if healthCalls != 1 {
-		t.Fatalf("confirmed GET failure did not trigger reselection: %d", healthCalls)
+	if !reflect.DeepEqual(steps, []string{"cached failover", "full scan"}) {
+		t.Fatalf("expected cached failover before full scan, got %v", steps)
+	}
+	if !postFailoverOptimization {
+		t.Fatal("expected the post-failover scan to bypass cooldown once")
 	}
 }
 
-func TestSchedulerConnectionWatchResetsGETFailureConfirmation(t *testing.T) {
+func TestSchedulerConnectionWatchDoesNothingWhileActiveRouteIsHealthy(t *testing.T) {
 	t.Parallel()
 
-	needed := true
 	scheduler := NewScheduler(nil)
 	scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
-		if !needed {
-			return false, "", nil
-		}
-		return true, activeGETFailureReasonPrefix + "temporary timeout", nil
+		return false, "", nil
 	}
 	healthCalls := 0
+	failoverCalls := 0
+	scheduler.recoveryFailover = func(context.Context, string) error {
+		failoverCalls++
+		return nil
+	}
 	scheduler.healthCheck = func(context.Context) {
 		healthCalls++
 	}
 
 	scheduler.runConnectionWatchOnce(context.Background())
-	needed = false
-	scheduler.runConnectionWatchOnce(context.Background())
-	needed = true
-	scheduler.runConnectionWatchOnce(context.Background())
-	scheduler.runConnectionWatchOnce(context.Background())
-	if healthCalls != 0 {
-		t.Fatalf("healthy observation did not reset GET confirmation: %d", healthCalls)
+	if failoverCalls != 0 || healthCalls != 0 {
+		t.Fatalf("healthy route triggered failover=%d scan=%d", failoverCalls, healthCalls)
 	}
+}
+
+func TestSchedulerConnectionWatchDoesNotThrottleASecondFailedRouteAfterSuccessfulFailover(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 9, 10, 16, 0, 0, 0, time.UTC)
+	scheduler := NewScheduler(nil)
+	scheduler.now = func() time.Time { return now }
+	scheduler.recoveryRetryEvery = 5 * time.Minute
+	scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
+		return true, activeGETFailureReasonPrefix + "timeout", nil
+	}
+	failoverCalls := 0
+	scheduler.recoveryFailover = func(context.Context, string) error {
+		failoverCalls++
+		return nil
+	}
+	scheduler.healthCheck = func(context.Context) {}
+
 	scheduler.runConnectionWatchOnce(context.Background())
-	if healthCalls != 1 {
-		t.Fatalf("three fresh GET failures did not trigger reselection: %d", healthCalls)
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
+	if failoverCalls != 2 {
+		t.Fatalf("expected immediate recovery for a second failed route, got %d attempts", failoverCalls)
 	}
 }
 

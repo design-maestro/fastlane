@@ -7,10 +7,12 @@ type NodeHealth struct {
 	NodeID               string    `json:"node_id"`
 	LastLatency          Duration  `json:"last_latency"`
 	AverageLatency       Duration  `json:"average_latency"`
+	LatencyVariation     Duration  `json:"latency_variation"`
 	SuccessCount         int       `json:"success_count"`
 	FailureCount         int       `json:"failure_count"`
 	ConsecutiveFailures  int       `json:"consecutive_failures"`
 	ConsecutiveSuccesses int       `json:"consecutive_successes"`
+	InstabilityPenalty   int       `json:"instability_penalty"`
 	LastCheckedAt        time.Time `json:"last_checked_at"`
 	Healthy              bool      `json:"healthy"`
 	Score                float64   `json:"score"`

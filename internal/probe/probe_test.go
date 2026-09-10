@@ -104,3 +104,27 @@ func TestShouldSwitch(t *testing.T) {
 		t.Fatal("expected switch reason")
 	}
 }
+
+func TestShouldSwitchUsesFreshLatencyAndEscapesCooldownAboveCeiling(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 9, 10, 16, 0, 0, 0, time.UTC)
+	policy := probe.DefaultSwitchPolicy()
+	current := domain.NodeHealth{
+		NodeID:         "current",
+		Healthy:        true,
+		LastLatency:    domain.NewDuration(321 * time.Millisecond),
+		AverageLatency: domain.NewDuration(40 * time.Millisecond),
+	}
+	candidate := domain.NodeHealth{
+		NodeID:         "candidate",
+		Healthy:        true,
+		LastLatency:    domain.NewDuration(26 * time.Millisecond),
+		AverageLatency: domain.NewDuration(120 * time.Millisecond),
+	}
+
+	should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Minute), policy)
+	if !should {
+		t.Fatalf("expected fresh 321ms route to escape cooldown for 26ms candidate, reason=%q", reason)
+	}
+}
