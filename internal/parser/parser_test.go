@@ -179,6 +179,31 @@ func TestParseShadowsocksLink(t *testing.T) {
 	}
 }
 
+func TestParseShadowsocksSIP002Link(t *testing.T) {
+	t.Parallel()
+
+	credentials := base64.RawURLEncoding.EncodeToString([]byte("chacha20-ietf-poly1305:paper-password"))
+	input := "ss://" + credentials + "@198.51.100.10:8388/?outline=1&prefix=demo#PaperVPN"
+	nodes, err := parser.ParseNodes(input, "Paper Provider")
+	if err != nil {
+		t.Fatalf("parse SIP002 node: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+
+	got := nodes[0]
+	if got.Address != "198.51.100.10" || got.Port != 8388 {
+		t.Fatalf("unexpected SIP002 endpoint: %+v", got)
+	}
+	if got.Encryption != "chacha20-ietf-poly1305" || got.Password != "paper-password" {
+		t.Fatalf("unexpected SIP002 credentials: %+v", got)
+	}
+	if got.Name != "PaperVPN" || got.Remark != "PaperVPN" {
+		t.Fatalf("unexpected SIP002 label: %+v", got)
+	}
+}
+
 func TestParseSocksLink(t *testing.T) {
 	t.Parallel()
 
