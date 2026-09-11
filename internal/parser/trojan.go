@@ -3,6 +3,7 @@ package parser
 import (
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -47,30 +48,55 @@ func ParseTrojan(raw, provider string) (domain.Node, error) {
 
 // ParseShadowsocks parses common SS share links.
 func ParseShadowsocks(raw, provider string) (domain.Node, error) {
-	trimmed := strings.TrimSpace(strings.TrimPrefix(raw, "ss://"))
-	fragment := ""
-	if idx := strings.Index(trimmed, "#"); idx >= 0 {
-		fragment = trimmed[idx+1:]
-		trimmed = trimmed[:idx]
-	}
-
-	decoded, err := decodeShadowsocksUserInfo(trimmed)
+	trimmed := strings.TrimSpace(raw)
+	parsed, err := url.Parse(trimmed)
 	if err != nil {
-		return domain.Node{}, err
+		return domain.Node{}, fmt.Errorf("parse shadowsocks link: %w", err)
 	}
 
-	parts := strings.Split(decoded, "@")
-	if len(parts) != 2 {
-		return domain.Node{}, fmt.Errorf("invalid shadowsocks payload")
+	var credentials, host, portText, fragment string
+	if parsed.User != nil && parsed.Host != "" {
+		fragment = parsed.Fragment
+		host = parsed.Hostname()
+		portText = parsed.Port()
+		credentials = parsed.User.Username()
+		if password, ok := parsed.User.Password(); ok {
+			credentials += ":" + password
+		} else {
+			credentials, err = decodeShadowsocksCredentials(credentials)
+			if err != nil {
+				return domain.Node{}, err
+			}
+		}
+	} else {
+		payload := strings.TrimPrefix(trimmed, parsed.Scheme+"://")
+		if idx := strings.Index(payload, "#"); idx >= 0 {
+			fragment, err = url.PathUnescape(payload[idx+1:])
+			if err != nil {
+				return domain.Node{}, fmt.Errorf("decode shadowsocks label: %w", err)
+			}
+			payload = payload[:idx]
+		}
+		decoded, decodeErr := decodeShadowsocksBase64(payload)
+		if decodeErr != nil {
+			return domain.Node{}, decodeErr
+		}
+		separator := strings.LastIndex(decoded, "@")
+		if separator <= 0 || separator == len(decoded)-1 {
+			return domain.Node{}, fmt.Errorf("invalid shadowsocks payload")
+		}
+		credentials = decoded[:separator]
+		host, portText, err = net.SplitHostPort(decoded[separator+1:])
+		if err != nil {
+			return domain.Node{}, fmt.Errorf("invalid shadowsocks host: %w", err)
+		}
 	}
 
-	credParts := strings.SplitN(parts[0], ":", 2)
+	credParts := strings.SplitN(credentials, ":", 2)
 	if len(credParts) != 2 {
 		return domain.Node{}, fmt.Errorf("invalid shadowsocks credentials")
 	}
-
-	host, portText, ok := strings.Cut(parts[1], ":")
-	if !ok {
+	if host == "" || portText == "" {
 		return domain.Node{}, fmt.Errorf("invalid shadowsocks host")
 	}
 
@@ -92,22 +118,29 @@ func ParseShadowsocks(raw, provider string) (domain.Node, error) {
 	return normalizeNode(node, provider)
 }
 
-func decodeShadowsocksUserInfo(input string) (string, error) {
-	if strings.Contains(input, "@") && strings.Contains(input, ":") {
+func decodeShadowsocksCredentials(input string) (string, error) {
+	if strings.Contains(input, ":") {
 		return input, nil
 	}
+	return decodeShadowsocksBase64(input)
+}
 
-	payload, err := base64.RawURLEncoding.DecodeString(input)
-	if err == nil {
-		return string(payload), nil
+func decodeShadowsocksBase64(input string) (string, error) {
+	encodings := []*base64.Encoding{
+		base64.RawURLEncoding,
+		base64.URLEncoding,
+		base64.RawStdEncoding,
+		base64.StdEncoding,
 	}
-
-	payload, err = base64.StdEncoding.DecodeString(input)
-	if err == nil {
-		return string(payload), nil
+	var lastErr error
+	for _, encoding := range encodings {
+		payload, err := encoding.DecodeString(input)
+		if err == nil {
+			return string(payload), nil
+		}
+		lastErr = err
 	}
-
-	return "", fmt.Errorf("decode shadowsocks payload: %w", err)
+	return "", fmt.Errorf("decode shadowsocks payload: %w", lastErr)
 }
 
 func passwordFromURL(parsed *url.URL) string {
