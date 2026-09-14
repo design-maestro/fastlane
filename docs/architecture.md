@@ -70,10 +70,12 @@ making a missing country-specific tag a requirement.
 6. Validate and activate the selected Xray configuration.
 7. Persist the actual subscription, node, latency, health map, mode, and failure reason.
 
-The daemon also verifies the active route. A missing runtime, subscription, or
-active node starts an immediate full reselection for the configured auto scope.
-A transient active-route GET failure must be observed three times in a row before
-reselection starts. Manual mode never moves to another server on its own.
+The daemon verifies the active route every three seconds independently from
+subscription refreshes and full server scans. A missing runtime, subscription,
+or active node starts recovery for the configured scope. A transient active-route
+GET failure must be observed twice in a row before failover starts. Auto mode may
+use a verified reserve or direct fail-open; manual mode permits only emergency
+replacement and keeps manual selection semantics.
 
 ## Safety properties
 
