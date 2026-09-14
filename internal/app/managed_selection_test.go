@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ type managedRecordingBackend struct {
 	selects      []string
 	persistCalls int
 	removed      []string
+	removeErr    error
 }
 
 func (b *managedRecordingBackend) PrepareOutbound(_ context.Context, node domain.Node, _ int) (string, error) {
@@ -24,7 +26,7 @@ func (b *managedRecordingBackend) PrepareOutbound(_ context.Context, node domain
 }
 func (b *managedRecordingBackend) RemoveOutbound(_ context.Context, tag string) error {
 	b.removed = append(b.removed, tag)
-	return nil
+	return b.removeErr
 }
 func (b *managedRecordingBackend) SelectOutbound(_ context.Context, tag string) error {
 	b.selected = tag
@@ -301,6 +303,136 @@ func TestMaintainManagedReservesChecksPreviousActiveNodeInDirectMode(t *testing.
 	}
 	if probed != "fastlane-node-only-node" {
 		t.Fatalf("previous active node was not rechecked: %q", probed)
+	}
+}
+
+func TestManagedFailoverUsesHighestRankedReserveAndKeepsManualMode(t *testing.T) {
+	current := domain.Node{ID: "current", Protocol: domain.ProtocolSocks, Address: "192.0.2.1", Port: 1080}
+	slower := domain.Node{ID: "slower", Protocol: domain.ProtocolSocks, Address: "192.0.2.2", Port: 1080}
+	faster := domain.Node{ID: "faster", Protocol: domain.ProtocolSocks, Address: "192.0.2.3", Port: 1080}
+	sub := domain.Subscription{ID: "sub", Nodes: []domain.Node{current, slower, faster}}
+	state := domain.DefaultRuntimeState()
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	state.ActiveTransport = domain.TransportModeProxy
+	state.Mode = domain.SelectionModeManual
+	state.ActiveSubscriptionID = sub.ID
+	state.ActiveNodeID = current.ID
+	state.SelectedOutboundTag = "fastlane-node-current"
+	state.Health = map[string]domain.NodeHealth{
+		slower.ID: reserveHealth(true, 200*time.Millisecond),
+		faster.ID: reserveHealth(true, 50*time.Millisecond),
+	}
+	state.RuntimeOutbounds = []domain.RuntimeOutboundState{
+		{Tag: "fastlane-node-current", SubscriptionID: sub.ID, NodeID: current.ID, Role: "active"},
+		{Tag: "fastlane-node-slower", SubscriptionID: sub.ID, NodeID: slower.ID, Role: "reserve", VerifiedAt: time.Now().UTC()},
+		{Tag: "fastlane-node-faster", SubscriptionID: sub.ID, NodeID: faster.ID, Role: "reserve", VerifiedAt: time.Now().UTC()},
+	}
+	store := &memoryStore{settings: domain.DefaultSettings(), state: state, subs: []domain.Subscription{sub}}
+	managed := &managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: state.SelectedOutboundTag}
+	service := NewService(Dependencies{Store: store, Backend: managed})
+	probed := make([]string, 0, 1)
+	service.managedOutboundProbe = func(_ context.Context, _ backend.ManagedBackend, _ int, tag string) error {
+		probed = append(probed, tag)
+		return nil
+	}
+	snapshot, err := service.captureAutoSelectionSnapshot()
+	if err != nil {
+		t.Fatalf("capture snapshot: %v", err)
+	}
+
+	switched, attempted, err := service.tryManagedReserveFailover(context.Background(), snapshot, domain.SelectionModeManual, "active failed")
+	if err != nil {
+		t.Fatalf("reserve failover: %v", err)
+	}
+	if !switched || !attempted || len(probed) != 0 {
+		t.Fatalf("unexpected reserve attempt: switched=%t attempted=%t probed=%v", switched, attempted, probed)
+	}
+	if store.state.ActiveNodeID != faster.ID || store.state.Mode != domain.SelectionModeManual {
+		t.Fatalf("manual failover state = %+v", store.state)
+	}
+}
+
+func TestMaintainManagedReservesLimitsCycleToFourProbes(t *testing.T) {
+	nodes := []domain.Node{{ID: "active", Protocol: domain.ProtocolSocks, Address: "192.0.2.1", Port: 1080}}
+	for index := 2; index <= 8; index++ {
+		nodes = append(nodes, domain.Node{ID: fmt.Sprintf("node-%d", index), Protocol: domain.ProtocolSocks, Address: fmt.Sprintf("192.0.2.%d", index), Port: 1080})
+	}
+	state := domain.DefaultRuntimeState()
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	state.ActiveTransport = domain.TransportModeProxy
+	state.Mode = domain.SelectionModeAuto
+	state.ActiveSubscriptionID = "sub"
+	state.ActiveNodeID = "active"
+	store := &memoryStore{settings: domain.DefaultSettings(), state: state, subs: []domain.Subscription{{ID: "sub", Nodes: nodes}}}
+	managed := &managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: "fastlane-node-active"}
+	service := NewService(Dependencies{Store: store, Backend: managed})
+	var probes atomic.Int32
+	service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error {
+		probes.Add(1)
+		return nil
+	}
+
+	if err := service.MaintainManagedReserves(context.Background()); err != nil {
+		t.Fatalf("maintain reserves: %v", err)
+	}
+	if probes.Load() != managedReserveProbeLimit {
+		t.Fatalf("probe count = %d, want %d", probes.Load(), managedReserveProbeLimit)
+	}
+}
+
+func TestConnectionFailoverFallsBackDirectAfterReserveFailure(t *testing.T) {
+	current := domain.Node{ID: "current", Protocol: domain.ProtocolSocks, Address: "192.0.2.1", Port: 1080}
+	reserve := domain.Node{ID: "reserve", Protocol: domain.ProtocolSocks, Address: "192.0.2.2", Port: 1080}
+	sub := domain.Subscription{ID: "sub", Nodes: []domain.Node{current, reserve}}
+	state := domain.DefaultRuntimeState()
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	state.ActiveTransport = domain.TransportModeProxy
+	state.Mode = domain.SelectionModeManual
+	state.ActiveSubscriptionID = sub.ID
+	state.ActiveNodeID = current.ID
+	state.SelectedOutboundTag = "fastlane-node-current"
+	state.Health = map[string]domain.NodeHealth{reserve.ID: reserveHealth(true, 50*time.Millisecond)}
+	state.RuntimeOutbounds = []domain.RuntimeOutboundState{
+		{Tag: state.SelectedOutboundTag, SubscriptionID: sub.ID, NodeID: current.ID, Role: "active"},
+		{Tag: "fastlane-node-reserve", SubscriptionID: sub.ID, NodeID: reserve.ID, Role: "reserve", VerifiedAt: time.Now().UTC().Add(-2 * time.Minute)},
+	}
+	store := &memoryStore{settings: domain.DefaultSettings(), state: state, subs: []domain.Subscription{sub}}
+	managed := &managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: state.SelectedOutboundTag}
+	service := NewService(Dependencies{Store: store, Backend: managed})
+	service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error {
+		return fmt.Errorf("reserve unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := service.RunConnectionFailover(ctx, "active failed"); err != nil {
+		t.Fatalf("fail open: %v", err)
+	}
+	if store.state.OperationalMode != domain.OperationalModeDirect || store.state.Connected || managed.selected != "fastlane-direct" {
+		t.Fatalf("direct fallback state = %+v, selected=%s", store.state, managed.selected)
+	}
+}
+
+func TestSafeRemoveManagedOutboundProtectsSelectedAndTracksFailure(t *testing.T) {
+	store := &memoryStore{settings: domain.DefaultSettings(), state: domain.DefaultRuntimeState()}
+	managed := &managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: "selected"}
+	service := NewService(Dependencies{Store: store, Backend: managed})
+	if err := service.safeRemoveManagedOutbound(context.Background(), managed, "selected"); err != nil {
+		t.Fatalf("protect selected outbound: %v", err)
+	}
+	if len(managed.removed) != 0 {
+		t.Fatalf("selected outbound was removed: %v", managed.removed)
+	}
+
+	managed.removeErr = fmt.Errorf("xray API unavailable")
+	if err := service.safeRemoveManagedOutbound(context.Background(), managed, "orphan"); err == nil {
+		t.Fatal("expected outbound removal error")
+	}
+	if !hasRuntimeRole(store.state.RuntimeOutbounds, "orphan", "draining") {
+		t.Fatalf("failed removal was not tracked: %+v", store.state.RuntimeOutbounds)
 	}
 }
 

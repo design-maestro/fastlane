@@ -26,13 +26,17 @@ type RuntimeOperation struct {
 
 // RuntimeOutboundState tracks live handlers retained across route switches.
 type RuntimeOutboundState struct {
-	Tag            string    `json:"tag"`
-	SubscriptionID string    `json:"subscription_id,omitempty"`
-	NodeID         string    `json:"node_id,omitempty"`
-	Role           string    `json:"role"`
-	VerifiedAt     time.Time `json:"verified_at,omitempty"`
-	RetireAfter    time.Time `json:"retire_after,omitempty"`
-	RemoveBy       time.Time `json:"remove_by,omitempty"`
+	Tag             string    `json:"tag"`
+	SubscriptionID  string    `json:"subscription_id,omitempty"`
+	NodeID          string    `json:"node_id,omitempty"`
+	Role            string    `json:"role"`
+	VerifiedAt      time.Time `json:"verified_at,omitempty"`
+	Score           float64   `json:"score,omitempty"`
+	Samples         int       `json:"samples,omitempty"`
+	SelectionReason string    `json:"selection_reason,omitempty"`
+	PromotionWins   int       `json:"promotion_wins,omitempty"`
+	RetireAfter     time.Time `json:"retire_after,omitempty"`
+	RemoveBy        time.Time `json:"remove_by,omitempty"`
 }
 
 type CandidateBackoffState struct {

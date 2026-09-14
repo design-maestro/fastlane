@@ -105,15 +105,19 @@ func (s *Service) RunConnectionFailover(ctx context.Context, failureReason strin
 	if !ok {
 		return err
 	}
+	fallbackSnapshot, snapshotErr := s.captureAutoSelectionSnapshot()
+	if snapshotErr != nil {
+		return fmt.Errorf("%v; refresh direct fallback state: %w", err, snapshotErr)
+	}
 	directErr := runStoreWriteLocked(s, func() error {
-		current, currentErr := s.autoSelectionSnapshotCurrentLocked(snapshot)
+		current, currentErr := s.autoSelectionSnapshotCurrentLocked(fallbackSnapshot)
 		if currentErr != nil {
 			return currentErr
 		}
 		if !current {
 			return errAutoSelectionSnapshotChanged
 		}
-		return s.activateManagedDirect(ctx, managed, snapshot.state, failureReason)
+		return s.activateManagedDirect(ctx, managed, fallbackSnapshot.state, failureReason)
 	})
 	if directErr != nil {
 		return fmt.Errorf("%v; activate direct fallback: %w", err, directErr)
@@ -200,6 +204,19 @@ func (s *Service) runAutoFailoverWithSnapshot(ctx context.Context, failureReason
 	if state.ZapretTest.Active || state.Mode != domain.SelectionModeAuto || state.ActiveSubscriptionID == "" {
 		return nil
 	}
+	if switched, attempted, _ := s.tryManagedReserveFailover(ctx, snapshot, domain.SelectionModeAuto, failureReason); switched {
+		return nil
+	} else if attempted {
+		fresh, captureErr := s.captureAutoSelectionSnapshot()
+		if captureErr != nil {
+			return captureErr
+		}
+		if fresh.state.Mode != domain.SelectionModeAuto {
+			return errAutoSelectionSnapshotChanged
+		}
+		snapshot = fresh
+		state = fresh.state
+	}
 
 	state.Health = cloneHealthMap(state.Health)
 	if failureReason == "" {
@@ -258,6 +275,19 @@ func (s *Service) runManualFailoverWithSnapshot(ctx context.Context, failureReas
 	if state.ZapretTest.Active || state.Mode != domain.SelectionModeManual || state.ActiveSubscriptionID == "" || state.ActiveNodeID == "" {
 		return nil
 	}
+	if switched, attempted, _ := s.tryManagedReserveFailover(ctx, snapshot, domain.SelectionModeManual, failureReason); switched {
+		return nil
+	} else if attempted {
+		fresh, captureErr := s.captureAutoSelectionSnapshot()
+		if captureErr != nil {
+			return captureErr
+		}
+		if fresh.state.Mode != domain.SelectionModeManual {
+			return errAutoSelectionSnapshotChanged
+		}
+		snapshot = fresh
+		state = fresh.state
+	}
 	if failureReason == "" {
 		failureReason = "active manual route failed"
 	}
@@ -294,6 +324,9 @@ func (s *Service) runManualFailoverWithSnapshot(ctx context.Context, failureReas
 	}
 	if !prepared.decision.HasHealthyCandidate || prepared.decision.SelectedNode.ID == "" || prepared.selectedSub.ID == "" {
 		return fmt.Errorf("no healthy manual fallback is available")
+	}
+	if !directRecovery && prepared.selectedSub.ID == state.ActiveSubscriptionID && prepared.decision.SelectedNode.ID == state.ActiveNodeID {
+		return fmt.Errorf("no different healthy manual fallback is available")
 	}
 
 	return runStoreWriteLocked(s, func() error {

@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -12,127 +14,93 @@ import (
 )
 
 const managedReserveLimit = 2
+const managedReserveProbeLimit = 4
 
 type managedReserveCandidate struct {
-	sub  domain.Subscription
-	node domain.Node
-	tag  string
-	slot int
+	sub        domain.Subscription
+	node       domain.Node
+	tag        string
+	verifiedAt time.Time
 }
 
-// MaintainManagedReserves verifies at most two standby handlers through the
-// live Xray probe inbounds. It never changes the user balancer target.
+// MaintainManagedReserves verifies up to four candidates, with no more than
+// two concurrent checks, through the live Xray probe inbounds. It retains at
+// most two verified reserves and never changes the user balancer target.
 func (s *Service) MaintainManagedReserves(ctx context.Context) error {
 	managed, ok := s.backend.(backend.ManagedBackend)
 	if !ok || s.store == nil {
 		return nil
 	}
-	return runStoreWriteLocked(s, func() error {
-		state, err := s.store.LoadState()
-		if err != nil {
-			return err
+	snapshot, err := s.captureAutoSelectionSnapshot()
+	if err != nil {
+		return err
+	}
+	state := snapshot.state
+	if state.Mode != domain.SelectionModeAuto && state.Mode != domain.SelectionModeManual {
+		return nil
+	}
+	selected, err := managed.SelectedOutbound(ctx)
+	if err != nil {
+		return nil
+	}
+	now := s.currentTime().UTC()
+	allCandidates := collectManagedReserveCandidates(snapshot.subscriptions, snapshot.settings, state, now)
+	ranked := rankManagedReserveCandidates(allCandidates, state.Health)
+	existing := existingManagedReserveCandidates(state.RuntimeOutbounds, allCandidates)
+	ordered := managedReserveProbeOrder(existing, ranked, state.Health, now)
+	candidates := make([]managedReserveCandidate, 0, managedReserveProbeLimit)
+	seenNodes := make(map[string]struct{}, len(ordered))
+	seenTags := map[string]struct{}{selected: {}}
+	knownTags := runtimeOutboundTags(state.RuntimeOutbounds)
+	preparedNew := make(map[string]struct{})
+	for _, candidate := range ordered {
+		if len(candidates) == managedReserveProbeLimit {
+			break
 		}
-		if state.Mode != domain.SelectionModeAuto && state.Mode != domain.SelectionModeManual {
-			return nil
+		nodeKey := domain.AutoExcludedNodeKey(candidate.sub.ID, candidate.node.ID)
+		if _, duplicate := seenNodes[nodeKey]; duplicate {
+			continue
 		}
-		selected, err := managed.SelectedOutbound(ctx)
-		if err != nil {
-			return nil
-		}
-		subscriptions, err := s.store.LoadSubscriptions()
-		if err != nil {
-			return err
-		}
-		settings, err := s.store.LoadSettings()
-		if err != nil {
-			return err
-		}
-		excluded := make(map[string]struct{}, len(settings.AutoExcludedNodes))
-		for _, key := range domain.NormalizeAutoExcludedNodes(settings.AutoExcludedNodes) {
-			excluded[key] = struct{}{}
-		}
-		now := s.currentTime().UTC()
-		candidates := make([]managedReserveCandidate, 0, managedReserveLimit)
-		seenTags := map[string]struct{}{selected: {}}
-		for _, sub := range subscriptions {
-			if sub.IsExpired(now) {
+		seenNodes[nodeKey] = struct{}{}
+		if candidate.tag == "" {
+			resolved, resolveErr := s.resolveNodeAddress(ctx, candidate.node)
+			if resolveErr != nil {
 				continue
 			}
-			for _, node := range sub.Nodes {
-				if state.OperationalMode != domain.OperationalModeDirect && sub.ID == state.ActiveSubscriptionID && node.ID == state.ActiveNodeID {
-					continue
-				}
-				if _, hidden := excluded[domain.AutoExcludedNodeKey(sub.ID, node.ID)]; hidden {
-					continue
-				}
-				resolved, resolveErr := s.resolveNodeAddress(ctx, node)
-				if resolveErr != nil {
-					continue
-				}
-				tag, prepareErr := managed.PrepareOutbound(ctx, resolved, 0)
-				if prepareErr != nil {
-					continue
-				}
-				if _, duplicate := seenTags[tag]; duplicate {
-					continue
-				}
-				seenTags[tag] = struct{}{}
-				if backoff, exists := state.CandidateBackoff[tag]; exists && now.Before(backoff.RetryAfter) {
-					_ = managed.RemoveOutbound(ctx, tag)
-					continue
-				}
-				candidates = append(candidates, managedReserveCandidate{sub: sub, node: node, tag: tag, slot: len(candidates)})
-				break // prefer reserves from different providers
+			tag, prepareErr := managed.PrepareOutbound(ctx, resolved, 0)
+			if prepareErr != nil {
+				continue
 			}
-			if len(candidates) == managedReserveLimit {
-				break
+			candidate.tag = tag
+			if _, known := knownTags[tag]; !known {
+				preparedNew[tag] = struct{}{}
 			}
 		}
-		if len(candidates) < managedReserveLimit {
-			for _, sub := range subscriptions {
-				for _, node := range sub.Nodes {
-					if len(candidates) == managedReserveLimit {
-						break
-					}
-					if sub.IsExpired(now) || (state.OperationalMode != domain.OperationalModeDirect && sub.ID == state.ActiveSubscriptionID && node.ID == state.ActiveNodeID) {
-						continue
-					}
-					if _, hidden := excluded[domain.AutoExcludedNodeKey(sub.ID, node.ID)]; hidden {
-						continue
-					}
-					resolved, resolveErr := s.resolveNodeAddress(ctx, node)
-					if resolveErr != nil {
-						continue
-					}
-					tag, prepareErr := managed.PrepareOutbound(ctx, resolved, 0)
-					if prepareErr != nil {
-						continue
-					}
-					if _, duplicate := seenTags[tag]; duplicate {
-						continue
-					}
-					seenTags[tag] = struct{}{}
-					if backoff, exists := state.CandidateBackoff[tag]; exists && now.Before(backoff.RetryAfter) {
-						_ = managed.RemoveOutbound(ctx, tag)
-						continue
-					}
-					candidates = append(candidates, managedReserveCandidate{sub: sub, node: node, tag: tag, slot: len(candidates)})
-				}
-			}
+		if _, duplicate := seenTags[candidate.tag]; duplicate {
+			continue
 		}
+		seenTags[candidate.tag] = struct{}{}
+		if backoff, exists := state.CandidateBackoff[candidate.tag]; exists && now.Before(backoff.RetryAfter) {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
 
-		type result struct {
-			candidate managedReserveCandidate
-			err       error
-			latency   time.Duration
-		}
-		results := make(chan result, len(candidates))
-		var wg sync.WaitGroup
-		for _, candidate := range candidates {
-			candidate := candidate
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+	type result struct {
+		candidate managedReserveCandidate
+		err       error
+		latency   time.Duration
+	}
+	results := make(chan result, len(candidates))
+	jobs := make(chan managedReserveCandidate)
+	var wg sync.WaitGroup
+	workerCount := min(2, len(candidates))
+	for slot := 0; slot < workerCount; slot++ {
+		slot := slot
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for candidate := range jobs {
 				started := time.Now()
 				probe := s.probeManagedOutbound
 				if s.managedOutboundProbe != nil {
@@ -140,56 +108,126 @@ func (s *Service) MaintainManagedReserves(ctx context.Context) error {
 						return s.managedOutboundProbe(probeCtx, probeBackend, slot, tag)
 					}
 				}
-				probeErr := probe(ctx, managed, candidate.slot, candidate.tag)
+				probeErr := probe(ctx, managed, slot, candidate.tag)
 				results <- result{candidate: candidate, err: probeErr, latency: time.Since(started)}
-			}()
+			}
+		}()
+	}
+	go func() {
+		for _, candidate := range candidates {
+			jobs <- candidate
 		}
+		close(jobs)
 		wg.Wait()
 		close(results)
+	}()
 
-		state.CandidateBackoff = cloneCandidateBackoff(state.CandidateBackoff)
-		state.Health = cloneHealthMap(state.Health)
-		verified := make([]domain.RuntimeOutboundState, 0, managedReserveLimit)
-		for item := range results {
-			if item.err == nil {
-				delete(state.CandidateBackoff, item.candidate.tag)
-				verified = append(verified, domain.RuntimeOutboundState{Tag: item.candidate.tag, SubscriptionID: item.candidate.sub.ID, NodeID: item.candidate.node.ID, Role: "reserve", VerifiedAt: now})
-				previous := state.Health[item.candidate.node.ID]
-				previous.NodeID = item.candidate.node.ID
-				state.Health[item.candidate.node.ID] = probe.UpdateHealth(previous, true, item.latency, now, "", 2)
-				continue
-			}
-			entry := state.CandidateBackoff[item.candidate.tag]
-			entry.Tag = item.candidate.tag
-			entry.ConsecutiveFailures++
-			entry.RetryAfter = now.Add(managedCandidateBackoff(entry.ConsecutiveFailures))
-			state.CandidateBackoff[item.candidate.tag] = entry
-			previous := state.Health[item.candidate.node.ID]
-			previous.NodeID = item.candidate.node.ID
-			state.Health[item.candidate.node.ID] = probe.UpdateHealth(previous, false, item.latency, now, item.err.Error(), 2)
-			_ = managed.RemoveOutbound(ctx, item.candidate.tag)
+	state.CandidateBackoff = cloneCandidateBackoff(state.CandidateBackoff)
+	state.Health = cloneHealthMap(state.Health)
+	successful := make([]managedReserveCandidate, 0, len(candidates))
+	for item := range results {
+		previous := state.Health[item.candidate.node.ID]
+		previous.NodeID = item.candidate.node.ID
+		if item.err == nil {
+			delete(state.CandidateBackoff, item.candidate.tag)
+			state.Health[item.candidate.node.ID] = probe.UpdateHealth(previous, true, item.latency, now, "", 2)
+			successful = append(successful, item.candidate)
+			continue
 		}
-		kept := make([]domain.RuntimeOutboundState, 0, len(state.RuntimeOutbounds)+len(verified))
-		verifiedTags := make(map[string]struct{}, len(verified))
-		for _, outbound := range verified {
-			verifiedTags[outbound.Tag] = struct{}{}
+		entry := state.CandidateBackoff[item.candidate.tag]
+		entry.Tag = item.candidate.tag
+		entry.ConsecutiveFailures++
+		entry.RetryAfter = now.Add(managedCandidateBackoff(entry.ConsecutiveFailures))
+		state.CandidateBackoff[item.candidate.tag] = entry
+		state.Health[item.candidate.node.ID] = probe.UpdateHealth(previous, false, item.latency, now, item.err.Error(), 2)
+	}
+
+	nextManaged := selectManagedReserveStates(successful, state.Health, state.RuntimeOutbounds, now)
+	keptTags := make(map[string]struct{}, len(nextManaged))
+	for _, outbound := range nextManaged {
+		keptTags[outbound.Tag] = struct{}{}
+	}
+	kept := make([]domain.RuntimeOutboundState, 0, len(state.RuntimeOutbounds)+len(nextManaged))
+	obsolete := make(map[string]struct{})
+	for _, outbound := range state.RuntimeOutbounds {
+		if outbound.Role != "reserve" && outbound.Role != "candidate" {
+			kept = append(kept, outbound)
+			continue
 		}
-		for _, outbound := range state.RuntimeOutbounds {
-			if outbound.Role != "reserve" {
-				kept = append(kept, outbound)
-				continue
+		if _, retain := keptTags[outbound.Tag]; !retain {
+			obsolete[outbound.Tag] = struct{}{}
+		}
+	}
+	state.RuntimeOutbounds = append(kept, nextManaged...)
+
+	return runStoreWriteLocked(s, func() error {
+		current, currentErr := s.autoSelectionSnapshotCurrentLocked(snapshot)
+		if currentErr != nil {
+			return currentErr
+		}
+		if !current {
+			var cleanupErr error
+			for tag := range preparedNew {
+				if err := s.safeRemoveManagedOutbound(ctx, managed, tag); err != nil {
+					cleanupErr = err
+				}
 			}
-			if _, retain := verifiedTags[outbound.Tag]; !retain {
-				if !strings.HasPrefix(strings.TrimSpace(outbound.Tag), "fastlane-node-") {
-					kept = append(kept, outbound)
-				} else {
-					_ = managed.RemoveOutbound(ctx, outbound.Tag)
+			s.logDebug("managed reserve result discarded because runtime inputs changed during probes")
+			return cleanupErr
+		}
+		if saveErr := s.saveState(state); saveErr != nil {
+			for tag := range preparedNew {
+				s.safeRemoveManagedOutbound(ctx, managed, tag)
+			}
+			return saveErr
+		}
+		var cleanupErr error
+		for tag := range obsolete {
+			if strings.HasPrefix(strings.TrimSpace(tag), "fastlane-node-") {
+				if removeErr := s.safeRemoveManagedOutbound(ctx, managed, tag); removeErr != nil {
+					s.logWarn("remove obsolete managed reserve", "tag", tag, "error", removeErr.Error())
+					cleanupErr = errors.Join(cleanupErr, removeErr)
 				}
 			}
 		}
-		state.RuntimeOutbounds = append(kept, verified...)
-		return s.saveState(state)
+		for tag := range preparedNew {
+			if _, retain := keptTags[tag]; !retain {
+				if err := s.safeRemoveManagedOutbound(ctx, managed, tag); err != nil {
+					cleanupErr = errors.Join(cleanupErr, err)
+				}
+			}
+		}
+		return cleanupErr
 	})
+}
+
+func (s *Service) safeRemoveManagedOutbound(ctx context.Context, managed backend.ManagedBackend, tag string) error {
+	if selected, err := managed.SelectedOutbound(ctx); err == nil && selected == tag {
+		return nil
+	}
+	if current, err := s.store.LoadState(); err == nil {
+		for _, outbound := range current.RuntimeOutbounds {
+			if outbound.Tag == tag {
+				return nil
+			}
+		}
+	}
+	if err := managed.RemoveOutbound(ctx, tag); err != nil {
+		s.logWarn("remove unused managed outbound", "tag", tag, "error", err.Error())
+		current, loadErr := s.store.LoadState()
+		if loadErr != nil {
+			return fmt.Errorf("remove outbound %s: %v; load cleanup state: %w", tag, err, loadErr)
+		}
+		now := s.currentTime().UTC()
+		current.RuntimeOutbounds = updateRuntimeOutbound(current.RuntimeOutbounds, domain.RuntimeOutboundState{
+			Tag: tag, Role: "draining", RetireAfter: now, RemoveBy: now.Add(30 * time.Minute),
+		})
+		if saveErr := s.saveState(current); saveErr != nil {
+			return fmt.Errorf("remove outbound %s: %v; save cleanup state: %w", tag, err, saveErr)
+		}
+		return err
+	}
+	return nil
 }
 
 func managedCandidateBackoff(failures int) time.Duration {
@@ -203,4 +241,82 @@ func managedCandidateBackoff(failures int) time.Duration {
 	default:
 		return 30 * time.Minute
 	}
+}
+
+// tryManagedReserveFailover verifies and applies retained reserves in the same
+// score order used by maintenance. The regular candidate search remains the
+// fallback when no retained reserve succeeds.
+func (s *Service) tryManagedReserveFailover(ctx context.Context, snapshot autoSelectionSnapshot, mode domain.SelectionMode, failureReason string) (switched, attempted bool, err error) {
+	if _, ok := s.backend.(backend.ManagedBackend); !ok {
+		return false, false, nil
+	}
+	now := s.currentTime().UTC()
+	eligible := collectManagedReserveCandidates(snapshot.subscriptions, snapshot.settings, snapshot.state, now)
+	byNode := make(map[string]managedReserveCandidate, len(eligible))
+	for _, candidate := range eligible {
+		byNode[domain.AutoExcludedNodeKey(candidate.sub.ID, candidate.node.ID)] = candidate
+	}
+	reserves := make([]managedReserveCandidate, 0, managedReserveLimit)
+	for _, outbound := range snapshot.state.RuntimeOutbounds {
+		if outbound.Role != "reserve" {
+			continue
+		}
+		candidate, ok := byNode[domain.AutoExcludedNodeKey(outbound.SubscriptionID, outbound.NodeID)]
+		if !ok {
+			continue
+		}
+		if backoff, paused := snapshot.state.CandidateBackoff[outbound.Tag]; paused && now.Before(backoff.RetryAfter) {
+			continue
+		}
+		candidate.tag = outbound.Tag
+		candidate.verifiedAt = outbound.VerifiedAt
+		reserves = append(reserves, candidate)
+	}
+	reserves = rankManagedReserveCandidates(reserves, snapshot.state.Health)
+	if len(reserves) == 0 {
+		return false, false, nil
+	}
+
+	err = runStoreWriteLocked(s, func() error {
+		current, currentErr := s.autoSelectionSnapshotCurrentLocked(snapshot)
+		if currentErr != nil {
+			return currentErr
+		}
+		if !current {
+			return errAutoSelectionSnapshotChanged
+		}
+		var lastErr error
+		for _, reserve := range reserves {
+			attempted = true
+			// applyNodeSelection always verifies the dedicated outbound first. This
+			// is deliberately stricter than the 60-second freshness requirement.
+			options := selectionOptionsForState(snapshot.state)
+			checkedAt := s.currentTime().UTC()
+			verifiedAge := checkedAt.Sub(reserve.verifiedAt)
+			options.skipManagedProbe = snapshot.state.OperationalMode != domain.OperationalModeDirect &&
+				!reserve.verifiedAt.IsZero() && verifiedAge >= 0 && verifiedAge <= time.Minute
+			if applyErr := s.applyNodeSelection(ctx, reserve.sub, reserve.node, mode, options); applyErr != nil {
+				lastErr = applyErr
+				continue
+			}
+			updated, loadErr := s.store.LoadState()
+			if loadErr != nil {
+				return loadErr
+			}
+			updated.Mode = mode
+			if mode == domain.SelectionModeManual {
+				updated.AutoScope = ""
+			}
+			updated.LastSwitchAt = s.currentTime().UTC()
+			updated.LastSwitchReason = "emergency failover to verified reserve"
+			updated.LastFailureReason = failureReason
+			if saveErr := s.saveState(updated); saveErr != nil {
+				return saveErr
+			}
+			switched = true
+			return nil
+		}
+		return lastErr
+	})
+	return switched, attempted, err
 }

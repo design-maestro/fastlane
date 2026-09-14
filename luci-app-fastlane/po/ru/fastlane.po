@@ -1115,3 +1115,15 @@ msgstr "Аварийный прямой режим"
 
 msgid "Keeps the internet online directly when every VPN server is unavailable and returns after a confirmed recovery"
 msgstr "Сохраняет прямой доступ в интернет при отказе всех VPN-серверов и возвращает VPN после подтверждённого восстановления"
+
+msgid "Reserve"
+msgstr "Резерв"
+
+msgid "Reserve candidate"
+msgstr "Кандидат в резерв"
+
+msgid "score"
+msgstr "оценка"
+
+msgid "samples"
+msgstr "измерений"

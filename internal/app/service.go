@@ -110,6 +110,7 @@ type applyNodeSelectionOptions struct {
 	persistFailure             bool
 	rollbackOnVerificationFail bool
 	forceStaticReload          bool
+	skipManagedProbe           bool
 	preservedState             domain.RuntimeState
 }
 
@@ -4065,7 +4066,7 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 	runtimeRequest := s.backendConfigRequest(runtimeSettings, resolvedNode, mode, 10808, 10809, firewallEnabled(settings.Firewall), s.dns != nil && localDNSRuntimeEnabled(settings.DNS))
 	managedApplied := false
 	if managed, ok := s.backend.(backend.ManagedBackend); ok && !opts.forceStaticReload {
-		handled, managedErr := s.tryManagedNodeSelection(ctx, managed, state, settings, runtimeSettings, sub, resolvedNode, mode)
+		handled, managedErr := s.tryManagedNodeSelection(ctx, managed, state, settings, runtimeSettings, sub, resolvedNode, mode, opts.skipManagedProbe)
 		if handled {
 			if managedErr != nil {
 				preserved := state
@@ -4209,7 +4210,7 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 	return nil
 }
 
-func (s *Service) tryManagedNodeSelection(ctx context.Context, managed backend.ManagedBackend, state domain.RuntimeState, settings, runtimeSettings domain.Settings, sub domain.Subscription, candidate domain.Node, mode domain.SelectionMode) (bool, error) {
+func (s *Service) tryManagedNodeSelection(ctx context.Context, managed backend.ManagedBackend, state domain.RuntimeState, settings, runtimeSettings domain.Settings, sub domain.Subscription, candidate domain.Node, mode domain.SelectionMode, skipProbe bool) (bool, error) {
 	directRecovery := state.OperationalMode == domain.OperationalModeDirect && state.ActiveSubscriptionID != "" && state.ActiveNodeID != ""
 	if (!state.Connected && !directRecovery) || state.ActiveSubscriptionID == "" || state.ActiveNodeID == "" {
 		return false, nil
@@ -4266,10 +4267,12 @@ func (s *Service) tryManagedNodeSelection(ctx context.Context, managed backend.M
 			return s.managedOutboundProbe(probeCtx, probeBackend, slot, tag)
 		}
 	}
-	if err := probeCandidate(ctx, managed, 0, candidateTag); err != nil {
-		_ = s.recordManagedCandidateFailure(candidateTag)
-		_ = managed.RemoveOutbound(ctx, candidateTag)
-		return true, fmt.Errorf("candidate verify failed: %w", err)
+	if !skipProbe || directRecovery {
+		if err := probeCandidate(ctx, managed, 0, candidateTag); err != nil {
+			_ = s.recordManagedCandidateFailure(candidateTag)
+			_ = managed.RemoveOutbound(ctx, candidateTag)
+			return true, fmt.Errorf("candidate verify failed: %w", err)
+		}
 	}
 	if directRecovery {
 		if err := sleepWithContext(ctx, s.managedRecoveryConfirmationDelay()); err != nil {

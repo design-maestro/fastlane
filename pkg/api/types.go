@@ -172,6 +172,9 @@ func StatusResponseFromSnapshot(snapshot app.StatusSnapshot) StatusResponse {
 func compactRuntimeState(state domain.RuntimeState) domain.RuntimeState {
 	state.LastFailureReason = compactReason(state.LastFailureReason)
 	state.LastTransportFailureReason = compactReason(state.LastTransportFailureReason)
+	for idx := range state.RuntimeOutbounds {
+		state.RuntimeOutbounds[idx].SelectionReason = compactReason(state.RuntimeOutbounds[idx].SelectionReason)
+	}
 	health := make(map[string]domain.NodeHealth, len(state.Health))
 	for nodeID, observation := range state.Health {
 		observation.LastFailureReason = compactReason(observation.LastFailureReason)
