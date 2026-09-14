@@ -116,6 +116,16 @@ return view.extend({
 			this.techRow('IPv6', ipv6.available ? (ipv6.runtime_disabled ? _('Disabled to prevent leaks') : _('Enabled')) : _('Unsupported')),
 			this.techRow(_('Service files'), readyFiles + ' / ' + fileNames.length + ' ' + _('available'))
 		];
+		(state.runtime_outbounds || []).forEach(L.bind(function(outbound, index) {
+			if (!outbound || (outbound.role !== 'reserve' && outbound.role !== 'candidate'))
+				return;
+			var label = outbound.role === 'reserve' ? _('Reserve') : _('Reserve candidate');
+			var value = safe(outbound.subscription_id) + ' / ' + safe(outbound.node_id) +
+				' · ' + _('score') + ' ' + Number(outbound.score || 0).toFixed(0) +
+				' · ' + Number(outbound.samples || 0) + ' ' + _('samples') +
+				' · ' + safe(outbound.selection_reason);
+			technicalRows.push(this.techRow(label + ' ' + (index + 1), value));
+		}, this));
 
 		var content = E('div', { id: 'fastlane-diagnostics-root', class: 'fastlane-diagnostics' }, [
 			E('style', {}, [ css ]),

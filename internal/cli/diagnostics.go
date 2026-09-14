@@ -238,6 +238,16 @@ func renderDiagnosticsText(snapshot diagnosticsSnapshot) string {
 		describeDiagnosticFile("nft-binary", snapshot.Files.NFTBinary),
 		describeDiagnosticFile("firewall-rules", snapshot.Files.FirewallRules),
 	}
+	for idx, outbound := range snapshot.Status.State.RuntimeOutbounds {
+		if outbound.Role != "reserve" && outbound.Role != "candidate" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf(
+			"runtime-%s-%d=%s/%s score=%.0f samples=%d verified=%s reason=%s",
+			outbound.Role, idx+1, outbound.SubscriptionID, outbound.NodeID, outbound.Score,
+			outbound.Samples, formatLocalTimestamp(outbound.VerifiedAt), outbound.SelectionReason,
+		))
+	}
 
 	return strings.Join(lines, "\n")
 }
