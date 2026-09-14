@@ -30,6 +30,9 @@ type ConfigRequest struct {
 	TransparentCountryRouting   domain.CountryRouting
 	// OutboundMark bypasses Fast Lane's own router-output capture for isolated probes.
 	OutboundMark int
+	// StartDirect persists fail-open startup semantics while keeping the
+	// selected node available to Fast Lane for later recovery.
+	StartDirect bool
 }
 
 // RollbackSnapshot stores an opaque backend-specific runtime snapshot.
@@ -63,4 +66,20 @@ type Backend interface {
 	Stop(ctx context.Context) error
 	Reload(ctx context.Context) error
 	Status(ctx context.Context) (RuntimeStatus, error)
+}
+
+// ManagedBackend changes the selected route in a running backend. Implementations
+// must keep the public listeners and the backend process alive while these
+// operations are performed.
+type ManagedBackend interface {
+	Backend
+	PrepareOutbound(ctx context.Context, node domain.Node, outboundMark int) (string, error)
+	RemoveOutbound(ctx context.Context, tag string) error
+	SelectOutbound(ctx context.Context, tag string) error
+	SelectDirect(ctx context.Context) error
+	SelectedOutbound(ctx context.Context) (string, error)
+	SetProbeOutbound(ctx context.Context, slot int, tag string) error
+	ClearProbeOutbound(ctx context.Context, slot int) error
+	ProbeHTTPPort(slot int) (int, error)
+	PersistConfig(ctx context.Context, req ConfigRequest) error
 }

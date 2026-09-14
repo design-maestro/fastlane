@@ -25,6 +25,70 @@ function firstNonEmpty(values, fallback) {
 	return fallback || '';
 }
 
+function resolveOperationalMode(state, activeTransport) {
+	var explicit = trim(state && state.operational_mode).toLowerCase();
+	var transport = firstNonEmpty([ activeTransport, state && state.active_transport ], '');
+
+	if (explicit === 'vpn' || explicit === 'direct' || explicit === 'recovering')
+		return explicit;
+	if (explicit !== '')
+		return 'direct';
+	if (state && state.connected === true) {
+		if (transport === 'direct' || transport === 'zapret')
+			return 'direct';
+		if (trim(state.active_subscription_id) !== '' && trim(state.active_node_id) !== '')
+			return 'vpn';
+		return 'recovering';
+	}
+	return 'direct';
+}
+
+function operationalStatusLabel(mode) {
+	if (mode === 'vpn')
+		return _('Connected');
+	if (mode === 'recovering')
+		return _('Restoring VPN connection…');
+	return _('VPN unavailable — internet is direct');
+}
+
+function runtimeConfigLabel(state) {
+	var generation = Number(state && state.runtime_config_generation);
+	var version = trim(state && state.runtime_config_version);
+	var parts = [];
+
+	if (isFinite(generation) && generation > 0)
+		parts.push(_('Generation %s').format(String(generation)));
+	if (version !== '')
+		parts.push(_('Version %s').format(version));
+
+	return parts.join(' · ') || _('Not reported');
+}
+
+function currentOperationLabel(state) {
+	var operation = state && state.current_operation;
+	var kind;
+	var transition;
+	var startedAt;
+
+	if (!operation)
+		return _('None');
+
+	kind = trim(operation.kind) || _('Runtime transition');
+	transition = trim(operation.from) !== '' || trim(operation.to) !== ''
+		? firstNonEmpty([ operation.from ], _('direct')) + ' → ' + firstNonEmpty([ operation.to ], _('direct'))
+		: '';
+	startedAt = fastlaneUI.formatTimestamp(operation.started_at);
+
+	return [ kind, transition, startedAt ].filter(function(value) { return trim(value) !== ''; }).join(' · ');
+}
+
+function runtimeReservesLabel(state) {
+	var outbounds = state && Array.isArray(state.runtime_outbounds) ? state.runtime_outbounds : [];
+	var reserves = outbounds.filter(function(outbound) { return outbound && outbound.role === 'reserve'; }).length;
+	var draining = outbounds.filter(function(outbound) { return outbound && outbound.role === 'draining'; }).length;
+	return _('Verified: %s · draining: %s').format(String(reserves), String(draining));
+}
+
 function isPlaceholderNodeLabel(value) {
 	return trim(value).toLowerCase() === 'proxy';
 }
@@ -525,6 +589,7 @@ return view.extend({
 			status.active_transport,
 			status.state && status.state.active_transport
 		], 'direct');
+		var operationalMode = resolveOperationalMode(state, activeTransport);
 		var firewallMode = 'disabled';
 		var explicitFirewallMode = trim(firewall.mode);
 		var hasTargets = (firewall.targets && Array.isArray(firewall.targets.services) && firewall.targets.services.length > 0) ||
@@ -561,7 +626,7 @@ return view.extend({
 
 		var connected = state.connected === true;
 		var activeEntry = presentationForSubscription(activeSubscription, presentation);
-		var activePing = resolveActivePing(status);
+		var activePing = operationalMode === 'vpn' ? resolveActivePing(status) : null;
 		var provider = trim(activeSubscription.id) !== ''
 			? (activeEntry ? activeEntry.provider_title : providerTitle(activeSubscription))
 			: _('Not selected');
@@ -599,7 +664,14 @@ return view.extend({
 				'.fastlane-overview-action-grid .cbi-button { width:100%; }',
 				'.fastlane-overview-active-ping { display:grid; gap:6px; }',
 				'.fastlane-overview-active-ping .fastlane-active-ping-primary { font-weight:700; }',
-				'.fastlane-overview-active-ping .fastlane-active-ping-meta { color:var(--fastlane-text-muted); font-size:12px; line-height:1.45; overflow-wrap:anywhere; word-break:break-word; }'
+				'.fastlane-overview-active-ping .fastlane-active-ping-meta { color:var(--fastlane-text-muted); font-size:12px; line-height:1.45; overflow-wrap:anywhere; word-break:break-word; }',
+				'.fastlane-card-recovering { border-color:rgba(245, 158, 11, 0.3); background:linear-gradient(180deg, rgba(45, 31, 10, 0.96) 0%, rgba(24, 21, 16, 1) 100%); }',
+				'.fastlane-card-recovering .fastlane-card-label { color:#f3c66d; }',
+				'.fastlane-card-recovering .fastlane-card-value { color:#fff4d6; }',
+				'.fastlane-card-recovering.fastlane-card-primary .fastlane-card-accent { background:linear-gradient(90deg, #f59e0b 0%, #fcd34d 100%); box-shadow:0 0 18px rgba(245, 158, 11, 0.28); }',
+				'.fastlane-theme-light .fastlane-card-recovering { border-color:rgba(217, 119, 6, 0.22); background:linear-gradient(180deg, rgba(255, 253, 247, 0.99) 0%, rgba(255, 247, 225, 0.99) 100%); }',
+				'.fastlane-theme-light .fastlane-card-recovering .fastlane-card-label { color:#b45309; }',
+				'.fastlane-theme-light .fastlane-card-recovering .fastlane-card-value { color:#78350f; }'
 			]),
 			E('section', { 'class': 'fastlane-page-hero fastlane-surface fastlane-surface-elevated fastlane-overview-hero' }, [
 				E('div', { 'class': 'fastlane-page-hero-copy' }, [
@@ -661,10 +733,17 @@ return view.extend({
 				])
 			]),
 			E('div', { 'class': 'fastlane-overview-grid' }, [
-				this.renderCard(_('State'), connected ? _('Connected') : _('Disconnected'), {
-					'tone': fastlaneUI.statusTone(connected),
+				this.renderCard(_('State'), operationalStatusLabel(operationalMode), {
+					'tone': operationalMode === 'recovering' ? 'recovering' : fastlaneUI.statusTone(operationalMode === 'vpn'),
 					'primary': true
 				}),
+				this.renderCard(_('Operational mode'), operationalMode),
+				this.renderCard(_('Selected outbound'), firstNonEmpty([ state.selected_outbound_tag ], _('Not reported'))),
+				this.renderCard(_('Runtime config'), runtimeConfigLabel(state)),
+				this.renderCard(_('Current operation'), currentOperationLabel(state)),
+				this.renderCard(_('Runtime reserves'), runtimeReservesLabel(state)),
+				this.renderCard(_('Last switch reason'), firstNonEmpty([ state.last_switch_reason ], _('Not reported'))),
+				this.renderCard(_('Last switch time'), fastlaneUI.formatTimestamp(state.last_switch_at) || _('Never')),
 				this.renderCard(_('Mode'), firstNonEmpty([ state.mode ], _('disconnected'))),
 				this.renderCard(_('Transport'), activeTransport),
 				this.renderCard(_('Provider'), provider),

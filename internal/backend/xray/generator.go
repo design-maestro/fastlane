@@ -1,6 +1,7 @@
 package xray
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/netip"
@@ -19,6 +20,12 @@ const (
 	transparentTCPInboundTag = "transparent-in"
 	transparentUDPInboundTag = "transparent-udp-in"
 	localDNSInboundTag       = "dns-in"
+	managedAPIAddress        = "127.0.0.1:10085"
+	managedAPITag            = "fastlane-api"
+	managedBalancerTag       = "fastlane-main"
+	managedOutboundPrefix    = "fastlane-node-"
+	managedDirectTag         = "fastlane-direct"
+	probeHTTPPortBase        = 10810
 )
 
 // NewGenerator creates a config generator instance.
@@ -35,21 +42,25 @@ func (Generator) Generate(req backend.ConfigRequest) ([]byte, error) {
 		}
 		req.TransparentCountryRouting = countryRouting
 	}
-	selected, err := selectedNode(req.Nodes, req.SelectedNodeID)
-	if err != nil {
-		return nil, err
-	}
+	var outbound any
+	if !req.StartDirect {
+		selected, err := selectedNode(req.Nodes, req.SelectedNodeID)
+		if err != nil {
+			return nil, err
+		}
 
-	outbound, err := selectedOutboundForNode(selected)
-	if err != nil {
-		return nil, err
+		outbound, _, err = managedOutboundForNode(selected, req.OutboundMark)
+		if err != nil {
+			return nil, err
+		}
 	}
-	outbound = outboundWithMark(outbound, req.OutboundMark)
 	directOutbound := xrayCommonOutbound{Tag: "direct", Protocol: "freedom"}
+	managedDirectOutbound := xrayCommonOutbound{Tag: managedDirectTag, Protocol: "freedom"}
 	if req.OutboundMark > 0 {
 		directOutbound.StreamSettings = map[string]any{
 			"sockopt": map[string]any{"mark": req.OutboundMark},
 		}
+		managedDirectOutbound.StreamSettings = directOutbound.StreamSettings
 	}
 
 	dnsConfig, err := buildDNSConfig(req.DNS)
@@ -57,9 +68,15 @@ func (Generator) Generate(req backend.ConfigRequest) ([]byte, error) {
 		return nil, err
 	}
 
+	managedOutbounds := []any{directOutbound, xrayCommonOutbound{Tag: "block", Protocol: "blackhole"}, managedDirectOutbound}
+	if !req.StartDirect {
+		managedOutbounds = append([]any{outbound}, managedOutbounds...)
+	}
 	cfg := xrayConfig{
-		Log: xrayLog{LogLevel: firstNonEmpty(req.LogLevel, "warning")},
-		DNS: dnsConfig,
+		Log:         xrayLog{LogLevel: firstNonEmpty(req.LogLevel, "warning")},
+		API:         &xrayAPI{Tag: managedAPITag, Services: []string{"HandlerService", "RoutingService"}},
+		Observatory: &xrayObservatory{SubjectSelector: []string{"fastlane-observe-none-"}, ProbeURL: "https://www.gstatic.com/generate_204", ProbeInterval: "24h"},
+		DNS:         dnsConfig,
 		Inbounds: []xrayInbound{
 			{
 				Tag:      "socks-in",
@@ -78,16 +95,19 @@ func (Generator) Generate(req backend.ConfigRequest) ([]byte, error) {
 				Settings: struct{}{},
 			},
 		},
-		Outbounds: []any{
-			outbound,
-			directOutbound,
-			xrayCommonOutbound{Tag: "block", Protocol: "blackhole"},
-		},
+		Outbounds: managedOutbounds,
 		Routing: xrayRouting{
 			// Resolve outbound hostnames with Xray's configured DNS instead of
 			// falling back to the router resolver, which may point at ::1:53.
 			DomainStrategy: "IPIfNonMatch",
 			Rules:          []xrayRouteRule{},
+			Balancers: []xrayBalancer{{
+				Tag: managedBalancerTag, Selector: []string{managedOutboundPrefix}, FallbackTag: managedDirectTag,
+			}, {
+				Tag: "fastlane-probe-0", Selector: []string{managedOutboundPrefix}, FallbackTag: "block",
+			}, {
+				Tag: "fastlane-probe-1", Selector: []string{managedOutboundPrefix}, FallbackTag: "block",
+			}},
 		},
 	}
 
@@ -118,14 +138,29 @@ func (Generator) Generate(req backend.ConfigRequest) ([]byte, error) {
 			transparentInbound(transparentUDPInboundTag, port, "udp", "tproxy"),
 		)
 	}
+	cfg.Inbounds = append(cfg.Inbounds,
+		xrayInbound{Tag: "fastlane-api-in", Listen: "127.0.0.1", Port: 10085, Protocol: "dokodemo-door", Settings: map[string]any{"address": "127.0.0.1"}},
+		probeHTTPInbound(0),
+		probeHTTPInbound(1),
+	)
 
-	cfg.Routing.Rules = append(cfg.Routing.Rules, transparentRoutingRules(req)...)
+	transparentRules := transparentRoutingRules(req)
+	for idx := range transparentRules {
+		if transparentRules[idx].OutboundTag == "selected" {
+			transparentRules[idx].OutboundTag = ""
+			transparentRules[idx].BalancerTag = managedBalancerTag
+		}
+	}
+	cfg.Routing.Rules = append(cfg.Routing.Rules, transparentRules...)
 	cfg.Routing.Rules = append(cfg.Routing.Rules, xrayRouteRule{
-		Type:        "field",
-		OutboundTag: "selected",
-		InboundTag:  []string{"socks-in", "http-in"},
-		Network:     "tcp,udp",
+		Type: "field", BalancerTag: managedBalancerTag,
+		InboundTag: []string{"socks-in", "http-in"}, Network: "tcp,udp",
 	})
+	cfg.Routing.Rules = append(cfg.Routing.Rules,
+		xrayRouteRule{Type: "field", InboundTag: []string{"fastlane-api-in"}, OutboundTag: managedAPITag},
+		xrayRouteRule{Type: "field", InboundTag: []string{"fastlane-probe-in-0"}, BalancerTag: "fastlane-probe-0", Network: "tcp,udp"},
+		xrayRouteRule{Type: "field", InboundTag: []string{"fastlane-probe-in-1"}, BalancerTag: "fastlane-probe-1", Network: "tcp,udp"},
+	)
 
 	rendered, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -133,6 +168,34 @@ func (Generator) Generate(req backend.ConfigRequest) ([]byte, error) {
 	}
 
 	return rendered, nil
+}
+
+func probeHTTPInbound(slot int) xrayInbound {
+	return xrayInbound{Tag: fmt.Sprintf("fastlane-probe-in-%d", slot), Listen: "127.0.0.1", Port: probeHTTPPortBase + slot, Protocol: "http", Settings: struct{}{}}
+}
+
+func managedOutboundForNode(node domain.Node, mark int) (any, string, error) {
+	outbound, err := selectedOutboundForNode(node)
+	if err != nil {
+		return nil, "", err
+	}
+	outbound = outboundWithMark(outbound, mark)
+	canonical, err := json.Marshal(outbound)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal managed outbound: %w", err)
+	}
+	sum := sha256.Sum256(canonical)
+	tag := fmt.Sprintf("%s%x", managedOutboundPrefix, sum[:8])
+	switch value := outbound.(type) {
+	case xrayCommonOutbound:
+		value.Tag = tag
+		outbound = value
+	case map[string]any:
+		value["tag"] = tag
+	default:
+		return nil, "", fmt.Errorf("unsupported managed outbound type %T", outbound)
+	}
+	return outbound, tag, nil
 }
 
 func outboundWithMark(outbound any, mark int) any {

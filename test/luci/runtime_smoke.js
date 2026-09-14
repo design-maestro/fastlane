@@ -414,8 +414,17 @@ async function smoke(section, name, run) {
 		for (const expected of ['Fast Lane', 'VPN on', 'Netherlands', 'Amsterdam', 'Durev', 'VLESS', '131 ms', 'Active']) assert.match(text, new RegExp(expected, 'i'));
 		page.pageData = [{ state: { connected: false }, settings: {} }, []];
 		text = treeText(page.render(page.pageData));
-		assert.match(text, /VPN off/);
+		assert.match(text, /VPN unavailable.*internet is direct/i);
 		assert.match(text, /Add your first subscription/);
+	});
+
+	await smoke('VPN', 'renders recovering mode without claiming an active VPN server', async () => {
+		const page = makeVPN();
+		page.pageData[0].state.operational_mode = 'recovering';
+		let text = treeText(page.render(page.pageData));
+		assert.match(text, /Restoring VPN connection/i);
+		assert.match(text, /Switching/i);
+		assert.doesNotMatch(text, /VPN on/i);
 	});
 
 	await smoke('VPN', 'uses one honest GET color scale including boundary and unknown values', async () => {

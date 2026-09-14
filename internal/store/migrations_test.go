@@ -552,6 +552,80 @@ func TestLoadStateMigratesMissingSchemaVersion(t *testing.T) {
 	if state.ActiveTransport != domain.TransportModeProxy {
 		t.Fatalf("expected connected legacy state to migrate to proxy transport, got %s", state.ActiveTransport)
 	}
+	if state.OperationalMode != domain.OperationalModeVPN {
+		t.Fatalf("expected connected legacy state to migrate to vpn operational mode, got %s", state.OperationalMode)
+	}
+}
+
+func TestLoadStatePreservesHotSwapRuntimeStatus(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	fileStore := store.NewFileStore(root)
+	stateJSON := `{
+  "schema_version": 4,
+  "operational_mode": "recovering",
+  "selected_outbound_tag": "selected-42",
+  "runtime_config_generation": 42,
+  "runtime_config_version": "sha256:runtime-v42",
+  "current_operation": {
+    "kind": "hot_swap",
+    "from": "selected-41",
+    "to": "selected-42",
+    "started_at": "2026-09-14T08:15:00Z"
+  },
+  "active_subscription_id": "sub-1",
+  "active_node_id": "node-42",
+  "mode": "auto",
+  "connected": true,
+  "active_transport": "proxy"
+}`
+	if err := os.WriteFile(filepath.Join(root, "state.json"), []byte(stateJSON), 0o644); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	state, err := fileStore.LoadState()
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+
+	if state.OperationalMode != domain.OperationalModeRecovering {
+		t.Fatalf("unexpected operational mode: %s", state.OperationalMode)
+	}
+	if state.SelectedOutboundTag != "selected-42" || state.RuntimeConfigGeneration != 42 || state.RuntimeConfigVersion != "sha256:runtime-v42" {
+		t.Fatalf("unexpected runtime config status: %+v", state)
+	}
+	if state.CurrentOperation == nil {
+		t.Fatal("expected current operation")
+	}
+	wantStartedAt := time.Date(2026, 9, 14, 8, 15, 0, 0, time.UTC)
+	if state.CurrentOperation.Kind != "hot_swap" || state.CurrentOperation.From != "selected-41" || state.CurrentOperation.To != "selected-42" || !state.CurrentOperation.StartedAt.Equal(wantStartedAt) {
+		t.Fatalf("unexpected current operation: %+v", state.CurrentOperation)
+	}
+}
+
+func TestLoadStateNormalizesUnknownOperationalMode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	fileStore := store.NewFileStore(root)
+	stateJSON := `{
+  "schema_version": 4,
+  "operational_mode": "unknown-future-mode",
+  "connected": true,
+  "active_transport": "proxy"
+}`
+	if err := os.WriteFile(filepath.Join(root, "state.json"), []byte(stateJSON), 0o644); err != nil {
+		t.Fatalf("write state file: %v", err)
+	}
+
+	state, err := fileStore.LoadState()
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if state.OperationalMode != domain.OperationalModeDirect {
+		t.Fatalf("expected unknown mode to fail open to direct, got %s", state.OperationalMode)
+	}
 }
 
 func TestLoadStateRejectsFutureSchemaVersion(t *testing.T) {

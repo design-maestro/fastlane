@@ -1,11 +1,25 @@
 package xray
 
 type xrayConfig struct {
-	Log       xrayLog       `json:"log"`
-	DNS       *xrayDNS      `json:"dns,omitempty"`
-	Inbounds  []xrayInbound `json:"inbounds"`
-	Outbounds []any         `json:"outbounds"`
-	Routing   xrayRouting   `json:"routing"`
+	Log         xrayLog          `json:"log"`
+	API         *xrayAPI         `json:"api,omitempty"`
+	DNS         *xrayDNS         `json:"dns,omitempty"`
+	Inbounds    []xrayInbound    `json:"inbounds"`
+	Outbounds   []any            `json:"outbounds"`
+	Routing     xrayRouting      `json:"routing"`
+	Observatory *xrayObservatory `json:"observatory,omitempty"`
+}
+
+type xrayObservatory struct {
+	SubjectSelector []string `json:"subjectSelector"`
+	ProbeURL        string   `json:"probeURL"`
+	ProbeInterval   string   `json:"probeInterval"`
+}
+
+type xrayAPI struct {
+	Tag      string   `json:"tag"`
+	Listen   string   `json:"listen,omitempty"`
+	Services []string `json:"services"`
 }
 
 type xrayLog struct {
@@ -35,11 +49,20 @@ type xrayInbound struct {
 type xrayRouting struct {
 	DomainStrategy string          `json:"domainStrategy"`
 	Rules          []xrayRouteRule `json:"rules"`
+	Balancers      []xrayBalancer  `json:"balancers,omitempty"`
+}
+
+type xrayBalancer struct {
+	Tag         string   `json:"tag"`
+	Selector    []string `json:"selector"`
+	FallbackTag string   `json:"fallbackTag,omitempty"`
 }
 
 type xrayRouteRule struct {
 	Type        string   `json:"type"`
-	OutboundTag string   `json:"outboundTag"`
+	RuleTag     string   `json:"ruleTag,omitempty"`
+	OutboundTag string   `json:"outboundTag,omitempty"`
+	BalancerTag string   `json:"balancerTag,omitempty"`
 	InboundTag  []string `json:"inboundTag,omitempty"`
 	Network     string   `json:"network,omitempty"`
 	Domain      []string `json:"domain,omitempty"`

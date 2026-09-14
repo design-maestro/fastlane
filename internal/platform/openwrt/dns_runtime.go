@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/design-maestro/fastlane/internal/domain"
@@ -153,8 +154,14 @@ func (m DNSRuntimeManager) runtimeInfo() (dnsmasqRuntimeInfo, error) {
 		return dnsmasqRuntimeInfo{}, fmt.Errorf("read %s: %w", procRoot, err)
 	}
 
+	latestPID := -1
+	latest := dnsmasqRuntimeInfo{}
 	for _, entry := range entries {
 		if !entry.IsDir() || !isNumeric(entry.Name()) {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= latestPID {
 			continue
 		}
 
@@ -183,8 +190,12 @@ func (m DNSRuntimeManager) runtimeInfo() (dnsmasqRuntimeInfo, error) {
 			}
 		}
 		if info.ConfDir != "" && info.ResolvFile != "" {
-			return info, nil
+			latestPID = pid
+			latest = info
 		}
+	}
+	if latestPID >= 0 {
+		return latest, nil
 	}
 
 	return dnsmasqRuntimeInfo{}, fmt.Errorf("detect dnsmasq runtime: no running dnsmasq with conf-dir and resolv-file found")

@@ -15,6 +15,32 @@ function trim(value) {
 	return value == null ? '' : String(value).trim();
 }
 
+function resolveOperationalMode(state, activeTransport) {
+	var explicit = trim(state && state.operational_mode).toLowerCase();
+	var transport = trim(activeTransport || (state && state.active_transport));
+
+	if (explicit === 'vpn' || explicit === 'direct' || explicit === 'recovering')
+		return explicit;
+	if (explicit !== '')
+		return 'direct';
+	if (state && state.connected === true) {
+		if (transport === 'direct' || transport === 'zapret')
+			return 'direct';
+		if (trim(state.active_subscription_id) !== '' && trim(state.active_node_id) !== '')
+			return 'vpn';
+		return 'recovering';
+	}
+	return 'direct';
+}
+
+function operationalStatusLabel(mode) {
+	if (mode === 'vpn')
+		return _('VPN on');
+	if (mode === 'recovering')
+		return _('Restoring VPN connection…');
+	return _('VPN unavailable — internet is direct');
+}
+
 function nodeRawName(node) {
 	return trim(node && (node.name || node.remark || node.address));
 }
@@ -357,6 +383,7 @@ body:not(.modal-overlay-active) #modal_overlay:has(.fastlane-modal){display:none
 
 // Shared GET latency scale for the active connection and server rows.
 css += '.fastlane-root .fl-latency,.fastlane-root .fl-status-cell-latency{color:var(--fl-muted)}.fastlane-root .fl-latency-good{color:var(--fl-green)}.fastlane-root .fl-latency-mid{color:var(--fl-amber)}.fastlane-root .fl-latency-slow{color:var(--fl-orange,#f0a35a)}.fastlane-root .fl-latency-critical,.fastlane-root .fl-latency-bad{color:var(--fl-red)}';
+css += '.fl-status{grid-template-columns:minmax(240px,1.25fr) minmax(210px,1fr) minmax(150px,1fr) minmax(180px,.9fr) auto auto}.fl-status-main{white-space:normal}.fl-status-main-direct,.fl-status-main-recovering{color:var(--fl-amber)}.fl-dot-recovering{background:var(--fl-amber);box-shadow:0 0 0 4px rgba(255,197,40,.12)}';
 css += '.fl-more-menu[hidden]{display:none!important}.fl-more-note{max-width:250px;padding:9px 12px;color:var(--fl-muted);font-size:12px;line-height:1.4;overflow-wrap:anywhere}.fl-busy-label{min-width:0}.fl-busy-action{flex:0 0 auto;margin-left:auto;min-height:38px;padding:7px 12px}';
 
 return view.extend({
@@ -1261,6 +1288,8 @@ return view.extend({
 		var status = this.status();
 		var state = status.state || {};
 		var connected = state.connected === true;
+		var operationalMode = resolveOperationalMode(state, status.active_transport);
+		var vpnActive = operationalMode === 'vpn';
 		var hasAvailableNodes = this.subscriptions().filter(function(sub) { return !isSubscriptionExpired(sub); }).some(L.bind(function(sub) {
 			return (sub.nodes || []).some(L.bind(function(node) { return !this.isHidden(sub.id, node.id, node); }, this));
 		}, this));
@@ -1268,14 +1297,16 @@ return view.extend({
 		var activeSubscription = status.active_subscription;
 		if (!activeSubscription && connected && state.active_subscription_id)
 			activeSubscription = this.subscriptions().filter(function(sub) { return sub.id === state.active_subscription_id; })[0];
-		var activeSource = connected && activeSubscription ? sourceName(activeSubscription) : '—';
-		var activeNode = connected && status.active_node ? status.active_node : { name: '—' };
+		var activeSource = vpnActive && activeSubscription ? sourceName(activeSubscription) : (operationalMode === 'recovering' ? _('Switching…') : _('Not active'));
+		var activeNode = vpnActive && status.active_node ? status.active_node : null;
+		var activeServer = activeNode ? nodeLocation(activeNode).country : (operationalMode === 'recovering' ? _('Switching…') : _('Not active'));
 		var observed = this.pings[state.active_subscription_id + ':' + state.active_node_id] || {};
+		var pingValue = vpnActive ? formatLatency(observed.latency_ms) : (operationalMode === 'recovering' ? _('Waiting…') : _('Not available'));
 		return E('div', { class: 'fl-status' }, [
-			E('div', { class: 'fl-status-cell fl-status-main' }, [ E('span', { class: 'fl-dot ' + (connected ? 'fl-dot-on' : '') }), connected ? _('VPN on') : _('VPN off') ]),
-			E('div', { class: 'fl-status-cell' }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Server') ]), E('span', { class: 'fl-status-cell-value' }, [ nodeLocation(activeNode).country ]) ]),
+			E('div', { class: 'fl-status-cell fl-status-main fl-status-main-' + operationalMode }, [ E('span', { class: 'fl-dot ' + (vpnActive ? 'fl-dot-on' : (operationalMode === 'recovering' ? 'fl-dot-recovering' : '')) }), operationalStatusLabel(operationalMode) ]),
+			E('div', { class: 'fl-status-cell' }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Server') ]), E('span', { class: 'fl-status-cell-value' }, [ activeServer ]) ]),
 			E('div', { class: 'fl-status-cell' }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Source') ]), E('span', { class: 'fl-status-cell-value' }, [ activeSource ]) ]),
-			E('div', { class: 'fl-status-cell', title: _('GET: up to 100 ms is low latency; 101–200 ms is medium; 201–1000 ms is high; over 1000 ms is very high. A successful GET means the server is reachable even if it is slow. This is not a download speed test.') }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Ping (GET)') ]), E('span', { class: 'fl-status-cell-value fl-status-cell-latency ' + this.latencyClass(observed.latency_ms, observed) }, [ formatLatency(observed.latency_ms) ]) ]),
+			E('div', { class: 'fl-status-cell', title: _('GET: up to 100 ms is low latency; 101–200 ms is medium; 201–1000 ms is high; over 1000 ms is very high. A successful GET means the server is reachable even if it is slow. This is not a download speed test.') }, [ E('span', { class: 'fl-status-cell-label' }, [ _('Ping (GET)') ]), E('span', { class: 'fl-status-cell-value fl-status-cell-latency ' + (vpnActive ? this.latencyClass(observed.latency_ms, observed) : '') }, [ pingValue ]) ]),
 			E('div', { class: 'fl-mode-switch', 'aria-label': _('Connection mode') }, [
 				E('button', { class: 'fl-mode-option ' + (mode === 'auto' ? 'fl-mode-option-active' : ''), disabled: this.busy || !hasAvailableNodes ? 'disabled' : null, title: hasAvailableNodes ? (mode === 'auto' ? _('Check all servers and select the best again') : _('Enable automatic selection and choose the best server')) : _('Add a subscription first'), click: ui.createHandlerFn(this, 'handleAuto') }, [ _('Auto') ]),
 				E('button', { class: 'fl-mode-option ' + (mode === 'manual' ? 'fl-mode-option-active' : ''), disabled: this.busy || mode === 'manual' || !hasAvailableNodes ? 'disabled' : null, title: hasAvailableNodes ? '' : _('Add a subscription first'), click: ui.createHandlerFn(this, 'handleManualMode') }, [ _('Manual') ])
@@ -1327,13 +1358,15 @@ return view.extend({
 	renderTable: function() {
 		var rows = this.visibleRows();
 		var all = (this.poolSubscriptions().length > 1 && this.filter === 'all') || this.showHidden;
-		var state = this.status().state || {};
+		var status = this.status();
+		var state = status.state || {};
+		var vpnActive = resolveOperationalMode(state, status.active_transport) === 'vpn';
 		var headings = [ E('th', { style: 'width:30%' }, [ _('Server') ]) ];
 		if (all) headings.push(E('th', { style: 'width:18%' }, [ _('Source') ]));
 		headings.push(E('th', { style: 'width:14%' }, [ _('Protocol') ]), E('th', { style: 'width:15%' }, [ _('Ping (GET)') ]), E('th', { style: 'width:16%' }, [ _('Status') ]), E('th', { style: 'width:7%' }, [ '' ]));
 		var body = [];
 		for (var i = 0; i < rows.length; i++) {
-			var row = rows[i], active = state.active_subscription_id === row.sub.id && state.active_node_id === row.node.id && state.connected;
+			var row = rows[i], active = vpnActive && state.active_subscription_id === row.sub.id && state.active_node_id === row.node.id && state.connected;
 			var actionKey = row.sub.id + ':' + row.node.id;
 			var expired = isSubscriptionExpired(row.sub);
 			var testing = !!this.testingNodes[row.sub.id + ':' + row.node.id];

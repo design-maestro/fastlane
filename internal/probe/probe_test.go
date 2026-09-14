@@ -105,7 +105,7 @@ func TestShouldSwitch(t *testing.T) {
 	}
 }
 
-func TestShouldSwitchUsesFreshLatencyAndEscapesCooldownAboveCeiling(t *testing.T) {
+func TestShouldSwitchDoesNotOptimizeInsideCooldownEvenAboveCeiling(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 9, 10, 16, 0, 0, 0, time.UTC)
@@ -117,14 +117,35 @@ func TestShouldSwitchUsesFreshLatencyAndEscapesCooldownAboveCeiling(t *testing.T
 		AverageLatency: domain.NewDuration(40 * time.Millisecond),
 	}
 	candidate := domain.NodeHealth{
-		NodeID:         "candidate",
-		Healthy:        true,
-		LastLatency:    domain.NewDuration(26 * time.Millisecond),
-		AverageLatency: domain.NewDuration(120 * time.Millisecond),
+		NodeID:               "candidate",
+		Healthy:              true,
+		LastLatency:          domain.NewDuration(26 * time.Millisecond),
+		AverageLatency:       domain.NewDuration(120 * time.Millisecond),
+		ConsecutiveSuccesses: 2,
 	}
 
 	should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Minute), policy)
-	if !should {
-		t.Fatalf("expected fresh 321ms route to escape cooldown for 26ms candidate, reason=%q", reason)
+	if should || reason != "cooldown active" {
+		t.Fatalf("expected cooldown to block latency optimization, should=%t reason=%q", should, reason)
+	}
+}
+
+func TestShouldSwitchRequiresTwoWinsAndTwentyPercentImprovement(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+	policy := probe.DefaultSwitchPolicy()
+	current := domain.NodeHealth{NodeID: "current", Healthy: true, AverageLatency: domain.NewDuration(300 * time.Millisecond)}
+	candidate := domain.NodeHealth{NodeID: "candidate", Healthy: true, AverageLatency: domain.NewDuration(240 * time.Millisecond), ConsecutiveSuccesses: 1}
+	if should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), policy); should || reason != "latency improvement is not confirmed" {
+		t.Fatalf("single win was accepted: should=%t reason=%q", should, reason)
+	}
+	candidate.ConsecutiveSuccesses = 2
+	candidate.AverageLatency = domain.NewDuration(245 * time.Millisecond) // 55 ms, but less than 20%.
+	if should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), policy); should || reason != "relative improvement below threshold" {
+		t.Fatalf("sub-20%% improvement was accepted: should=%t reason=%q", should, reason)
+	}
+	candidate.AverageLatency = domain.NewDuration(240 * time.Millisecond)
+	if should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), policy); !should || reason == "" {
+		t.Fatalf("confirmed 20%% / 60ms improvement was rejected: should=%t reason=%q", should, reason)
 	}
 }

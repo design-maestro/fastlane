@@ -164,14 +164,14 @@ type conntrackStats struct {
 
 // Disable removes the transient Fast Lane nftables table.
 func (m FirewallManager) Disable(ctx context.Context) error {
-	if err := m.tuneConntrack(ctx); err != nil {
-		return err
-	}
-	m.cleanupPolicyRouting(ctx)
 	err := m.run(ctx, "delete", "table", "inet", "fastlane")
 	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such file or directory") {
 		return err
 	}
+	m.cleanupPolicyRouting(ctx)
+	// Conntrack tuning is maintenance, not a prerequisite for fail-open. A
+	// failure here must not reclassify the already completed teardown as failed.
+	_ = m.tuneConntrack(ctx)
 	_ = os.Remove(m.RulesPath)
 	if err := m.syncDNSMasqTargets(ctx, nil, nil); err != nil {
 		return err
