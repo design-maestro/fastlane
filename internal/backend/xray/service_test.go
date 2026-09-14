@@ -7,8 +7,6 @@ import (
 )
 
 func TestInitdControllerStatusDetectsActiveWithNoInstances(t *testing.T) {
-	t.Parallel()
-
 	script := writeStatusScript(t, "#!/bin/sh\necho 'active with no instances'\nexit 0\n")
 	controller := InitdController{ScriptPath: script}
 
@@ -26,8 +24,6 @@ func TestInitdControllerStatusDetectsActiveWithNoInstances(t *testing.T) {
 }
 
 func TestInitdControllerStatusDetectsRunningProcess(t *testing.T) {
-	t.Parallel()
-
 	script := writeStatusScript(t, "#!/bin/sh\necho 'running'\nexit 0\n")
 	controller := InitdController{ScriptPath: script}
 
@@ -45,8 +41,6 @@ func TestInitdControllerStatusDetectsRunningProcess(t *testing.T) {
 }
 
 func TestInitdControllerStatusTreatsUnknownAsNotRunning(t *testing.T) {
-	t.Parallel()
-
 	script := writeStatusScript(t, "#!/bin/sh\necho 'unknown'\nexit 0\n")
 	controller := InitdController{ScriptPath: script}
 
@@ -61,8 +55,6 @@ func TestInitdControllerStatusTreatsUnknownAsNotRunning(t *testing.T) {
 }
 
 func TestInitdControllerStatusTreatsUnrecognizedOutputAsNotRunning(t *testing.T) {
-	t.Parallel()
-
 	script := writeStatusScript(t, "#!/bin/sh\necho 'mystery state'\nexit 0\n")
 	controller := InitdController{ScriptPath: script}
 
@@ -77,8 +69,6 @@ func TestInitdControllerStatusTreatsUnrecognizedOutputAsNotRunning(t *testing.T)
 }
 
 func TestRuntimeBackendStatusUsesConfigPath(t *testing.T) {
-	t.Parallel()
-
 	script := writeStatusScript(t, "#!/bin/sh\necho 'running'\nexit 0\n")
 	backend := NewRuntimeBackend("/etc/xray/config.json", InitdController{ScriptPath: script})
 
