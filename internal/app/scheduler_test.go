@@ -99,7 +99,7 @@ func TestSchedulerRunOnceUsesGlobalRefreshInterval(t *testing.T) {
 	}
 }
 
-func TestSchedulerRunOnceRefreshesAndReconnectsActiveSubscription(t *testing.T) {
+func TestSchedulerRunOnceRefreshesActiveSubscriptionWithoutReconnectingUnchangedNode(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 3, 24, 12, 0, 0, 0, time.UTC)
@@ -144,20 +144,55 @@ func TestSchedulerRunOnceRefreshesAndReconnectsActiveSubscription(t *testing.T) 
 	}
 
 	runtimeBackend := &recordingBackend{}
+	dnsManager := &recordingDNSManager{}
 	service := NewService(Dependencies{
-		Store:   store,
-		Backend: runtimeBackend,
+		Store:      store,
+		Backend:    runtimeBackend,
+		DNSManager: dnsManager,
 	})
 	scheduler := NewScheduler(service)
 	scheduler.now = func() time.Time { return now }
 
 	scheduler.RunOnce(context.Background())
 
-	if len(runtimeBackend.requests) != 1 {
-		t.Fatalf("expected one backend apply during reconnect, got %d", len(runtimeBackend.requests))
+	if len(runtimeBackend.requests) != 0 {
+		t.Fatalf("unchanged active node was reapplied %d times", len(runtimeBackend.requests))
+	}
+	if dnsManager.applyCalls != 0 || dnsManager.disableCalls != 0 {
+		t.Fatalf("unchanged active node restarted DNS: apply=%d disable=%d", dnsManager.applyCalls, dnsManager.disableCalls)
 	}
 	if !store.state.Connected || store.state.ActiveSubscriptionID != "sub-1" || store.state.ActiveNodeID != store.subs[0].Nodes[0].ID {
 		t.Fatalf("unexpected state after refresh and reconnect: %+v", store.state)
+	}
+}
+
+func TestSameRuntimeNodeIgnoresLabelsButDetectsRuntimeChanges(t *testing.T) {
+	t.Parallel()
+
+	base := domain.Node{
+		ID: "old", SubscriptionID: "sub-1", Name: "Old label", Remark: "Old label",
+		Protocol: domain.ProtocolVLESS, Address: "node.example.com", Port: 443,
+		UUID: "11111111-1111-1111-1111-111111111111", Encryption: "none",
+		Security: "tls", ServerName: "edge.example.com", Transport: "ws", Path: "/proxy",
+	}
+	renamed := base
+	renamed.ID = "new"
+	renamed.Name = "New label"
+	renamed.Remark = "New label"
+	if !sameRuntimeNode(&base, &renamed) {
+		t.Fatal("presentation-only rename was treated as a runtime change")
+	}
+
+	changedEndpoint := renamed
+	changedEndpoint.Address = "replacement.example.com"
+	if sameRuntimeNode(&base, &changedEndpoint) {
+		t.Fatal("endpoint change was treated as presentation-only")
+	}
+
+	changedSecurity := renamed
+	changedSecurity.Extras = map[string]string{"allowInsecure": "true"}
+	if sameRuntimeNode(&base, &changedSecurity) {
+		t.Fatal("security option change was treated as presentation-only")
 	}
 }
 
@@ -203,7 +238,7 @@ func TestRefreshAndReconnectPreservesGlobalAutoScope(t *testing.T) {
 	}
 }
 
-func TestSchedulerRunOnceKeepsActiveSubscriptionWhenCandidateVerifyFails(t *testing.T) {
+func TestSchedulerRunOnceDoesNotProbeOrRollbackUnchangedActiveSubscription(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 3, 24, 12, 0, 0, 0, time.UTC)
@@ -268,14 +303,14 @@ func TestSchedulerRunOnceKeepsActiveSubscriptionWhenCandidateVerifyFails(t *test
 
 	scheduler.RunOnce(context.Background())
 
-	if len(runtimeBackend.requests) != 1 {
-		t.Fatalf("expected one backend apply during reconnect, got %d", len(runtimeBackend.requests))
+	if len(runtimeBackend.requests) != 0 {
+		t.Fatalf("unchanged active node was reapplied %d times", len(runtimeBackend.requests))
 	}
-	if runtimeBackend.captureRollbackCalls != 1 {
-		t.Fatalf("expected one rollback snapshot capture, got %d", runtimeBackend.captureRollbackCalls)
+	if runtimeBackend.captureRollbackCalls != 0 {
+		t.Fatalf("unchanged active node captured rollback %d times", runtimeBackend.captureRollbackCalls)
 	}
-	if runtimeBackend.rollbackCalls != 1 {
-		t.Fatalf("expected one rollback after failed verify, got %d", runtimeBackend.rollbackCalls)
+	if runtimeBackend.rollbackCalls != 0 {
+		t.Fatalf("unchanged active node rolled back %d times", runtimeBackend.rollbackCalls)
 	}
 	if firewall.disableCalls != 0 {
 		t.Fatalf("expected firewall to stay enabled during recovered refresh failure, got %d disables", firewall.disableCalls)
@@ -283,8 +318,8 @@ func TestSchedulerRunOnceKeepsActiveSubscriptionWhenCandidateVerifyFails(t *test
 	if !store.state.Connected || store.state.ActiveSubscriptionID != "sub-1" || store.state.ActiveNodeID != store.subs[0].Nodes[0].ID {
 		t.Fatalf("unexpected state after recovered refresh failure: %+v", store.state)
 	}
-	if !strings.Contains(store.state.LastFailureReason, "candidate verify failed: backend egress probe failed") {
-		t.Fatalf("unexpected failure reason: %q", store.state.LastFailureReason)
+	if store.state.LastFailureReason != "" {
+		t.Fatalf("unchanged active node recorded a false failure: %q", store.state.LastFailureReason)
 	}
 }
 

@@ -233,7 +233,7 @@ func TestRefreshAndReconnectDoesNotHoldStoreLockWhileAutoProbing(t *testing.T) {
 		subs: []domain.Subscription{{
 			ID:         "sub-1",
 			SourceType: domain.SourceTypeRaw,
-			Source:     "vless://11111111-1111-1111-1111-111111111111@192.0.2.1:443?encryption=none#Node",
+			Source:     "vless://11111111-1111-1111-1111-111111111111@192.0.2.2:443?encryption=none#Node",
 			Nodes:      []domain.Node{node},
 		}},
 		settings: settings,
