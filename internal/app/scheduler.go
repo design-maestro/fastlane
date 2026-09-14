@@ -12,7 +12,7 @@ import (
 const (
 	maxRefreshConfigPollInterval = time.Second
 	maxHealthConfigPollInterval  = time.Second
-	connectionWatchInterval      = 15 * time.Second
+	connectionWatchInterval      = 3 * time.Second
 )
 
 // Scheduler periodically refreshes subscriptions using the global settings interval.

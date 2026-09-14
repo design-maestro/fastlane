@@ -18,6 +18,14 @@ import (
 	storepkg "github.com/design-maestro/fastlane/internal/store"
 )
 
+func TestConnectionWatchIntervalSupportsFastFailover(t *testing.T) {
+	t.Parallel()
+
+	if connectionWatchInterval != 3*time.Second {
+		t.Fatalf("unexpected active route watch interval: %s", connectionWatchInterval)
+	}
+}
+
 func TestSchedulerRunOnceRefreshesDueSubscription(t *testing.T) {
 	t.Parallel()
 
