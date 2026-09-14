@@ -3090,8 +3090,8 @@ func TestSetSettingAutoModeTrueSwitchesCurrentConnection(t *testing.T) {
 	if store.state.Mode != domain.SelectionModeAuto {
 		t.Fatalf("expected runtime state mode auto, got %s", store.state.Mode)
 	}
-	if store.state.ActiveNodeID != "node-2" {
-		t.Fatalf("expected best node to be selected, got %s", store.state.ActiveNodeID)
+	if store.state.ActiveNodeID != "node-1" {
+		t.Fatalf("expected current node to remain until a second confirming measurement, got %s", store.state.ActiveNodeID)
 	}
 }
 
@@ -3693,7 +3693,7 @@ func TestConnectManualAppliesLocalDNSRuntime(t *testing.T) {
 	}
 }
 
-func TestDisconnectDisablesDNSBeforeStoppingBackendAndFirewall(t *testing.T) {
+func TestDisconnectRemovesInterceptionBeforeStoppingDNSAndBackend(t *testing.T) {
 	t.Parallel()
 
 	store := &memoryStore{
@@ -3721,7 +3721,7 @@ func TestDisconnectDisablesDNSBeforeStoppingBackendAndFirewall(t *testing.T) {
 		t.Fatalf("disconnect: %v", err)
 	}
 
-	if got, want := strings.Join(order, ","), "dns.disable,backend.stop,firewall.disable"; got != want {
+	if got, want := strings.Join(order, ","), "firewall.disable,dns.disable,backend.stop"; got != want {
 		t.Fatalf("unexpected teardown order: got %q want %q", got, want)
 	}
 }

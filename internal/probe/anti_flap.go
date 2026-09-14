@@ -13,6 +13,8 @@ const defaultHealthyLatencyCeiling = 300 * time.Millisecond
 type SwitchPolicy struct {
 	Cooldown              time.Duration
 	LatencyImprovement    time.Duration
+	RelativeImprovement   float64
+	RequiredLatencyWins   int
 	FailureThreshold      int
 	HealthyLatencyCeiling time.Duration
 }
@@ -22,7 +24,9 @@ func DefaultSwitchPolicy() SwitchPolicy {
 	return SwitchPolicy{
 		Cooldown:              5 * time.Minute,
 		LatencyImprovement:    50 * time.Millisecond,
-		FailureThreshold:      3,
+		RelativeImprovement:   0.20,
+		RequiredLatencyWins:   2,
+		FailureThreshold:      2,
 		HealthyLatencyCeiling: defaultHealthyLatencyCeiling,
 	}
 }
@@ -43,14 +47,19 @@ func ShouldSwitch(current, candidate domain.NodeHealth, now, lastSwitch time.Tim
 
 	currentLatency := selectionLatency(current)
 	candidateLatency := selectionLatency(candidate)
-	if policy.HealthyLatencyCeiling > 0 &&
-		currentLatency > policy.HealthyLatencyCeiling &&
-		candidateLatency > 0 && candidateLatency < currentLatency {
-		return true, fmt.Sprintf("current latency %s exceeds ceiling", currentLatency)
-	}
-
 	if now.Sub(lastSwitch) < policy.Cooldown {
 		return false, "cooldown active"
+	}
+
+	if policy.RequiredLatencyWins > 0 && candidate.ConsecutiveSuccesses < policy.RequiredLatencyWins {
+		return false, "latency improvement is not confirmed"
+	}
+
+	if currentLatency > 0 && candidateLatency > 0 && policy.RelativeImprovement > 0 {
+		relative := float64(currentLatency-candidateLatency) / float64(currentLatency)
+		if relative < policy.RelativeImprovement {
+			return false, "relative improvement below threshold"
+		}
 	}
 
 	if currentLatency > 0 &&

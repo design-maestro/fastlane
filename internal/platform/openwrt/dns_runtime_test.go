@@ -56,6 +56,47 @@ func TestDNSRuntimeManagerSystemResolversFromRunningDNSMasq(t *testing.T) {
 	}
 }
 
+func TestDNSRuntimeManagerUsesNewestDNSMasqProcess(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	procRoot := filepath.Join(dir, "proc")
+
+	writeProcess := func(pid, resolver string) {
+		configPath := filepath.Join(dir, pid, "dnsmasq.conf")
+		confDir := filepath.Join(dir, pid, "dnsmasq.d")
+		resolvFile := filepath.Join(dir, pid, "resolv.conf")
+		pidDir := filepath.Join(procRoot, pid)
+		for _, path := range []string{pidDir, filepath.Dir(configPath), confDir} {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("dnsmasq\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmdline := "dnsmasq\x00--conf-file=" + configPath + "\x00"
+		if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte(cmdline), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(configPath, []byte("conf-dir="+confDir+"\nresolv-file="+resolvFile+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(resolvFile, []byte("nameserver "+resolver+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeProcess("99", "192.0.2.1")
+	writeProcess("100", "192.0.2.2")
+	resolvers, err := (DNSRuntimeManager{ProcRoot: procRoot}).SystemResolvers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(resolvers, ","); got != "192.0.2.2" {
+		t.Fatalf("selected stale dnsmasq process: %s", got)
+	}
+}
+
 func TestDNSRuntimeManagerApplyWritesDNSOverrideSnippetAndRestarts(t *testing.T) {
 	t.Parallel()
 

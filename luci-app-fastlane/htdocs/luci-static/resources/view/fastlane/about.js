@@ -9,6 +9,16 @@ var fastlaneSelfUpdateHelper = '/usr/libexec/fastlane-self-update';
 var whatsNewEntries = [
 	{
 		kind: _('New'),
+		title: _('Seamless VPN failover'),
+		summary: _('Checks and switches VPN servers inside the running Xray process without restarting DNS or Wi-Fi services')
+	},
+	{
+		kind: _('New'),
+		title: _('Direct emergency mode'),
+		summary: _('Keeps the internet online directly when every VPN server is unavailable and returns after a confirmed recovery')
+	},
+	{
+		kind: _('New'),
 		title: _('Xray Core Upgrade'),
 		summary: _('Upgraded Xray core to v26.7.28 to support latest Reality parameters and prevent connection drops')
 	},

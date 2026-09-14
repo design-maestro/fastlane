@@ -486,22 +486,23 @@ func TestSchedulerConnectionWatchBacksOffRepeatedRecoveryScans(t *testing.T) {
 	scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
 		return true, "still unavailable", nil
 	}
-	healthCalls := 0
-	scheduler.healthCheck = func(context.Context) {
-		healthCalls++
+	failoverCalls := 0
+	scheduler.recoveryFailover = func(context.Context, string) error {
+		failoverCalls++
+		return errors.New("still unavailable")
 	}
 
 	scheduler.runConnectionWatchOnce(context.Background())
 	now = now.Add(connectionWatchInterval)
 	scheduler.runConnectionWatchOnce(context.Background())
-	if healthCalls != 1 {
-		t.Fatalf("recovery scan repeated before cooldown: %d", healthCalls)
+	if failoverCalls != 1 {
+		t.Fatalf("recovery failover count before cooldown: %d", failoverCalls)
 	}
 
 	now = now.Add(5 * time.Minute)
 	scheduler.runConnectionWatchOnce(context.Background())
-	if healthCalls != 2 {
-		t.Fatalf("recovery scan did not resume after cooldown: %d", healthCalls)
+	if failoverCalls != 2 {
+		t.Fatalf("recovery failover did not resume after cooldown: %d", failoverCalls)
 	}
 }
 
@@ -512,23 +513,20 @@ func TestSchedulerConnectionWatchFailsOverBeforeFullScan(t *testing.T) {
 	scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
 		return true, activeGETFailureReasonPrefix + "temporary timeout", nil
 	}
-	steps := make([]string, 0, 2)
-	postFailoverOptimization := false
+	steps := make([]string, 0, 1)
 	scheduler.recoveryFailover = func(context.Context, string) error {
 		steps = append(steps, "cached failover")
 		return nil
 	}
-	scheduler.healthCheck = func(ctx context.Context) {
-		steps = append(steps, "full scan")
-		postFailoverOptimization = isPostFailoverOptimization(ctx)
-	}
+	scheduler.healthCheck = func(context.Context) { steps = append(steps, "full scan") }
 
 	scheduler.runConnectionWatchOnce(context.Background())
-	if !reflect.DeepEqual(steps, []string{"cached failover", "full scan"}) {
-		t.Fatalf("expected cached failover before full scan, got %v", steps)
+	if len(steps) != 0 {
+		t.Fatalf("first failed cycle triggered recovery: %v", steps)
 	}
-	if !postFailoverOptimization {
-		t.Fatal("expected the post-failover scan to bypass cooldown once")
+	scheduler.runConnectionWatchOnce(context.Background())
+	if !reflect.DeepEqual(steps, []string{"cached failover"}) {
+		t.Fatalf("expected confirmed failover without an immediate optimization scan, got %v", steps)
 	}
 }
 
@@ -575,8 +573,12 @@ func TestSchedulerConnectionWatchDoesNotThrottleASecondFailedRouteAfterSuccessfu
 	scheduler.runConnectionWatchOnce(context.Background())
 	now = now.Add(connectionWatchInterval)
 	scheduler.runConnectionWatchOnce(context.Background())
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
 	if failoverCalls != 2 {
-		t.Fatalf("expected immediate recovery for a second failed route, got %d attempts", failoverCalls)
+		t.Fatalf("expected two confirmed recovery attempts, got %d", failoverCalls)
 	}
 }
 

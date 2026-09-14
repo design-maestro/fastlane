@@ -102,7 +102,7 @@ func TestConnectAutoLogsSelectionReason(t *testing.T) {
 	for _, want := range []string{
 		"probe result",
 		"auto selection decision",
-		"latency improved by",
+		"latency improvement is not confirmed",
 		"auto connect succeeded",
 	} {
 		if !strings.Contains(logs.String(), want) {

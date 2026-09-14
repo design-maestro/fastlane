@@ -110,13 +110,23 @@ func TestDaemonOnceRestoresPersistedConnectionBeforeSchedulerLoop(t *testing.T) 
 	}
 
 	serviceScript := filepath.Join(root, "xray-service.sh")
-	serviceBody := "#!/bin/sh\ncase \"$1\" in\nreload|start|stop)\n  exit 0\n  ;;\nstatus)\n  echo running\n  exit 0\n  ;;\n*)\n  exit 1\n  ;;\nesac\n"
+	apiReady := filepath.Join(root, "api-ready")
+	serviceBody := "#!/bin/sh\ncase \"$1\" in\nreload|start)\n  touch \"" + apiReady + "\"\n  exit 0\n  ;;\nstop)\n  exit 0\n  ;;\nstatus)\n  echo running\n  exit 0\n  ;;\n*)\n  exit 1\n  ;;\nesac\n"
 	if err := os.WriteFile(serviceScript, []byte(serviceBody), 0o755); err != nil {
 		t.Fatalf("write xray service script: %v", err)
 	}
 
 	xrayBinary := filepath.Join(root, "xray")
-	xrayBody := "#!/bin/sh\nif [ \"$1\" = \"-test\" ] && [ \"$2\" = \"-config\" ] && [ -f \"$3\" ]; then\n  exit 0\nfi\nexit 1\n"
+	apiOutbounds := filepath.Join(root, "api-outbounds.json")
+	apiSelected := filepath.Join(root, "api-selected.txt")
+	xrayBody := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"-test\" ] && [ \"$2\" = \"-config\" ] && [ -f \"$3\" ]; then exit 0; fi\n" +
+		"if [ \"$1\" = \"api\" ] && [ ! -f \"" + apiReady + "\" ]; then exit 1; fi\n" +
+		"if [ \"$1\" = \"api\" ] && [ \"$2\" = \"ado\" ]; then cat > \"" + apiOutbounds + "\"; exit 0; fi\n" +
+		"if [ \"$1\" = \"api\" ] && [ \"$2\" = \"lso\" ]; then cat \"" + apiOutbounds + "\"; exit 0; fi\n" +
+		"if [ \"$1\" = \"api\" ] && [ \"$2\" = \"bo\" ]; then last=''; for arg in \"$@\"; do last=\"$arg\"; done; printf '%s' \"$last\" > \"" + apiSelected + "\"; exit 0; fi\n" +
+		"if [ \"$1\" = \"api\" ] && [ \"$2\" = \"bi\" ]; then printf '{\"balancer\":{\"override\":{\"target\":\"%s\"}}}' \"$(cat \"" + apiSelected + "\")\"; exit 0; fi\n" +
+		"exit 1\n"
 	if err := os.WriteFile(xrayBinary, []byte(xrayBody), 0o755); err != nil {
 		t.Fatalf("write xray binary: %v", err)
 	}

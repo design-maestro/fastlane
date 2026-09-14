@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/design-maestro/fastlane/internal/domain"
 )
 
 const (
@@ -25,6 +28,10 @@ type Scheduler struct {
 	recoveryFailover       func(context.Context, string) error
 	healthMu               sync.Mutex
 	lastRecoveryAt         time.Time
+	recoveryFailures       int
+	recoveryRouteKey       string
+	lastOutboundCleanupAt  time.Time
+	lastReserveCheckAt     time.Time
 	recoveryRetryEvery     time.Duration
 	refreshConfigPollEvery time.Duration
 	healthConfigPollEvery  time.Duration
@@ -65,7 +72,7 @@ func (s *Scheduler) SetHealthTrigger(trigger func() (string, bool), check func(c
 }
 
 // SetRecoveryFailover overrides the cached failover step used by the active
-// connection watcher. The full health pass still runs immediately afterwards.
+// connection watcher.
 func (s *Scheduler) SetRecoveryFailover(failover func(context.Context, string) error) {
 	s.recoveryFailover = failover
 }
@@ -179,6 +186,18 @@ func (s *Scheduler) runConnectionWatchLoop(ctx context.Context) {
 }
 
 func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
+	if s.service != nil && (s.lastOutboundCleanupAt.IsZero() || !s.now().Before(s.lastOutboundCleanupAt.Add(time.Minute))) {
+		if err := s.service.CleanupManagedOutbounds(ctx); err != nil {
+			s.logWarn("clean up retired xray outbounds", "error", err.Error())
+		}
+		s.lastOutboundCleanupAt = s.now()
+	}
+	if s.service != nil && (s.lastReserveCheckAt.IsZero() || !s.now().Before(s.lastReserveCheckAt.Add(time.Minute))) {
+		if err := s.service.MaintainManagedReserves(ctx); err != nil {
+			s.logWarn("verify managed xray reserves", "error", err.Error())
+		}
+		s.lastReserveCheckAt = s.now()
+	}
 	// A full URL-test pass temporarily changes probe processes and may take
 	// longer than the watch interval. Do not queue a second pass from a stale
 	// recovery observation while one is already running.
@@ -201,6 +220,18 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 	}
 	if !needed {
 		s.lastRecoveryAt = time.Time{}
+		s.recoveryFailures = 0
+		s.recoveryRouteKey = ""
+		return
+	}
+	routeKey := s.currentRecoveryRouteKey()
+	if routeKey != s.recoveryRouteKey {
+		s.recoveryRouteKey = routeKey
+		s.recoveryFailures = 0
+	}
+	s.recoveryFailures++
+	if s.recoveryFailures < 2 {
+		s.logWarn("active route check failed; waiting for confirmation", "reason", reason)
 		return
 	}
 	now := s.now()
@@ -220,17 +251,25 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 	if err != nil {
 		s.logWarn("connection failover", "error", err.Error())
 	}
-	s.logInfo("starting post-failover health check")
-	healthCtx := ctx
-	if failoverAttempted && err == nil {
-		healthCtx = withPostFailoverOptimization(ctx)
-	}
-	s.runHealthOnceLocked(healthCtx)
 	if failoverAttempted && err == nil {
 		// The replacement route passed its post-apply egress check. Do not let
 		// backoff suppress recovery if that different route also fails soon.
 		s.lastRecoveryAt = time.Time{}
+		s.recoveryFailures = 0
+		s.recoveryRouteKey = ""
 	}
+}
+
+func (s *Scheduler) currentRecoveryRouteKey() string {
+	if s.service == nil {
+		return "custom"
+	}
+	status, err := s.service.Status()
+	if err != nil {
+		return "unknown"
+	}
+	state := status.State
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%d", state.Mode, state.ActiveSubscriptionID, state.ActiveNodeID, state.ActiveTransport, state.LastSwitchAt.UTC().Format(time.RFC3339Nano), state.RuntimeConfigGeneration)
 }
 
 func (s *Scheduler) runOnce(ctx context.Context) {
@@ -332,6 +371,9 @@ func (s *Scheduler) recoveryRetryInterval() time.Duration {
 
 	retryEvery := time.Minute
 	if s.service == nil || s.service.store == nil {
+		return retryEvery
+	}
+	if status, err := s.service.Status(); err == nil && status.State.OperationalMode == domain.OperationalModeDirect {
 		return retryEvery
 	}
 	settings, err := s.service.store.LoadSettings()

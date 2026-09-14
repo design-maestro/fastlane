@@ -53,6 +53,12 @@ func TestGenerateManualVLESSConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize generated json: %v", err)
 	}
+	if os.Getenv("UPDATE_XRAY_GOLDEN") == "1" {
+		path := filepath.Join("..", "..", "test", "fixtures", "xray", "manual_vless.golden.json")
+		if err := os.WriteFile(path, gotJSON, 0o644); err != nil {
+			t.Fatalf("update golden: %v", err)
+		}
+	}
 
 	want, err := normalizeJSON([]byte(mustReadGolden(t, "manual_vless.golden.json")))
 	if err != nil {
@@ -222,6 +228,12 @@ func TestGenerateTransparentVLESSConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize generated json: %v", err)
 	}
+	if os.Getenv("UPDATE_XRAY_GOLDEN") == "1" {
+		path := filepath.Join("..", "..", "test", "fixtures", "xray", "transparent_vless.golden.json")
+		if err := os.WriteFile(path, gotJSON, 0o644); err != nil {
+			t.Fatalf("update golden: %v", err)
+		}
+	}
 
 	want, err := normalizeJSON([]byte(mustReadGolden(t, "transparent_vless.golden.json")))
 	if err != nil {
@@ -289,7 +301,7 @@ func TestGenerateTransparentConfigRoutesDNSUpstreamsDirect(t *testing.T) {
 	if !ok {
 		t.Fatalf("routing rules missing: %+v", routing)
 	}
-	if len(rules) != 4 {
+	if len(rules) != 7 {
 		t.Fatalf("expected dns direct, transparent tcp/udp, and local inbound rules, got %d rules", len(rules))
 	}
 
@@ -315,7 +327,7 @@ func TestGenerateTransparentConfigRoutesDNSUpstreamsDirect(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected second routing rule object, got %T", rules[1])
 	}
-	if transparent["outboundTag"] != "selected" || transparent["network"] != "tcp" {
+	if logicalOutbound(transparent) != "selected" || transparent["network"] != "tcp" {
 		t.Fatalf("unexpected transparent tcp route: %+v", transparent)
 	}
 	if !reflect.DeepEqual(asStringSlice(t, transparent["inboundTag"]), []string{"transparent-in"}) {
@@ -326,7 +338,7 @@ func TestGenerateTransparentConfigRoutesDNSUpstreamsDirect(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected third routing rule object, got %T", rules[2])
 	}
-	if transparentUDP["outboundTag"] != "selected" || transparentUDP["network"] != "udp" {
+	if logicalOutbound(transparentUDP) != "selected" || transparentUDP["network"] != "udp" {
 		t.Fatalf("unexpected transparent udp route: %+v", transparentUDP)
 	}
 	if !reflect.DeepEqual(asStringSlice(t, transparentUDP["inboundTag"]), []string{"transparent-udp-in"}) {
@@ -337,7 +349,7 @@ func TestGenerateTransparentConfigRoutesDNSUpstreamsDirect(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected fourth routing rule object, got %T", rules[3])
 	}
-	if local["outboundTag"] != "selected" || local["network"] != "tcp,udp" {
+	if logicalOutbound(local) != "selected" || local["network"] != "tcp,udp" {
 		t.Fatalf("unexpected local inbound route: %+v", local)
 	}
 	if !reflect.DeepEqual(asStringSlice(t, local["inboundTag"]), []string{"socks-in", "http-in"}) {
@@ -386,7 +398,7 @@ func TestGenerateTransparentConfigAddsSeparateUDPInboundAndQUICSniffing(t *testi
 	if !ok {
 		t.Fatalf("inbounds missing: %+v", cfg)
 	}
-	if len(inbounds) != 4 {
+	if len(inbounds) != 7 {
 		t.Fatalf("expected four inbounds, got %d", len(inbounds))
 	}
 
@@ -452,7 +464,7 @@ func TestGenerateTransparentConfigBlocksUDPWhenQUICBlockingEnabled(t *testing.T)
 	if !ok {
 		t.Fatalf("routing rules missing: %+v", routing)
 	}
-	if len(rules) != 3 {
+	if len(rules) != 6 {
 		t.Fatalf("expected three routing rules, got %d", len(rules))
 	}
 
@@ -517,7 +529,7 @@ func TestGenerateTransparentTargetRoutingOnlySelectsMatchedServices(t *testing.T
 	if !ok {
 		t.Fatalf("routing rules missing: %+v", routing)
 	}
-	if len(rules) != 7 {
+	if len(rules) != 10 {
 		t.Fatalf("expected seven routing rules, got %d", len(rules))
 	}
 
@@ -525,7 +537,7 @@ func TestGenerateTransparentTargetRoutingOnlySelectsMatchedServices(t *testing.T
 	if !ok {
 		t.Fatalf("expected first routing rule object, got %T", rules[0])
 	}
-	if domainRule["outboundTag"] != "selected" {
+	if logicalOutbound(domainRule) != "selected" {
 		t.Fatalf("unexpected target tcp domain rule: %+v", domainRule)
 	}
 	if domainRule["network"] != "tcp" {
@@ -542,7 +554,7 @@ func TestGenerateTransparentTargetRoutingOnlySelectsMatchedServices(t *testing.T
 	if !ok {
 		t.Fatalf("expected second routing rule object, got %T", rules[1])
 	}
-	if domainUDP["outboundTag"] != "selected" {
+	if logicalOutbound(domainUDP) != "selected" {
 		t.Fatalf("unexpected target udp domain rule: %+v", domainUDP)
 	}
 	if domainUDP["network"] != "udp" {
@@ -559,7 +571,7 @@ func TestGenerateTransparentTargetRoutingOnlySelectsMatchedServices(t *testing.T
 	if !ok {
 		t.Fatalf("expected third routing rule object, got %T", rules[2])
 	}
-	if ipRule["outboundTag"] != "selected" {
+	if logicalOutbound(ipRule) != "selected" {
 		t.Fatalf("unexpected target tcp ip rule: %+v", ipRule)
 	}
 	if ipRule["network"] != "tcp" {
@@ -576,7 +588,7 @@ func TestGenerateTransparentTargetRoutingOnlySelectsMatchedServices(t *testing.T
 	if !ok {
 		t.Fatalf("expected fourth routing rule object, got %T", rules[3])
 	}
-	if ipUDP["outboundTag"] != "selected" {
+	if logicalOutbound(ipUDP) != "selected" {
 		t.Fatalf("unexpected target udp ip rule: %+v", ipUDP)
 	}
 	if ipUDP["network"] != "udp" {
@@ -615,7 +627,7 @@ func TestGenerateTransparentTargetRoutingOnlySelectsMatchedServices(t *testing.T
 	if !ok {
 		t.Fatalf("expected seventh routing rule object, got %T", rules[6])
 	}
-	if localRule["outboundTag"] != "selected" {
+	if logicalOutbound(localRule) != "selected" {
 		t.Fatalf("unexpected local inbound rule: %+v", localRule)
 	}
 	if !reflect.DeepEqual(asStringSlice(t, localRule["inboundTag"]), []string{"socks-in", "http-in"}) {
@@ -716,7 +728,7 @@ func TestGenerateTransparentSelectiveTargetRoutingFallsBackToSelected(t *testing
 	if !ok {
 		t.Fatalf("routing rules missing: %+v", routing)
 	}
-	if len(rules) != 3 {
+	if len(rules) != 6 {
 		t.Fatalf("expected three routing rules, got %d", len(rules))
 	}
 
@@ -724,7 +736,7 @@ func TestGenerateTransparentSelectiveTargetRoutingFallsBackToSelected(t *testing
 	if !ok {
 		t.Fatalf("expected first routing rule object, got %T", rules[0])
 	}
-	if transparent["outboundTag"] != "selected" || transparent["network"] != "tcp" {
+	if logicalOutbound(transparent) != "selected" || transparent["network"] != "tcp" {
 		t.Fatalf("unexpected transparent tcp selective rule: %+v", transparent)
 	}
 	if _, hasDomain := transparent["domain"]; hasDomain {
@@ -738,7 +750,7 @@ func TestGenerateTransparentSelectiveTargetRoutingFallsBackToSelected(t *testing
 	if !ok {
 		t.Fatalf("expected second routing rule object, got %T", rules[1])
 	}
-	if transparentUDP["outboundTag"] != "selected" || transparentUDP["network"] != "udp" {
+	if logicalOutbound(transparentUDP) != "selected" || transparentUDP["network"] != "udp" {
 		t.Fatalf("unexpected transparent udp selective rule: %+v", transparentUDP)
 	}
 	if _, hasDomain := transparentUDP["domain"]; hasDomain {
@@ -791,7 +803,7 @@ func TestGenerateTransparentSelectiveSplitRoutingKeepsBypassDirect(t *testing.T)
 	if !ok {
 		t.Fatalf("routing rules missing: %+v", routing)
 	}
-	if len(rules) != 5 {
+	if len(rules) != 8 {
 		t.Fatalf("expected five routing rules, got %d", len(rules))
 	}
 
@@ -807,7 +819,7 @@ func TestGenerateTransparentSelectiveSplitRoutingKeepsBypassDirect(t *testing.T)
 	if !ok {
 		t.Fatalf("expected third routing rule object, got %T", rules[2])
 	}
-	if fallbackRule["outboundTag"] != "selected" || fallbackRule["network"] != "tcp" {
+	if logicalOutbound(fallbackRule) != "selected" || fallbackRule["network"] != "tcp" {
 		t.Fatalf("unexpected selective fallback tcp rule: %+v", fallbackRule)
 	}
 }
@@ -864,7 +876,7 @@ func TestGenerateTransparentBypassRoutingKeepsMatchedServicesDirect(t *testing.T
 	if !ok {
 		t.Fatalf("routing rules missing: %+v", routing)
 	}
-	if len(rules) != 7 {
+	if len(rules) != 10 {
 		t.Fatalf("expected seven routing rules, got %d", len(rules))
 	}
 
@@ -928,7 +940,7 @@ func TestGenerateTransparentBypassRoutingKeepsMatchedServicesDirect(t *testing.T
 	if !ok {
 		t.Fatalf("expected fifth routing rule object, got %T", rules[4])
 	}
-	if fallbackRule["outboundTag"] != "selected" || fallbackRule["network"] != "tcp" {
+	if logicalOutbound(fallbackRule) != "selected" || fallbackRule["network"] != "tcp" {
 		t.Fatalf("unexpected transparent tcp fallback rule: %+v", fallbackRule)
 	}
 
@@ -936,7 +948,7 @@ func TestGenerateTransparentBypassRoutingKeepsMatchedServicesDirect(t *testing.T
 	if !ok {
 		t.Fatalf("expected sixth routing rule object, got %T", rules[5])
 	}
-	if fallbackUDP["outboundTag"] != "selected" || fallbackUDP["network"] != "udp" {
+	if logicalOutbound(fallbackUDP) != "selected" || fallbackUDP["network"] != "udp" {
 		t.Fatalf("unexpected transparent udp fallback rule: %+v", fallbackUDP)
 	}
 
@@ -944,7 +956,7 @@ func TestGenerateTransparentBypassRoutingKeepsMatchedServicesDirect(t *testing.T
 	if !ok {
 		t.Fatalf("expected seventh routing rule object, got %T", rules[6])
 	}
-	if localRule["outboundTag"] != "selected" {
+	if logicalOutbound(localRule) != "selected" {
 		t.Fatalf("unexpected local inbound rule: %+v", localRule)
 	}
 }
@@ -1027,6 +1039,16 @@ func normalizeJSON(input []byte) ([]byte, error) {
 	}
 
 	return bytes.TrimSpace(buffer.Bytes()), nil
+}
+
+func logicalOutbound(rule map[string]any) string {
+	if tag, _ := rule["outboundTag"].(string); tag != "" {
+		return tag
+	}
+	if tag, _ := rule["balancerTag"].(string); tag == "fastlane-main" {
+		return "selected"
+	}
+	return ""
 }
 
 func findInboundByTag(t *testing.T, inbounds []any, tag string) map[string]any {

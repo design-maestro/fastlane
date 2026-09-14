@@ -277,7 +277,7 @@ func TestGeneratorPreservesRawXHTTPOutbound(t *testing.T) {
 		t.Fatalf("decode generated config: %v", err)
 	}
 	selected := cfg["outbounds"].([]any)[0].(map[string]any)
-	if selected["tag"] != "selected" {
+	if tag, _ := selected["tag"].(string); !strings.HasPrefix(tag, managedOutboundPrefix) {
 		t.Fatalf("unexpected selected tag: %v", selected["tag"])
 	}
 	xhttp := selected["streamSettings"].(map[string]any)["xhttpSettings"].(map[string]any)
@@ -291,6 +291,52 @@ func TestGeneratorPreservesRawXHTTPOutbound(t *testing.T) {
 	}
 	if source["tag"] != "provider-tag" {
 		t.Fatalf("source raw outbound was mutated: %v", source["tag"])
+	}
+}
+
+func TestGeneratorPersistsDirectStartupWithoutVPNCandidate(t *testing.T) {
+	t.Parallel()
+	rendered, err := NewGenerator().Generate(backend.ConfigRequest{
+		Nodes:          []domain.Node{{ID: "node", Protocol: domain.ProtocolSocks, Address: "192.0.2.10", Port: 1080}},
+		SelectedNodeID: "node",
+		StartDirect:    true,
+	})
+	if err != nil {
+		t.Fatalf("generate direct startup: %v", err)
+	}
+	var cfg struct {
+		Outbounds []struct {
+			Tag string `json:"tag"`
+		} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(rendered, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, outbound := range cfg.Outbounds {
+		if strings.HasPrefix(outbound.Tag, managedOutboundPrefix) {
+			t.Fatalf("direct startup retained VPN candidate %q", outbound.Tag)
+		}
+	}
+}
+
+func TestGeneratorPersistsDirectStartupWithoutSelectedNode(t *testing.T) {
+	t.Parallel()
+	rendered, err := NewGenerator().Generate(backend.ConfigRequest{SOCKSPort: 10808, HTTPPort: 10809, StartDirect: true})
+	if err != nil {
+		t.Fatalf("generate direct-only startup: %v", err)
+	}
+	var cfg struct {
+		Outbounds []struct {
+			Tag string `json:"tag"`
+		} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(rendered, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, outbound := range cfg.Outbounds {
+		if strings.HasPrefix(outbound.Tag, managedOutboundPrefix) {
+			t.Fatalf("direct-only startup config contains VPN candidate %q", outbound.Tag)
+		}
 	}
 }
 
@@ -469,15 +515,19 @@ func TestGeneratorAddsLocalDNSRuntime(t *testing.T) {
 	if !ok || len(rules) < 3 {
 		t.Fatalf("routing rules missing: %+v", routing)
 	}
-	firstRule, ok := rules[0].(map[string]any)
-	if !ok {
-		t.Fatalf("expected first routing rule object, got %T", rules[0])
+	var dnsRule map[string]any
+	for _, raw := range rules {
+		candidate, _ := raw.(map[string]any)
+		if candidate["outboundTag"] == "dns-out" {
+			dnsRule = candidate
+			break
+		}
 	}
-	if firstRule["outboundTag"] != "dns-out" {
-		t.Fatalf("expected first routing rule to send dns-in to dns-out, got %+v", firstRule)
+	if dnsRule == nil {
+		t.Fatalf("expected routing rule to send dns-in to dns-out, got %+v", rules)
 	}
-	if !reflect.DeepEqual(asStringSlice(t, firstRule["inboundTag"]), []string{"dns-in"}) {
-		t.Fatalf("unexpected dns-in inbound tag: %+v", firstRule["inboundTag"])
+	if !reflect.DeepEqual(asStringSlice(t, dnsRule["inboundTag"]), []string{"dns-in"}) {
+		t.Fatalf("unexpected dns-in inbound tag: %+v", dnsRule["inboundTag"])
 	}
 }
 

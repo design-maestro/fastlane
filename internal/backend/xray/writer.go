@@ -40,6 +40,7 @@ type RuntimeBackend struct {
 	tester     ConfigTester
 	backupPath string
 	logger     *slog.Logger
+	apiRunner  commandRunner
 }
 
 // NewRuntimeBackend creates an operational Xray backend.

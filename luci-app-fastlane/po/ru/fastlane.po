@@ -1043,3 +1043,75 @@ msgstr "Используйте строчные латинские буквы, �
 
 msgid "domains"
 msgstr "доменов"
+
+msgid "Current operation"
+msgstr "Текущая операция"
+
+msgid "Generation %s"
+msgstr "Поколение %s"
+
+msgid "None"
+msgstr "Нет"
+
+msgid "Not active"
+msgstr "Не используется"
+
+msgid "Not available"
+msgstr "Недоступно"
+
+msgid "Not reported"
+msgstr "Нет данных"
+
+msgid "Operational mode"
+msgstr "Рабочий режим"
+
+msgid "Restoring VPN connection…"
+msgstr "Восстанавливаем VPN…"
+
+msgid "Runtime config"
+msgstr "Конфигурация процесса"
+
+msgid "Last switch reason"
+msgstr "Причина последнего переключения"
+
+msgid "Last switch time"
+msgstr "Время последнего переключения"
+
+msgid "Runtime transition"
+msgstr "Переход состояния"
+
+msgid "Runtime reserves"
+msgstr "Резервные подключения"
+
+msgid "Verified: %s · draining: %s"
+msgstr "Проверено: %s · завершаются: %s"
+
+msgid "Selected outbound"
+msgstr "Активный выход"
+
+msgid "Switching…"
+msgstr "Переключаем…"
+
+msgid "Version %s"
+msgstr "Версия %s"
+
+msgid "VPN unavailable — internet is direct"
+msgstr "VPN недоступен — интернет напрямую"
+
+msgid "Waiting…"
+msgstr "Ожидание…"
+
+msgid "direct"
+msgstr "напрямую"
+
+msgid "Seamless VPN failover"
+msgstr "Бесшовное переключение VPN"
+
+msgid "Checks and switches VPN servers inside the running Xray process without restarting DNS or Wi-Fi services"
+msgstr "Проверяет и переключает VPN-серверы внутри работающего Xray без перезапуска DNS и Wi-Fi"
+
+msgid "Direct emergency mode"
+msgstr "Аварийный прямой режим"
+
+msgid "Keeps the internet online directly when every VPN server is unavailable and returns after a confirmed recovery"
+msgstr "Сохраняет прямой доступ в интернет при отказе всех VPN-серверов и возвращает VPN после подтверждённого восстановления"

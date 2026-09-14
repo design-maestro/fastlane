@@ -109,6 +109,7 @@ type StatusSnapshot struct {
 type applyNodeSelectionOptions struct {
 	persistFailure             bool
 	rollbackOnVerificationFail bool
+	forceStaticReload          bool
 	preservedState             domain.RuntimeState
 }
 
@@ -130,6 +131,8 @@ type Service struct {
 	backendReadyChecks      int
 	backendReadyDelay       time.Duration
 	backendEgressProbe      func(ctx context.Context) error
+	managedOutboundProbe    func(context.Context, backend.ManagedBackend, int, string) error
+	managedRecoveryDelay    time.Duration
 	backendEgressTimeout    time.Duration
 	backendEgressRetryDelay time.Duration
 	nodeDialProbeTimeout    time.Duration
@@ -1038,6 +1041,11 @@ func (s *Service) connectManual(ctx context.Context, subscriptionID, nodeID stri
 	if err := s.applyNodeSelection(ctx, sub, node, domain.SelectionModeManual, selectionOptionsForState(state)); err != nil {
 		return err
 	}
+	if updated, stateErr := s.store.LoadState(); stateErr == nil {
+		updated.LastSwitchAt = s.currentTime().UTC()
+		updated.LastSwitchReason = "manual selection"
+		_ = s.saveState(updated)
+	}
 
 	settings, err := s.store.LoadSettings()
 	if err == nil {
@@ -1454,6 +1462,47 @@ func (s *Service) RuntimeStatus(ctx context.Context) (backend.RuntimeStatus, err
 	return s.backend.Status(ctx)
 }
 
+// CleanupManagedOutbounds removes retired live handlers after their grace
+// period. Xray v26.7.28 detaches the handler from new selections without
+// closing already established TCP or UDP sessions.
+func (s *Service) CleanupManagedOutbounds(ctx context.Context) error {
+	managed, ok := s.backend.(backend.ManagedBackend)
+	if !ok {
+		return nil
+	}
+	return runStoreWriteLocked(s, func() error {
+		state, err := s.store.LoadState()
+		if err != nil {
+			return fmt.Errorf("load runtime state for outbound cleanup: %w", err)
+		}
+		selected, err := managed.SelectedOutbound(ctx)
+		if err != nil {
+			return nil
+		}
+		now := s.currentTime().UTC()
+		kept := make([]domain.RuntimeOutboundState, 0, len(state.RuntimeOutbounds))
+		changed := false
+		for _, outbound := range state.RuntimeOutbounds {
+			protected := outbound.Tag == selected || (state.CurrentOperation != nil && (outbound.Tag == state.CurrentOperation.From || outbound.Tag == state.CurrentOperation.To))
+			if outbound.Role != "draining" || outbound.RetireAfter.IsZero() || now.Before(outbound.RetireAfter) || protected {
+				kept = append(kept, outbound)
+				continue
+			}
+			if err := managed.RemoveOutbound(ctx, outbound.Tag); err != nil {
+				kept = append(kept, outbound)
+				s.logWarn("remove retired xray outbound", "tag", outbound.Tag, "error", err.Error())
+				continue
+			}
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		state.RuntimeOutbounds = kept
+		return s.saveState(state)
+	})
+}
+
 // DNSStatus returns the current Fast Lane-managed DNS runtime status, if available.
 func (s *Service) DNSStatus(ctx context.Context) (domain.DNSRuntimeStatus, error) {
 	if s.dns == nil {
@@ -1821,6 +1870,23 @@ func (s *Service) restoreRuntime(ctx context.Context) error {
 		}
 	}
 
+	managedDirectState := state.SelectedOutboundTag == "fastlane-direct" || state.RuntimeConfigGeneration > 0
+	if state.OperationalMode == domain.OperationalModeDirect && managedDirectState && state.ActiveSubscriptionID != "" {
+		if managed, ok := s.backend.(backend.ManagedBackend); ok {
+			if _, err := s.ensureBackendRunning(ctx, state.ActiveSubscriptionID, state.ActiveNodeID, state.Mode); err != nil {
+				return err
+			}
+			if err := managed.SelectDirect(ctx); err != nil {
+				return fmt.Errorf("restore direct outbound: %w", err)
+			}
+			state.Connected = false
+			state.ActiveTransport = domain.TransportModeDirect
+			state.SelectedOutboundTag = "fastlane-direct"
+			state.CurrentOperation = nil
+			return s.saveState(state)
+		}
+	}
+
 	if !state.Connected || state.ActiveSubscriptionID == "" {
 		if err := s.disconnectRuntime(ctx); err != nil {
 			return err
@@ -2042,7 +2108,7 @@ func (s *Service) setFirewallTargetService(ctx context.Context, name string, sel
 	}
 
 	if shouldReapply {
-		if err := s.reapplyCurrentConnection(ctx); err != nil {
+		if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 			return domain.FirewallTargetService{}, err
 		}
 	}
@@ -2106,7 +2172,7 @@ func (s *Service) deleteFirewallTargetService(ctx context.Context, name string) 
 	}
 
 	if shouldReapply {
-		if err := s.reapplyCurrentConnection(ctx); err != nil {
+		if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 			return err
 		}
 	}
@@ -2239,7 +2305,7 @@ func (s *Service) configureFirewallTargets(ctx context.Context, targets []string
 		return domain.FirewallSettings{}, fmt.Errorf("save settings: %w", err)
 	}
 
-	if err := s.reapplyCurrentConnection(ctx); err != nil {
+	if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 		return domain.FirewallSettings{}, err
 	}
 
@@ -2299,7 +2365,7 @@ func (s *Service) configureFirewallSplit(ctx context.Context, proxyTargets, bypa
 		return domain.FirewallSettings{}, fmt.Errorf("save settings: %w", err)
 	}
 
-	if err := s.reapplyCurrentConnection(ctx); err != nil {
+	if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 		return domain.FirewallSettings{}, err
 	}
 
@@ -2344,7 +2410,7 @@ func (s *Service) configureFirewallHosts(ctx context.Context, sources []string, 
 		return domain.FirewallSettings{}, fmt.Errorf("save settings: %w", err)
 	}
 
-	if err := s.reapplyCurrentConnection(ctx); err != nil {
+	if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 		return domain.FirewallSettings{}, err
 	}
 
@@ -2377,7 +2443,7 @@ func (s *Service) updateFirewallPort(ctx context.Context, port int) (domain.Fire
 		return domain.FirewallSettings{}, fmt.Errorf("save settings: %w", err)
 	}
 
-	if err := s.reapplyCurrentConnection(ctx); err != nil {
+	if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 		return domain.FirewallSettings{}, err
 	}
 
@@ -2406,7 +2472,7 @@ func (s *Service) updateFirewallBlockQUIC(ctx context.Context, enabled bool) (do
 		return domain.FirewallSettings{}, fmt.Errorf("save settings: %w", err)
 	}
 
-	if err := s.reapplyCurrentConnection(ctx); err != nil {
+	if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 		return domain.FirewallSettings{}, err
 	}
 
@@ -2463,7 +2529,7 @@ func (s *Service) disableFirewall(ctx context.Context) (domain.FirewallSettings,
 		return domain.FirewallSettings{}, fmt.Errorf("save settings: %w", err)
 	}
 
-	if err := s.reapplyCurrentConnection(ctx); err != nil {
+	if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 		return domain.FirewallSettings{}, err
 	}
 
@@ -2629,7 +2695,7 @@ func (s *Service) PatchSettings(values map[string]string) (domain.Settings, erro
 			return domain.Settings{}, fmt.Errorf("save settings: %w", err)
 		}
 		if countryRoutingChanged {
-			if err := s.reapplyCurrentConnection(context.Background()); err != nil {
+			if err := s.reapplyCurrentConnectionWithReload(context.Background()); err != nil {
 				if restoreErr := s.restoreSettingsRuntime(previousSettings); restoreErr != nil {
 					return domain.Settings{}, fmt.Errorf("apply country routing: %w; restore previous setting: %v", err, restoreErr)
 				}
@@ -2872,7 +2938,7 @@ func (s *Service) setSetting(key, value string) (domain.Settings, error) {
 	}
 
 	if reapplyRuntime {
-		if err := s.reapplyCurrentConnection(context.Background()); err != nil {
+		if err := s.reapplyCurrentConnectionWithReload(context.Background()); err != nil {
 			if key == "russia-direct" || key == "country-routing.enabled" || key == "country-direct" || key == "country-routing.country" || key == "direct-country" {
 				if restoreErr := s.restoreSettingsRuntime(previousSettings); restoreErr != nil {
 					return domain.Settings{}, fmt.Errorf("apply country routing setting: %w; restore previous setting: %v", err, restoreErr)
@@ -2889,7 +2955,7 @@ func (s *Service) restoreSettingsRuntime(settings domain.Settings) error {
 	if err := s.store.SaveSettings(settings); err != nil {
 		return fmt.Errorf("save previous settings: %w", err)
 	}
-	if err := s.reapplyCurrentConnection(context.Background()); err != nil {
+	if err := s.reapplyCurrentConnectionWithReload(context.Background()); err != nil {
 		return fmt.Errorf("reapply previous runtime: %w", err)
 	}
 	return nil
@@ -2945,7 +3011,7 @@ func (s *Service) applyDefaultDNS(ctx context.Context) (domain.Settings, error) 
 		return domain.Settings{}, fmt.Errorf("save settings: %w", err)
 	}
 
-	if err := s.reapplyCurrentConnection(ctx); err != nil {
+	if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 		return domain.Settings{}, err
 	}
 
@@ -2979,7 +3045,7 @@ func (s *Service) updateDNS(ctx context.Context, dns domain.DNSSettings) (domain
 		return domain.Settings{}, fmt.Errorf("save settings: %w", err)
 	}
 
-	if err := s.reapplyCurrentConnection(ctx); err != nil {
+	if err := s.reapplyCurrentConnectionWithReload(ctx); err != nil {
 		return domain.Settings{}, err
 	}
 
@@ -3622,7 +3688,7 @@ func (s *Service) backendConfigRequest(settings domain.Settings, node domain.Nod
 		LocalDNSPort:                localDNSPort,
 		TransparentProxy:            transparent,
 		TransparentSelectiveCapture: transparentSelectiveCapture(settings.Firewall),
-		TransparentBlockQUIC:        domain.EffectiveTransparentBlockQUIC(settings.Firewall, &node),
+		TransparentBlockQUIC:        s.managedTransparentBlockQUIC(settings.Firewall),
 		TransparentPort:             settings.Firewall.TransparentPort,
 		TransparentCountryRouting:   settings.CountryRouting,
 	}
@@ -3643,6 +3709,27 @@ func (s *Service) backendConfigRequest(settings domain.Settings, node domain.Nod
 	}
 
 	return req
+}
+
+func (s *Service) managedTransparentBlockQUIC(settings domain.FirewallSettings) bool {
+	if settings.BlockQUIC {
+		return true
+	}
+	if s == nil || s.store == nil {
+		return false
+	}
+	subscriptions, err := s.store.LoadSubscriptions()
+	if err != nil {
+		return false
+	}
+	for _, sub := range subscriptions {
+		for idx := range sub.Nodes {
+			if domain.EffectiveTransparentBlockQUIC(settings, &sub.Nodes[idx]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func localDNSRuntimeEnabled(settings domain.DNSSettings) bool {
@@ -3975,9 +4062,34 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 	if err != nil {
 		return fmt.Errorf("resolve node address: %w", err)
 	}
+	runtimeRequest := s.backendConfigRequest(runtimeSettings, resolvedNode, mode, 10808, 10809, firewallEnabled(settings.Firewall), s.dns != nil && localDNSRuntimeEnabled(settings.DNS))
+	managedApplied := false
+	if managed, ok := s.backend.(backend.ManagedBackend); ok && !opts.forceStaticReload {
+		handled, managedErr := s.tryManagedNodeSelection(ctx, managed, state, settings, runtimeSettings, sub, resolvedNode, mode)
+		if handled {
+			if managedErr != nil {
+				preserved := state
+				if latest, latestErr := s.store.LoadState(); latestErr == nil {
+					preserved = latest
+					preserved.ActiveSubscriptionID = state.ActiveSubscriptionID
+					preserved.ActiveNodeID = state.ActiveNodeID
+					preserved.ActiveNodeName = state.ActiveNodeName
+					preserved.Mode = state.Mode
+					preserved.ActiveTransport = state.ActiveTransport
+				}
+				preserved.CurrentOperation = nil
+				preserved.OperationalMode = domain.OperationalModeVPN
+				if persistErr := s.persistPreservedConnection(preserved, managedErr.Error()); persistErr != nil {
+					return fmt.Errorf("%v; preserve active route: %w", managedErr, persistErr)
+				}
+				return managedErr
+			}
+			managedApplied = true
+		}
+	}
 
 	var rollbackSnapshot backend.RollbackSnapshot
-	if s.backend != nil {
+	if s.backend != nil && !managedApplied {
 		if opts.rollbackOnVerificationFail {
 			snapshot, err := s.backend.CaptureRollback()
 			if err != nil {
@@ -3991,7 +4103,7 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 		}
 
 		s.logInfo("apply backend config", "subscription", sub.ID, "node", node.ID, "mode", mode, "resolved_address", resolvedNode.Address)
-		if err := s.backend.ApplyConfig(ctx, s.backendConfigRequest(runtimeSettings, resolvedNode, mode, 10808, 10809, firewallEnabled(settings.Firewall), s.dns != nil && localDNSRuntimeEnabled(settings.DNS))); err != nil {
+		if err := s.backend.ApplyConfig(ctx, runtimeRequest); err != nil {
 			s.logWarn("apply backend config failed", "subscription", sub.ID, "node", node.ID, "mode", mode, "error", err.Error())
 			return s.handleNodeSelectionFailure(ctx, sub, node, mode, opts, fmt.Sprintf("apply backend config: %v", err), fmt.Errorf("apply backend config: %w", err))
 		}
@@ -4001,9 +4113,21 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 		if reason, err := s.ensureBackendEgress(ctx, settings, sub.ID, node.ID, mode); err != nil {
 			return s.handlePostApplyVerificationFailure(ctx, sub, node, mode, opts, rollbackSnapshot, reason, err)
 		}
+		if managed, ok := s.backend.(backend.ManagedBackend); ok {
+			// The migration reload installs the loopback API and managed balancer.
+			// Pin its sole target so future switches always have an observable
+			// readback value.
+			tag, prepareErr := managed.PrepareOutbound(ctx, resolvedNode, 0)
+			if prepareErr != nil {
+				return s.handlePostApplyVerificationFailure(ctx, sub, node, mode, opts, rollbackSnapshot, prepareErr.Error(), prepareErr)
+			}
+			if selectErr := managed.SelectOutbound(ctx, tag); selectErr != nil {
+				return s.handlePostApplyVerificationFailure(ctx, sub, node, mode, opts, rollbackSnapshot, selectErr.Error(), selectErr)
+			}
+		}
 	}
 
-	if s.dns != nil {
+	if s.dns != nil && !managedApplied {
 		if localDNSRuntimeEnabled(settings.DNS) {
 			if err := s.dns.Apply(ctx, settings.DNS, localDNSListen, localDNSPort); err != nil {
 				return s.handleNodeSelectionFailure(ctx, sub, node, mode, opts, fmt.Sprintf("apply dns runtime: %v", err), fmt.Errorf("apply dns runtime: %w", err))
@@ -4013,9 +4137,9 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 		}
 	}
 
-	if s.firewall != nil {
+	if s.firewall != nil && !managedApplied {
 		if domain.FirewallRoutingEnabled(settings.Firewall) {
-			effectiveBlockQUIC := domain.EffectiveTransparentBlockQUIC(settings.Firewall, &resolvedNode)
+			effectiveBlockQUIC := s.managedTransparentBlockQUIC(settings.Firewall)
 			runtimeFirewall := domain.CanonicalFirewallSettings(settings.Firewall)
 			runtimeFirewall.BlockQUIC = effectiveBlockQUIC
 			s.logInfo(
@@ -4051,6 +4175,24 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 		state.AutoScope = ""
 	}
 	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	state.CurrentOperation = nil
+	if managedApplied {
+		if intentState, intentErr := s.store.LoadState(); intentErr == nil {
+			state.RuntimeConfigGeneration = intentState.RuntimeConfigGeneration
+			state.RuntimeOutbounds = append([]domain.RuntimeOutboundState(nil), intentState.RuntimeOutbounds...)
+		}
+	}
+	if managed, ok := s.backend.(backend.ManagedBackend); ok {
+		if selectedTag, selectedErr := managed.SelectedOutbound(ctx); selectedErr == nil {
+			if !managedApplied && state.RuntimeConfigGeneration == 0 {
+				state.RuntimeConfigGeneration = 1
+			}
+			state.SelectedOutboundTag = selectedTag
+			state.RuntimeConfigVersion = selectedTag
+			state.RuntimeOutbounds = updateRuntimeOutbound(state.RuntimeOutbounds, domain.RuntimeOutboundState{Tag: selectedTag, SubscriptionID: sub.ID, NodeID: node.ID, Role: "active", VerifiedAt: s.currentTime().UTC()})
+		}
+	}
 	if state.ActiveTransport != domain.TransportModeProxy {
 		state.LastTransportSwitchAt = s.currentTime().UTC()
 	}
@@ -4065,6 +4207,226 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 	}
 
 	return nil
+}
+
+func (s *Service) tryManagedNodeSelection(ctx context.Context, managed backend.ManagedBackend, state domain.RuntimeState, settings, runtimeSettings domain.Settings, sub domain.Subscription, candidate domain.Node, mode domain.SelectionMode) (bool, error) {
+	directRecovery := state.OperationalMode == domain.OperationalModeDirect && state.ActiveSubscriptionID != "" && state.ActiveNodeID != ""
+	if (!state.Connected && !directRecovery) || state.ActiveSubscriptionID == "" || state.ActiveNodeID == "" {
+		return false, nil
+	}
+	currentNode := candidate
+	currentTag := "fastlane-direct"
+	if directRecovery {
+		if err := managed.SelectDirect(ctx); err != nil {
+			return false, nil
+		}
+	} else {
+		currentSub, err := s.subscriptionByID(state.ActiveSubscriptionID)
+		if err != nil {
+			return false, nil
+		}
+		var ok bool
+		currentNode, ok = currentSub.NodeByID(state.ActiveNodeID)
+		if !ok {
+			currentTag = strings.TrimSpace(state.SelectedOutboundTag)
+			actual, selectedErr := managed.SelectedOutbound(ctx)
+			if currentTag == "" || selectedErr != nil || actual != currentTag {
+				return false, nil
+			}
+		} else {
+			currentNode, err = s.resolveNodeAddress(ctx, currentNode)
+			if err != nil {
+				return false, nil
+			}
+			currentTag, err = managed.PrepareOutbound(ctx, currentNode, 0)
+			if err != nil {
+				// An older running config has no management API. The caller performs the
+				// one allowed migration reload.
+				return false, nil
+			}
+		}
+		if err := managed.SelectOutbound(ctx, currentTag); err != nil {
+			return true, fmt.Errorf("pin current xray outbound: %w", err)
+		}
+	}
+	candidateTag, err := managed.PrepareOutbound(ctx, candidate, 0)
+	if err != nil {
+		return true, fmt.Errorf("prepare candidate outbound: %w", err)
+	}
+	if backoff, ok := state.CandidateBackoff[candidateTag]; ok && s.currentTime().UTC().Before(backoff.RetryAfter) {
+		return true, fmt.Errorf("candidate retry is paused until %s", backoff.RetryAfter.UTC().Format(time.RFC3339))
+	}
+	if candidateTag == currentTag {
+		// A display-only rename does not create or switch a runtime connection.
+		return true, managed.PersistConfig(ctx, s.backendConfigRequest(runtimeSettings, candidate, mode, 10808, 10809, firewallEnabled(settings.Firewall), s.dns != nil && localDNSRuntimeEnabled(settings.DNS)))
+	}
+	probeCandidate := s.probeManagedOutbound
+	if s.managedOutboundProbe != nil {
+		probeCandidate = func(probeCtx context.Context, probeBackend backend.ManagedBackend, slot int, tag string) error {
+			return s.managedOutboundProbe(probeCtx, probeBackend, slot, tag)
+		}
+	}
+	if err := probeCandidate(ctx, managed, 0, candidateTag); err != nil {
+		_ = s.recordManagedCandidateFailure(candidateTag)
+		_ = managed.RemoveOutbound(ctx, candidateTag)
+		return true, fmt.Errorf("candidate verify failed: %w", err)
+	}
+	if directRecovery {
+		if err := sleepWithContext(ctx, s.managedRecoveryConfirmationDelay()); err != nil {
+			return true, fmt.Errorf("wait for VPN recovery confirmation: %w", err)
+		}
+		if err := probeCandidate(ctx, managed, 0, candidateTag); err != nil {
+			_ = s.recordManagedCandidateFailure(candidateTag)
+			_ = managed.RemoveOutbound(ctx, candidateTag)
+			return true, fmt.Errorf("candidate recovery confirmation failed: %w", err)
+		}
+	}
+	now := s.currentTime().UTC()
+	intent := state
+	intent.CandidateBackoff = cloneCandidateBackoff(state.CandidateBackoff)
+	delete(intent.CandidateBackoff, candidateTag)
+	if currentTag != "fastlane-direct" {
+		intent.RuntimeOutbounds = updateRuntimeOutbound(intent.RuntimeOutbounds, domain.RuntimeOutboundState{Tag: currentTag, SubscriptionID: state.ActiveSubscriptionID, NodeID: state.ActiveNodeID, Role: "active"})
+	}
+	intent.RuntimeOutbounds = updateRuntimeOutbound(intent.RuntimeOutbounds, domain.RuntimeOutboundState{Tag: candidateTag, SubscriptionID: sub.ID, NodeID: candidate.ID, Role: "reserve", VerifiedAt: now})
+	intent.OperationalMode = domain.OperationalModeRecovering
+	intent.RuntimeConfigGeneration++
+	intent.CurrentOperation = &domain.RuntimeOperation{
+		Kind: "switch_outbound", From: currentTag, To: candidateTag, StartedAt: now,
+	}
+	if err := s.saveState(intent); err != nil {
+		return true, fmt.Errorf("save outbound switch intent: %w", err)
+	}
+	if err := managed.SelectOutbound(ctx, candidateTag); err != nil {
+		return true, fmt.Errorf("switch xray outbound: %w", err)
+	}
+	if reason, err := s.ensureBackendEgress(ctx, settings, sub.ID, candidate.ID, mode); err != nil {
+		if rollbackErr := managed.SelectOutbound(ctx, currentTag); rollbackErr != nil {
+			return true, fmt.Errorf("%s; rollback target: %v", reason, rollbackErr)
+		}
+		return true, err
+	}
+	request := s.backendConfigRequest(runtimeSettings, candidate, mode, 10808, 10809, firewallEnabled(settings.Firewall), s.dns != nil && localDNSRuntimeEnabled(settings.DNS))
+	if err := managed.PersistConfig(ctx, request); err != nil {
+		rollbackErr := managed.SelectOutbound(ctx, currentTag)
+		if rollbackErr != nil {
+			return true, fmt.Errorf("persist switched xray config: %w; rollback target: %v", err, rollbackErr)
+		}
+		return true, fmt.Errorf("persist switched xray config: %w", err)
+	}
+	if currentTag != "fastlane-direct" {
+		intent.RuntimeOutbounds = updateRuntimeOutbound(intent.RuntimeOutbounds, domain.RuntimeOutboundState{Tag: currentTag, SubscriptionID: state.ActiveSubscriptionID, NodeID: state.ActiveNodeID, Role: "draining", RetireAfter: now.Add(5 * time.Minute), RemoveBy: now.Add(30 * time.Minute)})
+	}
+	intent.RuntimeOutbounds = updateRuntimeOutbound(intent.RuntimeOutbounds, domain.RuntimeOutboundState{Tag: candidateTag, SubscriptionID: sub.ID, NodeID: candidate.ID, Role: "active", VerifiedAt: now})
+	if err := s.saveState(intent); err != nil {
+		_ = managed.SelectOutbound(ctx, currentTag)
+		return true, fmt.Errorf("save switched outbound state: %w", err)
+	}
+	return true, nil
+}
+
+func (s *Service) managedRecoveryConfirmationDelay() time.Duration {
+	if s.managedRecoveryDelay > 0 {
+		return s.managedRecoveryDelay
+	}
+	return 5 * time.Second
+}
+
+func cloneCandidateBackoff(source map[string]domain.CandidateBackoffState) map[string]domain.CandidateBackoffState {
+	cloned := make(map[string]domain.CandidateBackoffState, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func (s *Service) recordManagedCandidateFailure(tag string) error {
+	state, err := s.store.LoadState()
+	if err != nil {
+		return err
+	}
+	state.CandidateBackoff = cloneCandidateBackoff(state.CandidateBackoff)
+	entry := state.CandidateBackoff[tag]
+	entry.Tag = tag
+	entry.ConsecutiveFailures++
+	delay := managedCandidateBackoff(entry.ConsecutiveFailures)
+	entry.RetryAfter = s.currentTime().UTC().Add(delay)
+	state.CandidateBackoff[tag] = entry
+	return s.saveState(state)
+}
+
+func updateRuntimeOutbound(outbounds []domain.RuntimeOutboundState, next domain.RuntimeOutboundState) []domain.RuntimeOutboundState {
+	updated := append([]domain.RuntimeOutboundState(nil), outbounds...)
+	for idx := range updated {
+		if updated[idx].Tag == next.Tag {
+			if next.SubscriptionID == "" {
+				next.SubscriptionID = updated[idx].SubscriptionID
+			}
+			if next.NodeID == "" {
+				next.NodeID = updated[idx].NodeID
+			}
+			if next.VerifiedAt.IsZero() {
+				next.VerifiedAt = updated[idx].VerifiedAt
+			}
+			updated[idx] = next
+			return updated
+		}
+	}
+	return append(updated, next)
+}
+
+func (s *Service) probeManagedOutbound(ctx context.Context, managed backend.ManagedBackend, slot int, tag string) error {
+	port, err := managed.ProbeHTTPPort(slot)
+	if err != nil {
+		return err
+	}
+	if err := managed.SetProbeOutbound(ctx, slot, tag); err != nil {
+		return fmt.Errorf("select probe outbound: %w", err)
+	}
+	defer func() {
+		if err := managed.ClearProbeOutbound(context.Background(), slot); err != nil {
+			s.logWarn("clear managed probe outbound", "slot", slot, "error", err.Error())
+		}
+	}()
+	proxyURL := &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}
+	transport, ok := cloneSubscriptionTransportWithProxy(s.httpClient.Transport, proxyURL)
+	if !ok {
+		return fmt.Errorf("HTTP transport cannot be cloned for managed probe")
+	}
+	probeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan error, len(backendEgressProbeURLs))
+	for _, endpoint := range backendEgressProbeURLs {
+		endpoint := endpoint
+		go func() {
+			requestCtx, requestCancel := context.WithTimeout(probeCtx, 5*time.Second)
+			defer requestCancel()
+			req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
+			if err == nil {
+				client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+				resp, requestErr := client.Do(req)
+				err = requestErr
+				if resp != nil {
+					_, _ = io.Copy(io.Discard, resp.Body)
+					_ = resp.Body.Close()
+					if err == nil && resp.StatusCode != http.StatusNoContent {
+						err = fmt.Errorf("%s returned HTTP %d instead of 204", endpoint, resp.StatusCode)
+					}
+				}
+			}
+			results <- err
+		}()
+	}
+	var failures []string
+	for range backendEgressProbeURLs {
+		if err := <-results; err == nil {
+			cancel()
+			return nil
+		} else {
+			failures = append(failures, err.Error())
+		}
+	}
+	return fmt.Errorf("both HTTPS checks failed: %s", strings.Join(failures, "; "))
 }
 
 func selectionOptionsForState(state domain.RuntimeState) applyNodeSelectionOptions {
@@ -4714,6 +5076,14 @@ func clearZapretTestState(state *domain.RuntimeState) {
 }
 
 func (s *Service) stopProxyTransport(ctx context.Context) error {
+	// Remove interception first. If a later best-effort cleanup fails, LAN
+	// traffic must already have a direct path instead of being redirected to a
+	// stopped local listener.
+	if s.firewall != nil {
+		if err := s.firewall.Disable(ctx); err != nil {
+			return fmt.Errorf("disable firewall: %w", err)
+		}
+	}
 	if s.dns != nil {
 		if err := s.dns.Disable(ctx); err != nil {
 			return fmt.Errorf("disable dns runtime: %w", err)
@@ -4724,12 +5094,6 @@ func (s *Service) stopProxyTransport(ctx context.Context) error {
 			return fmt.Errorf("stop backend: %w", err)
 		}
 	}
-	if s.firewall != nil {
-		if err := s.firewall.Disable(ctx); err != nil {
-			return fmt.Errorf("disable firewall: %w", err)
-		}
-	}
-
 	return nil
 }
 
@@ -4930,6 +5294,14 @@ func (s *Service) restoreZapretTestSelection(ctx context.Context, restore domain
 }
 
 func (s *Service) reapplyCurrentConnection(ctx context.Context) error {
+	return s.reapplyCurrentConnectionWithOptions(ctx, false)
+}
+
+func (s *Service) reapplyCurrentConnectionWithReload(ctx context.Context) error {
+	return s.reapplyCurrentConnectionWithOptions(ctx, true)
+}
+
+func (s *Service) reapplyCurrentConnectionWithOptions(ctx context.Context, forceStaticReload bool) error {
 	state, err := s.store.LoadState()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
@@ -4981,7 +5353,7 @@ func (s *Service) reapplyCurrentConnection(ctx context.Context) error {
 		return fmt.Errorf("node %q not found in subscription %q", state.ActiveNodeID, state.ActiveSubscriptionID)
 	}
 
-	return s.applyNodeSelection(ctx, sub, node, state.Mode, applyNodeSelectionOptions{})
+	return s.applyNodeSelection(ctx, sub, node, state.Mode, applyNodeSelectionOptions{forceStaticReload: forceStaticReload})
 }
 
 func (s *Service) ensureBackendRunning(ctx context.Context, subscriptionID, nodeID string, mode domain.SelectionMode) (string, error) {

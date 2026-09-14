@@ -355,6 +355,13 @@ func decodeSettings(data []byte, path string) (domain.Settings, error) {
 }
 
 func decodeState(data []byte, path string) (domain.RuntimeState, error) {
+	type rawRuntimeOperation struct {
+		Kind      *string    `json:"kind"`
+		From      *string    `json:"from"`
+		To        *string    `json:"to"`
+		StartedAt *time.Time `json:"started_at"`
+	}
+
 	type rawZapretTestRestoreState struct {
 		ActiveSubscriptionID *string               `json:"active_subscription_id"`
 		ActiveNodeID         *string               `json:"active_node_id"`
@@ -369,22 +376,30 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 	}
 
 	type rawState struct {
-		SchemaVersion              *int                          `json:"schema_version"`
-		AutoScope                  *string                       `json:"auto_scope"`
-		ActiveSubscriptionID       *string                       `json:"active_subscription_id"`
-		ActiveNodeID               *string                       `json:"active_node_id"`
-		ActiveNodeName             *string                       `json:"active_node_name"`
-		Mode                       *domain.SelectionMode         `json:"mode"`
-		Connected                  *bool                         `json:"connected"`
-		ActiveTransport            *domain.TransportMode         `json:"active_transport"`
-		LastRefreshAt              *map[string]time.Time         `json:"last_refresh_at"`
-		Health                     *map[string]domain.NodeHealth `json:"health"`
-		LastSwitchAt               *time.Time                    `json:"last_switch_at"`
-		LastTransportSwitchAt      *time.Time                    `json:"last_transport_switch_at"`
-		LastSuccessAt              *time.Time                    `json:"last_success_at"`
-		LastFailureReason          *string                       `json:"last_failure_reason"`
-		LastTransportFailureReason *string                       `json:"last_transport_failure_reason"`
-		ZapretTest                 *rawZapretTestState           `json:"zapret_test"`
+		SchemaVersion              *int                                     `json:"schema_version"`
+		OperationalMode            *domain.OperationalMode                  `json:"operational_mode"`
+		SelectedOutboundTag        *string                                  `json:"selected_outbound_tag"`
+		RuntimeConfigGeneration    *uint64                                  `json:"runtime_config_generation"`
+		RuntimeConfigVersion       *string                                  `json:"runtime_config_version"`
+		CurrentOperation           *rawRuntimeOperation                     `json:"current_operation"`
+		RuntimeOutbounds           *[]domain.RuntimeOutboundState           `json:"runtime_outbounds"`
+		CandidateBackoff           *map[string]domain.CandidateBackoffState `json:"candidate_backoff"`
+		AutoScope                  *string                                  `json:"auto_scope"`
+		ActiveSubscriptionID       *string                                  `json:"active_subscription_id"`
+		ActiveNodeID               *string                                  `json:"active_node_id"`
+		ActiveNodeName             *string                                  `json:"active_node_name"`
+		Mode                       *domain.SelectionMode                    `json:"mode"`
+		Connected                  *bool                                    `json:"connected"`
+		ActiveTransport            *domain.TransportMode                    `json:"active_transport"`
+		LastRefreshAt              *map[string]time.Time                    `json:"last_refresh_at"`
+		Health                     *map[string]domain.NodeHealth            `json:"health"`
+		LastSwitchAt               *time.Time                               `json:"last_switch_at"`
+		LastSwitchReason           *string                                  `json:"last_switch_reason"`
+		LastTransportSwitchAt      *time.Time                               `json:"last_transport_switch_at"`
+		LastSuccessAt              *time.Time                               `json:"last_success_at"`
+		LastFailureReason          *string                                  `json:"last_failure_reason"`
+		LastTransportFailureReason *string                                  `json:"last_transport_failure_reason"`
+		ZapretTest                 *rawZapretTestState                      `json:"zapret_test"`
 	}
 
 	var raw rawState
@@ -422,6 +437,40 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 	if raw.ActiveTransport != nil {
 		state.ActiveTransport = domain.NormalizeTransportMode(*raw.ActiveTransport)
 	}
+	if raw.SelectedOutboundTag != nil {
+		state.SelectedOutboundTag = *raw.SelectedOutboundTag
+	}
+	if raw.RuntimeConfigGeneration != nil {
+		state.RuntimeConfigGeneration = *raw.RuntimeConfigGeneration
+	}
+	if raw.RuntimeConfigVersion != nil {
+		state.RuntimeConfigVersion = *raw.RuntimeConfigVersion
+	}
+	if raw.CurrentOperation != nil {
+		operation := &domain.RuntimeOperation{}
+		if raw.CurrentOperation.Kind != nil {
+			operation.Kind = *raw.CurrentOperation.Kind
+		}
+		if raw.CurrentOperation.From != nil {
+			operation.From = *raw.CurrentOperation.From
+		}
+		if raw.CurrentOperation.To != nil {
+			operation.To = *raw.CurrentOperation.To
+		}
+		if raw.CurrentOperation.StartedAt != nil {
+			operation.StartedAt = *raw.CurrentOperation.StartedAt
+		}
+		state.CurrentOperation = operation
+	}
+	if raw.RuntimeOutbounds != nil {
+		state.RuntimeOutbounds = append([]domain.RuntimeOutboundState(nil), (*raw.RuntimeOutbounds)...)
+	}
+	if raw.CandidateBackoff != nil {
+		state.CandidateBackoff = *raw.CandidateBackoff
+	}
+	if state.CandidateBackoff == nil {
+		state.CandidateBackoff = make(map[string]domain.CandidateBackoffState)
+	}
 	if raw.LastRefreshAt != nil {
 		state.LastRefreshAt = *raw.LastRefreshAt
 	}
@@ -430,6 +479,9 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 	}
 	if raw.LastSwitchAt != nil {
 		state.LastSwitchAt = *raw.LastSwitchAt
+	}
+	if raw.LastSwitchReason != nil {
+		state.LastSwitchReason = *raw.LastSwitchReason
 	}
 	if raw.LastTransportSwitchAt != nil {
 		state.LastTransportSwitchAt = *raw.LastTransportSwitchAt
@@ -480,6 +532,11 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 		}
 	}
 	state.ActiveTransport = domain.NormalizeTransportMode(state.ActiveTransport)
+	if raw.OperationalMode != nil {
+		state.OperationalMode = domain.NormalizeOperationalMode(*raw.OperationalMode)
+	} else {
+		state.OperationalMode = domain.LegacyOperationalMode(state.Connected, state.ActiveTransport)
+	}
 
 	state.SchemaVersion = domain.DefaultRuntimeState().SchemaVersion
 	return state, nil

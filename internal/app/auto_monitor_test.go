@@ -253,7 +253,7 @@ func TestConnectionRecoveryNeededChecksManuallyPinnedRoute(t *testing.T) {
 	}
 }
 
-func TestPostFailoverHealthCheckRefinesSelectionInsideCooldown(t *testing.T) {
+func TestPostFailoverHealthCheckDoesNotOptimizeInsideCooldown(t *testing.T) {
 	t.Parallel()
 
 	currentNode, candidateNode, sub := testAutoSubscription()
@@ -283,14 +283,14 @@ func TestPostFailoverHealthCheckRefinesSelectionInsideCooldown(t *testing.T) {
 		}},
 	})
 
-	if err := service.RunAutoHealthCheck(withPostFailoverOptimization(context.Background())); err != nil {
+	if err := service.RunAutoHealthCheck(context.Background()); err != nil {
 		t.Fatalf("run post-failover health check: %v", err)
 	}
-	if store.state.ActiveNodeID != candidateNode.ID {
-		t.Fatalf("expected full scan to refine provisional failover, got %s", store.state.ActiveNodeID)
+	if store.state.ActiveNodeID != currentNode.ID {
+		t.Fatalf("post-failover cooldown was bypassed, got %s", store.state.ActiveNodeID)
 	}
-	if len(backend.requests) != 1 {
-		t.Fatalf("expected one refinement switch, got %d", len(backend.requests))
+	if len(backend.requests) != 0 {
+		t.Fatalf("unexpected refinement switch count: %d", len(backend.requests))
 	}
 }
 
@@ -344,7 +344,7 @@ func TestConnectAutoAllEscapesDegradedCurrentNodeDespiteCandidatePenalty(t *test
 			AutoScope:            autoScopeAll,
 			Mode:                 domain.SelectionModeAuto,
 			Connected:            true,
-			LastSwitchAt:         time.Now().UTC(),
+			LastSwitchAt:         time.Now().Add(-time.Hour).UTC(),
 			Health: map[string]domain.NodeHealth{
 				current.ID: {
 					NodeID:               current.ID,
@@ -421,6 +421,9 @@ func TestRunAutoHealthCheckAllSwitchesProviderWhenCurrentFails(t *testing.T) {
 
 	if err := service.RunAutoHealthCheck(context.Background()); err != nil {
 		t.Fatalf("run global auto health check: %v", err)
+	}
+	if err := service.RunAutoHealthCheck(context.Background()); err != nil {
+		t.Fatalf("run confirming global auto health check: %v", err)
 	}
 	if store.state.ActiveSubscriptionID != "sub-second" || store.state.ActiveNodeID != replacement.ID {
 		t.Fatalf("expected switch to second provider, got %+v", store.state)

@@ -1,28 +1,64 @@
 {
-  "log": {
-    "loglevel": "warning"
+  "api": {
+    "services": [
+      "HandlerService",
+      "RoutingService"
+    ],
+    "tag": "fastlane-api"
   },
   "inbounds": [
     {
-      "tag": "socks-in",
       "listen": "127.0.0.1",
       "port": 10808,
       "protocol": "socks",
       "settings": {
         "udp": true
-      }
+      },
+      "tag": "socks-in"
     },
     {
-      "tag": "http-in",
       "listen": "127.0.0.1",
       "port": 10809,
       "protocol": "http",
-      "settings": {}
+      "settings": {},
+      "tag": "http-in"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      },
+      "tag": "fastlane-api-in"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10810,
+      "protocol": "http",
+      "settings": {},
+      "tag": "fastlane-probe-in-0"
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 10811,
+      "protocol": "http",
+      "settings": {},
+      "tag": "fastlane-probe-in-1"
     }
   ],
+  "log": {
+    "loglevel": "warning"
+  },
+  "observatory": {
+    "probeInterval": "24h",
+    "probeURL": "https://www.gstatic.com/generate_204",
+    "subjectSelector": [
+      "fastlane-observe-none-"
+    ]
+  },
   "outbounds": [
     {
-      "tag": "selected",
       "protocol": "vless",
       "settings": {
         "vnext": [
@@ -31,9 +67,9 @@
             "port": 443,
             "users": [
               {
-                "id": "11111111-1111-1111-1111-111111111111",
                 "encryption": "none",
-                "flow": ""
+                "flow": "",
+                "id": "11111111-1111-1111-1111-111111111111"
               }
             ]
           }
@@ -41,41 +77,92 @@
       },
       "streamSettings": {
         "network": "ws",
-        "security": "reality",
         "realitySettings": {
           "fingerprint": "chrome",
           "publicKey": "public-key-1",
           "serverName": "edge.example.com",
           "shortId": "ab12cd34"
         },
+        "security": "reality",
         "wsSettings": {
           "headers": {
             "Host": "cdn.example.com"
           },
           "path": "/proxy"
         }
-      }
+      },
+      "tag": "fastlane-node-06262d1aeb864e8c"
     },
     {
-      "tag": "direct",
-      "protocol": "freedom"
+      "protocol": "freedom",
+      "tag": "direct"
     },
     {
-      "tag": "block",
-      "protocol": "blackhole"
+      "protocol": "blackhole",
+      "tag": "block"
+    },
+    {
+      "protocol": "freedom",
+      "tag": "fastlane-direct"
     }
   ],
   "routing": {
+    "balancers": [
+      {
+        "fallbackTag": "fastlane-direct",
+        "selector": [
+          "fastlane-node-"
+        ],
+        "tag": "fastlane-main"
+      },
+      {
+        "fallbackTag": "block",
+        "selector": [
+          "fastlane-node-"
+        ],
+        "tag": "fastlane-probe-0"
+      },
+      {
+        "fallbackTag": "block",
+        "selector": [
+          "fastlane-node-"
+        ],
+        "tag": "fastlane-probe-1"
+      }
+    ],
     "domainStrategy": "IPIfNonMatch",
     "rules": [
       {
-        "type": "field",
-        "outboundTag": "selected",
+        "balancerTag": "fastlane-main",
         "inboundTag": [
           "socks-in",
           "http-in"
         ],
-        "network": "tcp,udp"
+        "network": "tcp,udp",
+        "type": "field"
+      },
+      {
+        "inboundTag": [
+          "fastlane-api-in"
+        ],
+        "outboundTag": "fastlane-api",
+        "type": "field"
+      },
+      {
+        "balancerTag": "fastlane-probe-0",
+        "inboundTag": [
+          "fastlane-probe-in-0"
+        ],
+        "network": "tcp,udp",
+        "type": "field"
+      },
+      {
+        "balancerTag": "fastlane-probe-1",
+        "inboundTag": [
+          "fastlane-probe-in-1"
+        ],
+        "network": "tcp,udp",
+        "type": "field"
       }
     ]
   }

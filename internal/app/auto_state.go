@@ -37,6 +37,9 @@ func (s *Service) loadStateWithAutoHealthCache() (domain.RuntimeState, error) {
 }
 
 func (s *Service) saveState(state domain.RuntimeState) error {
+	if state.OperationalMode != domain.OperationalModeRecovering {
+		state.OperationalMode = domain.LegacyOperationalMode(state.Connected, state.ActiveTransport)
+	}
 	if err := s.store.SaveState(state); err != nil {
 		return err
 	}

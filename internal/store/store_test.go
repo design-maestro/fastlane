@@ -69,7 +69,17 @@ func TestFileStoreRoundTrip(t *testing.T) {
 	}
 
 	state := domain.RuntimeState{
-		SchemaVersion:        1,
+		SchemaVersion:           1,
+		OperationalMode:         domain.OperationalModeRecovering,
+		SelectedOutboundTag:     "selected-next",
+		RuntimeConfigGeneration: 7,
+		RuntimeConfigVersion:    "runtime-v7",
+		CurrentOperation: &domain.RuntimeOperation{
+			Kind:      "hot_swap",
+			From:      "selected-old",
+			To:        "selected-next",
+			StartedAt: time.Date(2026, 9, 14, 8, 15, 0, 0, time.UTC),
+		},
 		Mode:                 domain.SelectionModeManual,
 		Connected:            true,
 		ActiveSubscriptionID: sub.ID,
@@ -106,6 +116,15 @@ func TestFileStoreRoundTrip(t *testing.T) {
 
 	if gotState.ActiveNodeID != "node-1" {
 		t.Fatalf("unexpected state: %+v", gotState)
+	}
+	if gotState.SchemaVersion != domain.DefaultRuntimeState().SchemaVersion {
+		t.Fatalf("unexpected persisted state schema: %d", gotState.SchemaVersion)
+	}
+	if gotState.OperationalMode != domain.OperationalModeRecovering || gotState.SelectedOutboundTag != "selected-next" || gotState.RuntimeConfigGeneration != 7 || gotState.RuntimeConfigVersion != "runtime-v7" {
+		t.Fatalf("unexpected runtime state: %+v", gotState)
+	}
+	if gotState.CurrentOperation == nil || gotState.CurrentOperation.Kind != "hot_swap" || gotState.CurrentOperation.From != "selected-old" || gotState.CurrentOperation.To != "selected-next" {
+		t.Fatalf("unexpected runtime operation: %+v", gotState.CurrentOperation)
 	}
 
 	gotSettings, err := fs.LoadSettings()

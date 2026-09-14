@@ -25,8 +25,8 @@ import (
 const (
 	openWrtVersion             = "24.10.5"
 	openWrtImageURL            = "https://downloads.openwrt.org/releases/24.10.5/targets/x86/64/openwrt-24.10.5-x86-64-generic-ext4-combined.img.gz"
-	xrayVersion                = "v26.2.6"
-	xrayLinuxAMD64URL          = "https://github.com/XTLS/Xray-core/releases/download/v26.2.6/Xray-linux-64.zip"
+	xrayVersion                = "v26.7.28"
+	xrayLinuxAMD64URL          = "https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-64.zip"
 	integrationRawVLESSFixture = "vless://11111111-1111-1111-1111-111111111111@203.0.113.10:443?encryption=none&security=tls&sni=edge.example.com&type=ws&path=%2Fproxy&host=cdn.example.com#OpenWrt%20Integration"
 	fastlaneRemoteBinary       = "/usr/bin/fastlane"
 	xrayRemoteBinary           = "/usr/bin/xray"
@@ -133,6 +133,12 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 	if err := harness.AssertLuCIDiagnosticsPage(ctx, "OpenWrt Integration"); err != nil {
 		t.Fatalf("browser smoke diagnostics connected state: %v", err)
 	}
+	// The fixture endpoint is intentionally unroutable. Pause the watchdog while
+	// the remainder of this test exercises settings reapplication; unit and
+	// pinned-Xray integration tests cover live failover independently.
+	if err := harness.PauseFastLaneDaemon(ctx); err != nil {
+		t.Fatalf("pause fastlane watchdog for settings checks: %v", err)
+	}
 	if err := harness.ApplyDefaultDNS(ctx); err != nil {
 		t.Fatalf("apply default dns: %v", err)
 	}
@@ -167,7 +173,7 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 	if err := harness.Disconnect(ctx); err != nil {
 		t.Fatalf("disconnect fastlane: %v", err)
 	}
-	if err := harness.AssertLuCIVPNPage(ctx, "VPN выключен"); err != nil {
+	if err := harness.AssertLuCIVPNPage(ctx, "VPN недоступен — интернет напрямую"); err != nil {
 		t.Fatalf("browser smoke VPN disconnected state: %v", err)
 	}
 	if err := harness.AssertDNSRuntimeDisabled(ctx); err != nil {
@@ -685,6 +691,10 @@ func (h *openWRTHarness) Connect(ctx context.Context, subscriptionID, nodeID str
 
 func (h *openWRTHarness) EnableFirewallTargets(ctx context.Context, target string) error {
 	return h.sshCommand(ctx, fmt.Sprintf("%s firewall set targets %s", fastlaneRemoteBinary, shellQuote(target)))
+}
+
+func (h *openWRTHarness) PauseFastLaneDaemon(ctx context.Context) error {
+	return h.sshCommand(ctx, fastlaneRemoteService+" stop")
 }
 
 func (h *openWRTHarness) EnableFirewallAntiTargets(ctx context.Context, target string) error {

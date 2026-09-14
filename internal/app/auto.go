@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/design-maestro/fastlane/internal/backend"
 	"github.com/design-maestro/fastlane/internal/domain"
 	"github.com/design-maestro/fastlane/internal/probe"
 )
@@ -12,19 +14,6 @@ import (
 const autoScopeAll = "all"
 
 const activeGETFailureReasonPrefix = "active GET failed: "
-
-type autoHealthContextKey uint8
-
-const postFailoverOptimizationKey autoHealthContextKey = iota
-
-func withPostFailoverOptimization(ctx context.Context) context.Context {
-	return context.WithValue(ctx, postFailoverOptimizationKey, true)
-}
-
-func isPostFailoverOptimization(ctx context.Context) bool {
-	requested, _ := ctx.Value(postFailoverOptimizationKey).(bool)
-	return requested
-}
 
 type autoSelectionDecision struct {
 	CurrentNodeID       string
@@ -81,8 +70,8 @@ func (s *Service) RunAutoHealthCheck(ctx context.Context) error {
 }
 
 // RunAutoFailover immediately moves an unhealthy auto route to the best
-// previously measured candidate. It intentionally skips the full pool probe;
-// the scheduler starts that pass after this fast recovery attempt completes.
+// previously measured candidate. It intentionally skips a full pool probe;
+// regular reserve maintenance refreshes candidates independently.
 func (s *Service) RunAutoFailover(ctx context.Context, failureReason string) error {
 	snapshot, err := s.captureAutoSelectionSnapshot()
 	if err != nil {
@@ -103,12 +92,107 @@ func (s *Service) RunConnectionFailover(ctx context.Context, failureReason strin
 	}
 	switch snapshot.state.Mode {
 	case domain.SelectionModeAuto:
-		return s.runAutoFailoverWithSnapshot(ctx, failureReason, snapshot)
+		err = s.runAutoFailoverWithSnapshot(ctx, failureReason, snapshot)
 	case domain.SelectionModeManual:
-		return s.runManualFailoverWithSnapshot(ctx, failureReason, snapshot)
+		err = s.runManualFailoverWithSnapshot(ctx, failureReason, snapshot)
 	default:
 		return nil
 	}
+	if err == nil || errors.Is(err, errAutoSelectionSnapshotChanged) {
+		return err
+	}
+	managed, ok := s.backend.(backend.ManagedBackend)
+	if !ok {
+		return err
+	}
+	directErr := runStoreWriteLocked(s, func() error {
+		current, currentErr := s.autoSelectionSnapshotCurrentLocked(snapshot)
+		if currentErr != nil {
+			return currentErr
+		}
+		if !current {
+			return errAutoSelectionSnapshotChanged
+		}
+		return s.activateManagedDirect(ctx, managed, snapshot.state, failureReason)
+	})
+	if directErr != nil {
+		return fmt.Errorf("%v; activate direct fallback: %w", err, directErr)
+	}
+	return nil
+}
+
+func (s *Service) activateManagedDirect(ctx context.Context, managed backend.ManagedBackend, state domain.RuntimeState, reason string) error {
+	if reason == "" {
+		reason = "no healthy VPN server is available"
+	}
+	from := state.SelectedOutboundTag
+	intent := state
+	intent.OperationalMode = domain.OperationalModeRecovering
+	intent.RuntimeConfigGeneration++
+	intent.CurrentOperation = &domain.RuntimeOperation{Kind: "fail_open", From: from, To: "fastlane-direct", StartedAt: s.currentTime().UTC()}
+	if err := s.saveState(intent); err != nil {
+		return fmt.Errorf("save direct fallback intent: %w", err)
+	}
+	if err := managed.SelectDirect(ctx); err != nil {
+		state.CurrentOperation = nil
+		_ = s.saveState(state)
+		return fmt.Errorf("select direct outbound: %w", err)
+	}
+	if err := s.persistManagedDirectConfig(ctx, managed, state); err != nil {
+		if from != "" {
+			_ = managed.SelectOutbound(ctx, from)
+		}
+		state.CurrentOperation = nil
+		_ = s.saveState(state)
+		return err
+	}
+	state.OperationalMode = domain.OperationalModeDirect
+	state.SelectedOutboundTag = "fastlane-direct"
+	state.CurrentOperation = nil
+	state.RuntimeConfigGeneration = intent.RuntimeConfigGeneration
+	now := s.currentTime().UTC()
+	for idx := range state.RuntimeOutbounds {
+		if state.RuntimeOutbounds[idx].Role == "active" {
+			state.RuntimeOutbounds[idx].Role = "draining"
+			state.RuntimeOutbounds[idx].RetireAfter = now.Add(5 * time.Minute)
+			state.RuntimeOutbounds[idx].RemoveBy = now.Add(30 * time.Minute)
+		}
+	}
+	state.Connected = false
+	state.ActiveTransport = domain.TransportModeDirect
+	state.LastTransportSwitchAt = now
+	state.LastTransportFailureReason = reason
+	state.LastFailureReason = reason
+	state.LastSwitchAt = now
+	state.LastSwitchReason = "VPN unavailable; switched to direct"
+	return s.saveState(state)
+}
+
+func (s *Service) persistManagedDirectConfig(ctx context.Context, managed backend.ManagedBackend, state domain.RuntimeState) error {
+	settings, err := s.store.LoadSettings()
+	if err != nil {
+		return fmt.Errorf("load settings for direct startup config: %w", err)
+	}
+	runtimeSettings, err := s.prepareRuntimeDNSSettings(ctx, settings)
+	if err != nil {
+		return fmt.Errorf("prepare DNS for direct startup config: %w", err)
+	}
+	var node domain.Node
+	if sub, subErr := s.subscriptionByID(state.ActiveSubscriptionID); subErr == nil {
+		if active, ok := sub.NodeByID(state.ActiveNodeID); ok {
+			resolved, resolveErr := s.resolveNodeAddress(ctx, active)
+			if resolveErr != nil {
+				return fmt.Errorf("resolve active node for direct startup config: %w", resolveErr)
+			}
+			node = resolved
+		}
+	}
+	req := s.backendConfigRequest(runtimeSettings, node, state.Mode, 10808, 10809, firewallEnabled(settings.Firewall), s.dns != nil && localDNSRuntimeEnabled(settings.DNS))
+	req.StartDirect = true
+	if err := managed.PersistConfig(ctx, req); err != nil {
+		return fmt.Errorf("persist direct startup config: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) runAutoFailoverWithSnapshot(ctx context.Context, failureReason string, snapshot autoSelectionSnapshot) error {
@@ -121,13 +205,16 @@ func (s *Service) runAutoFailoverWithSnapshot(ctx context.Context, failureReason
 	if failureReason == "" {
 		failureReason = "active auto route failed"
 	}
-	forceHealthFailure(
-		state.Health,
-		state.ActiveNodeID,
-		failureReason,
-		s.currentTime().UTC(),
-		switchPolicyFromSettings(snapshot.settings).FailureThreshold,
-	)
+	directRecovery := state.OperationalMode == domain.OperationalModeDirect
+	if !directRecovery {
+		forceHealthFailure(
+			state.Health,
+			state.ActiveNodeID,
+			failureReason,
+			s.currentTime().UTC(),
+			switchPolicyFromSettings(snapshot.settings).FailureThreshold,
+		)
+	}
 
 	scope := state.ActiveSubscriptionID
 	if state.AutoScope == autoScopeAll {
@@ -149,7 +236,7 @@ func (s *Service) runAutoFailoverWithSnapshot(ctx context.Context, failureReason
 	if !prepared.decision.HasHealthyCandidate || prepared.decision.SelectedNode.ID == "" {
 		return fmt.Errorf("no previously healthy auto candidate is available")
 	}
-	if prepared.decision.SelectedNode.ID == state.ActiveNodeID && prepared.selectedSub.ID == state.ActiveSubscriptionID {
+	if !directRecovery && prepared.decision.SelectedNode.ID == state.ActiveNodeID && prepared.selectedSub.ID == state.ActiveSubscriptionID {
 		return fmt.Errorf("no different previously healthy auto candidate is available")
 	}
 
@@ -176,19 +263,24 @@ func (s *Service) runManualFailoverWithSnapshot(ctx context.Context, failureReas
 	}
 
 	state.Health = cloneHealthMap(state.Health)
-	forceHealthFailure(
-		state.Health,
-		state.ActiveNodeID,
-		failureReason,
-		s.currentTime().UTC(),
-		switchPolicyFromSettings(snapshot.settings).FailureThreshold,
-	)
+	directRecovery := state.OperationalMode == domain.OperationalModeDirect
+	if !directRecovery {
+		forceHealthFailure(
+			state.Health,
+			state.ActiveNodeID,
+			failureReason,
+			s.currentTime().UTC(),
+			switchPolicyFromSettings(snapshot.settings).FailureThreshold,
+		)
+	}
 	failoverSnapshot := snapshot
 	failoverSnapshot.state = state
-	failoverSnapshot.settings.AutoExcludedNodes = domain.NormalizeAutoExcludedNodes(append(
-		append([]string(nil), failoverSnapshot.settings.AutoExcludedNodes...),
-		domain.AutoExcludedNodeKey(state.ActiveSubscriptionID, state.ActiveNodeID),
-	))
+	if !directRecovery {
+		failoverSnapshot.settings.AutoExcludedNodes = domain.NormalizeAutoExcludedNodes(append(
+			append([]string(nil), failoverSnapshot.settings.AutoExcludedNodes...),
+			domain.AutoExcludedNodeKey(state.ActiveSubscriptionID, state.ActiveNodeID),
+		))
+	}
 
 	prepared, err := s.prepareAutoSelectionWithProbes(ctx, autoScopeAll, failoverSnapshot, false)
 	if err != nil {
@@ -201,7 +293,7 @@ func (s *Service) runManualFailoverWithSnapshot(ctx context.Context, failureReas
 		}
 	}
 	if !prepared.decision.HasHealthyCandidate || prepared.decision.SelectedNode.ID == "" || prepared.selectedSub.ID == "" {
-		return fmt.Errorf("no different healthy manual fallback is available")
+		return fmt.Errorf("no healthy manual fallback is available")
 	}
 
 	return runStoreWriteLocked(s, func() error {
@@ -223,6 +315,7 @@ func (s *Service) runManualFailoverWithSnapshot(ctx context.Context, failureReas
 		updated.Mode = domain.SelectionModeManual
 		updated.AutoScope = ""
 		updated.LastSwitchAt = s.currentTime().UTC()
+		updated.LastSwitchReason = "manual emergency failover"
 		updated.LastFailureReason = failureReason
 		if err := s.saveState(updated); err != nil {
 			return fmt.Errorf("save manual failover state: %w", err)
@@ -470,9 +563,6 @@ func (s *Service) evaluateAutoSelectionAll(ctx context.Context, subscriptions []
 
 	currentHealth := health[currentNodeID]
 	policy := switchPolicyFromSettings(settings)
-	if isPostFailoverOptimization(ctx) {
-		policy.Cooldown = 0
-	}
 	shouldSwitch, reason := probe.ShouldSwitch(currentHealth, candidateHealth, s.currentTime().UTC(), state.LastSwitchAt, policy)
 	selectedNode := candidateNode
 	if !shouldSwitch && currentNodeID != "" {
@@ -583,9 +673,6 @@ func (s *Service) evaluateAutoSelection(ctx context.Context, sub domain.Subscrip
 
 	currentHealth := health[currentNodeID]
 	policy := switchPolicyFromSettings(settings)
-	if isPostFailoverOptimization(ctx) {
-		policy.Cooldown = 0
-	}
 	shouldSwitch, reason := probe.ShouldSwitch(currentHealth, candidateHealth, time.Now().UTC(), state.LastSwitchAt, policy)
 
 	selectedNode := candidateNode
@@ -662,6 +749,7 @@ func (s *Service) commitAutoSelection(ctx context.Context, sub domain.Subscripti
 	state.LastTransportFailureReason = ""
 	if decision.Switch {
 		state.LastSwitchAt = s.currentTime().UTC()
+		state.LastSwitchReason = decision.Reason
 	}
 
 	if err := s.saveState(state); err != nil {
