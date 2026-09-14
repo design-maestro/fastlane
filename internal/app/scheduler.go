@@ -281,7 +281,7 @@ func (s *Scheduler) runOnce(ctx context.Context) {
 				s.logWarn("refresh and reconnect active subscription", "subscription", sub.ID, "error", err.Error())
 				continue
 			}
-			s.logInfo("refreshed and reconnected active subscription", "subscription", sub.ID)
+			s.logInfo("refreshed active subscription", "subscription", sub.ID)
 			continue
 		}
 
