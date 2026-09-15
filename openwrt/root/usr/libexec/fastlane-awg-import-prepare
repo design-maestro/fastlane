@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+mkdir -p /var/run/fastlane
+chmod 0700 /var/run/fastlane
+: > /var/run/fastlane/awg-import.conf
+chmod 0600 /var/run/fastlane/awg-import.conf

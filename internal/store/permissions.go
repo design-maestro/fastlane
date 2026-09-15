@@ -47,6 +47,7 @@ func (s *FileStore) secretFilePaths(xrayConfigPath string) []string {
 		s.paths.SubscriptionsPath,
 		s.paths.SettingsPath,
 		s.paths.StatePath,
+		s.paths.AWGProfilePath,
 		s.paths.LockPath,
 		filepath.Join(s.paths.Root, "speedtest.lock"),
 	}

@@ -1127,3 +1127,162 @@ msgstr "оценка"
 
 msgid "samples"
 msgstr "измерений"
+
+msgid "Address"
+msgstr "Адрес"
+
+msgid "AmneziaWG"
+msgstr "AmneziaWG"
+
+msgid "AmneziaWG configuration"
+msgstr "Конфигурация AmneziaWG"
+
+msgid "AmneziaWG connected."
+msgstr "AmneziaWG подключён."
+
+msgid "AmneziaWG connection checked."
+msgstr "Соединение AmneziaWG проверено."
+
+msgid "AmneziaWG disconnected."
+msgstr "AmneziaWG отключён."
+
+msgid "AmneziaWG error"
+msgstr "Ошибка AmneziaWG"
+
+msgid "AmneziaWG profile deleted."
+msgstr "Профиль AmneziaWG удалён."
+
+msgid "AmneziaWG profile imported."
+msgstr "Профиль AmneziaWG импортирован."
+
+msgid "Checking AmneziaWG connection…"
+msgstr "Проверяю соединение AmneziaWG…"
+
+msgid "Check"
+msgstr "Проверить"
+
+msgid "Connecting AmneziaWG…"
+msgstr "Подключаю AmneziaWG…"
+
+msgid "Connection check failed"
+msgstr "Проверка соединения не пройдена"
+
+msgid "Could not complete the AmneziaWG action."
+msgstr "Не удалось выполнить действие AmneziaWG."
+
+msgid "Could not import the AmneziaWG profile. Check the configuration."
+msgstr "Не удалось импортировать профиль AmneziaWG. Проверьте конфигурацию."
+
+msgid "Could not read AmneziaWG status"
+msgstr "Не удалось получить статус AmneziaWG"
+
+msgid "Delete the AmneziaWG profile? The imported configuration will be removed from the router."
+msgstr "Удалить профиль AmneziaWG? Импортированная конфигурация будет удалена с роутера."
+
+msgid "Deleting AmneziaWG profile…"
+msgstr "Удаляю профиль AmneziaWG…"
+
+msgid "Disconnecting AmneziaWG…"
+msgstr "Отключаю AmneziaWG…"
+
+msgid "Endpoint"
+msgstr "Точка подключения"
+
+msgid "AWG 2.0 prototype"
+msgstr "Прототип AWG 2.0"
+
+msgid "Experimental AmneziaWG profile"
+msgstr "Экспериментальный профиль AmneziaWG"
+
+msgid "This is an AmneziaWG Legacy profile. Export an AWG 2.0 profile with S1–S4."
+msgstr "Это профиль AmneziaWG Legacy. Экспортируйте профиль AWG 2.0 с параметрами S1–S4."
+
+msgid "PreUp, PostUp, PreDown and PostDown commands are not allowed. Fast Lane manages routes itself."
+msgstr "Команды PreUp, PostUp, PreDown и PostDown запрещены. Fast Lane управляет маршрутами самостоятельно."
+
+msgid "This profile contains parameters that the AWG 2.0 prototype does not support."
+msgstr "В профиле есть параметры, которые прототип AWG 2.0 пока не поддерживает."
+
+msgid "Fast Lane is applying the AmneziaWG profile."
+msgstr "Fast Lane применяет профиль AmneziaWG."
+
+msgid "Import"
+msgstr "Импортировать"
+
+msgid "Import a profile to connect through AmneziaWG."
+msgstr "Импортируйте профиль, чтобы подключаться через AmneziaWG."
+
+msgid "Import AmneziaWG profile"
+msgstr "Импорт профиля AmneziaWG"
+
+msgid "Import one AmneziaWG configuration to use this experimental tunnel."
+msgstr "Импортируйте одну конфигурацию AmneziaWG для этого экспериментального туннеля."
+
+msgid "Import profile"
+msgstr "Импортировать профиль"
+
+msgid "Importing profile…"
+msgstr "Импортирую профиль…"
+
+msgid "Importing…"
+msgstr "Импортирую…"
+
+msgid "Interface"
+msgstr "Интерфейс"
+
+msgid "Last check"
+msgstr "Последняя проверка"
+
+msgid "No profile imported"
+msgstr "Профиль не импортирован"
+
+msgid "One manual profile. It does not participate in automatic server selection."
+msgstr "Один ручной профиль. Он не участвует в автовыборе сервера."
+
+msgid "Paste an AmneziaWG configuration."
+msgstr "Вставьте конфигурацию AmneziaWG."
+
+msgid "Paste the complete AmneziaWG configuration here"
+msgstr "Вставьте сюда полную конфигурацию AmneziaWG"
+
+msgid "Preparing tunnel…"
+msgstr "Подготавливаю туннель…"
+
+msgid "Profile"
+msgstr "Профиль"
+
+msgid "Profile name"
+msgstr "Название профиля"
+
+msgid "For example: Backup AWG"
+msgstr "Например: Резервный AWG"
+
+msgid "Profile is invalid"
+msgstr "Профиль некорректен"
+
+msgid "Refresh the page or import the profile again."
+msgstr "Обновите страницу или импортируйте профиль заново."
+
+msgid "Replace profile"
+msgstr "Заменить профиль"
+
+msgid "Replace the profile with a valid AmneziaWG configuration."
+msgstr "Замените профиль на корректную конфигурацию AmneziaWG."
+
+msgid "The configuration is sent directly to Fast Lane for import. Private keys and raw profile contents are never shown on this page."
+msgstr "Конфигурация передаётся напрямую в Fast Lane для импорта. Закрытые ключи и содержимое профиля не показываются на этой странице."
+
+msgid "The profile is ready. Internet traffic is currently direct."
+msgstr "Профиль готов. Сейчас интернет-трафик идёт напрямую."
+
+msgid "The tunnel could not be prepared. Replace the profile or delete it."
+msgstr "Не удалось подготовить туннель. Замените или удалите профиль."
+
+msgid "The tunnel is up, but the internet check did not succeed."
+msgstr "Туннель поднят, но проверка доступа в интернет не прошла."
+
+msgid "Traffic is using the experimental AmneziaWG tunnel."
+msgstr "Трафик идёт через экспериментальный туннель AmneziaWG."
+
+msgid "failed"
+msgstr "ошибка"

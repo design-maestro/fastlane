@@ -72,6 +72,14 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 		t.Fatalf("install fastlane: %v", err)
 	}
 	t.Log("Fast Lane installed")
+	translation, err := harness.sshOutput(ctx, `ucode -e 'import { load_catalog, change_catalog, translate } from "luci.core"; load_catalog("ru", "/usr/lib/lua/luci/i18n"); change_catalog("ru"); print(translate("AWG 2.0 prototype") || "missing");'`)
+	if err != nil {
+		t.Fatalf("load Fast Lane Russian translation: %v", err)
+	}
+	if got := strings.TrimSpace(string(translation)); got != "Прототип AWG 2.0" {
+		t.Fatalf("AWG prototype translation = %q", got)
+	}
+	t.Log("Fast Lane AWG translation verified")
 	if err := harness.InstallXray(ctx); err != nil {
 		t.Fatalf("install xray: %v", err)
 	}
@@ -80,8 +88,11 @@ func TestOpenWrtEndToEnd(t *testing.T) {
 		t.Fatalf("management HTTP smoke: %v", err)
 	}
 	t.Log("Authenticated management HTTP verified")
-	if err := harness.AssertLuCIVPNPage(ctx, "Fast Lane", "VPN", "Добавить серверы", "Добавьте первую подписку"); err != nil {
+	if err := harness.AssertLuCIVPNPage(ctx, "Fast Lane", "VPN", "Добавить серверы", "Добавьте первую подписку", "AmneziaWG"); err != nil {
 		t.Fatalf("browser smoke VPN empty state: %v", err)
+	}
+	if err := harness.AssertLuCIAWGCardLayout(ctx); err != nil {
+		t.Fatalf("browser smoke AmneziaWG card: %v", err)
 	}
 	if err := harness.AssertLuCIVPNAddDialog(ctx); err != nil {
 		t.Fatalf("browser smoke VPN add dialog action: %v", err)
@@ -409,7 +420,7 @@ func (h *openWRTHarness) InstallFastLane(ctx context.Context) error {
 	if err := h.scpFile(ctx, filepath.Join(h.repoRoot, "openwrt", "root", "etc", "init.d", "fastlane"), fastlaneRemoteService); err != nil {
 		return err
 	}
-	for _, helperName := range []string{"fastlane-cron", "fastlane-geodata", "fastlane-self-update", "fastlane-xray-update"} {
+	for _, helperName := range []string{"fastlane-awg-import-prepare", "fastlane-cron", "fastlane-geodata", "fastlane-self-update", "fastlane-xray-update"} {
 		localPath := filepath.Join(h.repoRoot, "openwrt", "root", "usr", "libexec", helperName)
 		if err := h.scpFile(ctx, localPath, "/usr/libexec/"+helperName); err != nil {
 			return err
@@ -460,7 +471,7 @@ func (h *openWRTHarness) InstallFastLane(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := h.sshCommand(ctx, "chmod 0755 "+fastlaneRemoteBinary+" "+fastlaneRemoteService+" /usr/libexec/fastlane-cron /usr/libexec/fastlane-geodata /usr/libexec/fastlane-self-update /usr/libexec/fastlane-xray-update"); err != nil {
+	if err := h.sshCommand(ctx, "chmod 0755 "+fastlaneRemoteBinary+" "+fastlaneRemoteService+" /usr/libexec/fastlane-awg-import-prepare /usr/libexec/fastlane-cron /usr/libexec/fastlane-geodata /usr/libexec/fastlane-self-update /usr/libexec/fastlane-xray-update"); err != nil {
 		return err
 	}
 	if err := h.sshCommand(ctx, "test -s /www/luci-static/resources/fastlane/fastlane-20260906-v4.js && test -s /www/luci-static/resources/fastlane/assets/fastlane-mark.png"); err != nil {
@@ -483,7 +494,10 @@ func (h *openWRTHarness) InstallFastLane(ctx context.Context) error {
 	if err := h.sshCommand(ctx, "/etc/init.d/rpcd start"); err != nil {
 		return err
 	}
-	if err := h.sshCommand(ctx, "/etc/init.d/uhttpd restart"); err != nil {
+	// LuCI's ucode worker keeps the loaded LMO catalog in process memory.
+	// A reload/restart can preserve that worker on OpenWrt 24.10, so use an
+	// explicit stop/start after installing a new translation catalog.
+	if err := h.sshCommand(ctx, "/etc/init.d/uhttpd stop && /etc/init.d/uhttpd start"); err != nil {
 		return err
 	}
 	if err := h.sshCommand(ctx, fastlaneRemoteService+" enable"); err != nil {

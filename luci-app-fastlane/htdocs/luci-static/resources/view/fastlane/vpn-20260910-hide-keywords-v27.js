@@ -136,6 +136,29 @@ function formatLatency(value) {
 	return number == null ? '—' : Math.round(number) + ' ' + _('ms');
 }
 
+function awgState(status) {
+	status = status && typeof status === 'object' ? status : {};
+	var state = trim(status.state).toLowerCase();
+	if (!status.profile)
+		return state === 'invalid' || state === 'error' ? state : 'absent';
+	if (state === 'invalid' || state === 'error' || state === 'preparing' || state === 'probe_failed')
+		return state;
+	if (state === 'connected' || status.active === true)
+		return 'connected';
+	return 'direct';
+}
+
+function awgStatePresentation(status) {
+	var state = awgState(status);
+	if (state === 'absent') return { label: _('No profile imported'), help: _('Import one AmneziaWG configuration to use this experimental tunnel.'), tone: 'muted' };
+	if (state === 'invalid') return { label: _('Profile is invalid'), help: _('Replace the profile with a valid AmneziaWG configuration.'), tone: 'error' };
+	if (state === 'error') return { label: _('AmneziaWG error'), help: _('The tunnel could not be prepared. Replace the profile or delete it.'), tone: 'error' };
+	if (state === 'preparing') return { label: _('Preparing tunnel…'), help: _('Fast Lane is applying the AmneziaWG profile.'), tone: 'working' };
+	if (state === 'connected') return { label: _('Connected'), help: _('Traffic is using the experimental AmneziaWG tunnel.'), tone: 'connected' };
+	if (state === 'probe_failed') return { label: _('Connection check failed'), help: _('The tunnel is up, but the internet check did not succeed.'), tone: 'error' };
+	return { label: _('Direct'), help: _('The profile is ready. Internet traffic is currently direct.'), tone: 'muted' };
+}
+
 function durationMilliseconds(value) {
 	var raw = trim(value);
 	if (!raw)
@@ -304,6 +327,18 @@ function commandError(result) {
 	return message || _('The Fast Lane command failed.');
 }
 
+function awgImportError(value) {
+	var details = trim(value && value.message ? value.message : value);
+	var normalized = details.toLowerCase();
+	if (normalized.indexOf('lacks s3') >= 0 || normalized.indexOf('lacks s4') >= 0 || normalized.indexOf('older than awg 2.0') >= 0)
+		return _('This is an AmneziaWG Legacy profile. Export an AWG 2.0 profile with S1–S4.');
+	if (normalized.indexOf('lifecycle hooks are forbidden') >= 0)
+		return _('PreUp, PostUp, PreDown and PostDown commands are not allowed. Fast Lane manages routes itself.');
+	if (normalized.indexOf('unsupported amneziawg parameter') >= 0 || normalized.indexOf('requires awg 3.x') >= 0)
+		return _('This profile contains parameters that the AWG 2.0 prototype does not support.');
+	return _('Could not import the AmneziaWG profile. Check the configuration.');
+}
+
 function friendlyError(value, fallback) {
 	var details = trim(value) || _('No technical details were returned.');
 	var normalized = details.toLowerCase();
@@ -385,6 +420,7 @@ body:not(.modal-overlay-active) #modal_overlay:has(.fastlane-modal){display:none
 css += '.fastlane-root .fl-latency,.fastlane-root .fl-status-cell-latency{color:var(--fl-muted)}.fastlane-root .fl-latency-good{color:var(--fl-green)}.fastlane-root .fl-latency-mid{color:var(--fl-amber)}.fastlane-root .fl-latency-slow{color:var(--fl-orange,#f0a35a)}.fastlane-root .fl-latency-critical,.fastlane-root .fl-latency-bad{color:var(--fl-red)}';
 css += '.fl-status{grid-template-columns:minmax(240px,1.25fr) minmax(210px,1fr) minmax(150px,1fr) minmax(180px,.9fr) auto auto}.fl-status-main{white-space:normal}.fl-status-main-direct,.fl-status-main-recovering{color:var(--fl-amber)}.fl-dot-recovering{background:var(--fl-amber);box-shadow:0 0 0 4px rgba(255,197,40,.12)}';
 css += '.fl-more-menu[hidden]{display:none!important}.fl-more-note{max-width:250px;padding:9px 12px;color:var(--fl-muted);font-size:12px;line-height:1.4;overflow-wrap:anywhere}.fl-busy-label{min-width:0}.fl-busy-action{flex:0 0 auto;margin-left:auto;min-height:38px;padding:7px 12px}';
+css += '.fl-awg-card{margin-bottom:16px;border:1px solid var(--fl-line);border-radius:8px;background:var(--fl-panel);overflow:hidden}.fl-awg-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--fl-line)}.fl-awg-title-row{display:flex;align-items:center;gap:10px}.fl-awg-title{font-size:18px;font-weight:700;color:var(--fl-text)}.fl-awg-badge{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border:1px solid rgba(255,197,40,.35);border-radius:999px;background:rgba(255,197,40,.08);color:var(--fl-amber);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}.fl-awg-description{margin-top:5px!important;color:var(--fl-muted);font-size:13px}.fl-awg-state{display:flex;align-items:flex-start;gap:10px;min-width:210px}.fl-awg-state-copy{display:grid;gap:2px}.fl-awg-state-label{color:var(--fl-text);font-weight:700}.fl-awg-state-help{color:var(--fl-muted);font-size:12px;line-height:1.4}.fl-awg-state-connected .fl-awg-state-label{color:var(--fl-green)}.fl-awg-state-error .fl-awg-state-label{color:var(--fl-red)}.fl-awg-state-working .fl-awg-state-label{color:var(--fl-amber)}.fl-awg-body{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:18px;padding:16px 20px}.fl-awg-meta{display:grid;grid-template-columns:repeat(5,minmax(110px,1fr));gap:14px}.fl-awg-meta-item{display:grid;gap:3px;min-width:0}.fl-awg-meta-label{color:var(--fl-muted);font-size:12px}.fl-awg-meta-value{color:var(--fl-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fl-awg-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px}.fl-awg-empty{color:var(--fl-muted);font-size:13px}.fl-awg-probe{padding:0 20px 16px;color:var(--fl-muted);font-size:12px}.fl-awg-import-form{display:grid;gap:14px;min-width:min(620px,80vw);color:var(--fl-text)}.fl-awg-import-form textarea{width:100%;min-height:260px;resize:vertical;border:1px solid var(--fl-line-strong)!important;border-radius:7px!important;background:#050d10!important;color:var(--fl-text)!important;padding:12px!important;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace!important}.fl-awg-import-form textarea:focus-visible{outline:2px solid var(--fl-green);outline-offset:2px}.fl-awg-private-note{color:var(--fl-muted);font-size:12px;line-height:1.5}@media(max-width:980px){.fl-awg-head{display:grid}.fl-awg-state{min-width:0}.fl-awg-body{grid-template-columns:1fr}.fl-awg-meta{grid-template-columns:repeat(2,minmax(0,1fr))}.fl-awg-actions{justify-content:flex-start}}@media(max-width:520px){.fl-awg-head,.fl-awg-body{padding:14px}.fl-awg-title-row{align-items:flex-start;flex-direction:column;gap:7px}.fl-awg-meta{grid-template-columns:1fr 1fr}.fl-awg-actions{display:grid;grid-template-columns:1fr 1fr}.fl-awg-actions .fl-button{width:100%;min-width:0;padding-inline:8px}.fl-awg-probe{padding:0 14px 14px}.fl-awg-import-form{min-width:0}.fl-awg-import-form textarea{min-height:220px}}';
 
 return view.extend({
 	load: function() {
@@ -406,6 +442,7 @@ return view.extend({
 		this.batchTesting = false;
 		this.batchDone = 0;
 		this.batchTotal = 0;
+		this.awgBusy = '';
 		return this.fetchData().then(L.bind(function(data) {
 			this.startPolling();
 			return data;
@@ -417,7 +454,8 @@ return view.extend({
 		return Promise.all([
 			this.execJSON([ '--json', 'status' ]).catch(function(err) { return { __error: err.message }; }),
 			this.execJSON([ '--json', 'list', 'subscriptions' ]).catch(function(err) { return { __error: err.message }; }),
-			this.execJSON([ '--json', 'inspect', 'health-check-status' ]).catch(function() { return { status: 'idle' }; })
+			this.execJSON([ '--json', 'inspect', 'health-check-status' ]).catch(function() { return { status: 'idle' }; }),
+			this.execJSON([ '--json', 'awg', 'status' ]).catch(function(err) { return { __error: err.message }; })
 		]).then(L.bind(function(data) {
 			this.fetchErrors = {};
 			var status = data[0];
@@ -436,7 +474,7 @@ return view.extend({
 			} else if (this.toastErrors) {
 				delete this.toastErrors.subscriptions;
 			}
-			this.pageData = [ status, subscriptions, data[2] || { status: 'idle' } ];
+			this.pageData = [ status, subscriptions, data[2] || { status: 'idle' }, data[3] || {} ];
 			var subscriptionList = Array.isArray(subscriptions) ? subscriptions : [];
 			this.mergePersistedPings(status, subscriptionList);
 			this.mergeBackgroundPings(data[2], subscriptionList);
@@ -465,6 +503,26 @@ return view.extend({
 				throw new Error(commandError(result));
 			return result;
 		});
+	},
+
+	awgStatus: function() {
+		var value = this.pageData && this.pageData[3];
+		return value && typeof value === 'object' ? value : {};
+	},
+
+	runAWGAction: function(label, args, success) {
+		this.awgBusy = label;
+		this.update();
+		return this.exec(args).then(L.bind(function(result) {
+			this.awgBusy = '';
+			if (success)
+				fastlaneShell.showToast(success, 'success');
+			return this.refreshView().then(function() { return result; });
+		}, this)).catch(L.bind(function() {
+			this.awgBusy = '';
+			fastlaneShell.showToast(_('Could not complete the AmneziaWG action.'), 'error');
+			return this.refreshView();
+		}, this));
 	},
 
 	readPings: function() {
@@ -557,7 +615,7 @@ return view.extend({
 		if (this.pollFn)
 			return;
 		this.pollFn = L.bind(function() {
-			if (this.busy || this.backgroundRefreshPromise)
+			if (this.busy || this.awgBusy || this.backgroundRefreshPromise)
 				return Promise.resolve();
 			this.backgroundRefreshPromise = this.fetchData()
 				.then(L.bind(function() {
@@ -955,6 +1013,94 @@ return view.extend({
 		return this.runAction(_('Disconnecting VPN…'), this.exec([ 'disconnect' ]), _('VPN disconnected.'));
 	},
 
+	handleAWGImportOpen: function(ev) {
+		if (ev) ev.preventDefault();
+		var name = E('input', { type: 'text', placeholder: _('For example: Backup AWG'), maxlength: '80', autocomplete: 'off' });
+		var source = E('textarea', { placeholder: _('Paste the complete AmneziaWG configuration here'), spellcheck: 'false', autocapitalize: 'none', autocomplete: 'off' });
+		var error = E('div', { class: 'fl-modal-status', role: 'status', 'aria-live': 'polite' });
+		var submit = E('button', { class: 'fl-modal-button fl-modal-primary fl-dialog-button fl-dialog-primary', type: 'button' }, [ _('Import') ]);
+		submit.addEventListener('click', L.bind(this.handleAWGImportSubmit, this, name, source, error, submit));
+		ui.showModal(_('Import AmneziaWG profile'), [
+			E('div', { class: 'fl-awg-import-form fl-dialog-form' }, [
+				E('label', { class: 'fl-dialog-field' }, [ E('span', { class: 'fl-dialog-label' }, [ _('Profile name') ]), name ]),
+				E('label', { class: 'fl-dialog-field' }, [ E('span', { class: 'fl-dialog-label' }, [ _('AmneziaWG configuration') ]), source ]),
+				E('p', { class: 'fl-awg-private-note' }, [ _('The configuration is sent directly to Fast Lane for import. Private keys and raw profile contents are never shown on this page.') ]),
+				error
+			]),
+			E('div', { class: 'right fl-dialog-actions' }, [
+				E('button', { class: 'fl-modal-button fl-dialog-button', type: 'button', click: ui.hideModal }, [ _('Cancel') ]),
+				submit
+			])
+		]);
+		var modal = document.querySelector('.modal');
+		if (modal) {
+			modal.classList.add('fastlane-modal');
+			modal.classList.add('fl-dialog');
+		}
+		window.requestAnimationFrame(function() { source.focus(); });
+	},
+
+	handleAWGImportSubmit: function(nameInput, sourceInput, errorBox, submitButton, ev) {
+		if (ev) ev.preventDefault();
+		var content = trim(sourceInput.value);
+		if (!content) {
+			errorBox.textContent = _('Paste an AmneziaWG configuration.');
+			sourceInput.focus();
+			return;
+		}
+		errorBox.className = 'fl-modal-status fl-modal-status-working';
+		errorBox.textContent = _('Importing profile…');
+		submitButton.disabled = true;
+		submitButton.textContent = _('Importing…');
+		sourceInput.value = '';
+		var importPath = '/var/run/fastlane/awg-import.conf';
+		return fs.exec('/usr/libexec/fastlane-awg-import-prepare', []).then(function(result) {
+			if (result.code !== 0)
+				throw new Error(commandError(result));
+			return fs.write(importPath, content);
+		}).then(L.bind(function() {
+			var args = [ 'awg', 'import', '--file', importPath ];
+			var name = trim(nameInput.value);
+			if (name)
+				args.push('--name', name);
+			return this.exec(args);
+		}, this)).then(L.bind(function() {
+			content = '';
+			ui.hideModal();
+			fastlaneShell.showToast(_('AmneziaWG profile imported.'), 'success');
+			return this.refreshView();
+		}, this)).catch(function(err) {
+			content = '';
+			errorBox.className = 'fl-modal-status';
+			errorBox.textContent = awgImportError(err);
+			submitButton.disabled = false;
+			submitButton.textContent = _('Import');
+			sourceInput.focus();
+		});
+	},
+
+	handleAWGConnect: function(ev) {
+		if (ev) ev.preventDefault();
+		return this.runAWGAction(_('Connecting AmneziaWG…'), [ 'awg', 'connect' ], _('AmneziaWG connected.'));
+	},
+
+	handleAWGCheck: function(ev) {
+		if (ev) ev.preventDefault();
+		return this.runAWGAction(_('Checking AmneziaWG connection…'), [ 'awg', 'check' ], _('AmneziaWG connection checked.'));
+	},
+
+	handleAWGDisconnect: function(ev) {
+		if (ev) ev.preventDefault();
+		return this.runAWGAction(_('Disconnecting AmneziaWG…'), [ 'awg', 'disconnect' ], _('AmneziaWG disconnected.'));
+	},
+
+	handleAWGRemove: function(ev) {
+		if (ev) ev.preventDefault();
+		if (!window.confirm(_('Delete the AmneziaWG profile? The imported configuration will be removed from the router.')))
+			return;
+		return this.runAWGAction(_('Deleting AmneziaWG profile…'), [ 'awg', 'remove' ], _('AmneziaWG profile deleted.'));
+	},
+
 	handleConnect: function(subID, nodeID, ev) {
 		if (ev) { ev.preventDefault(); ev.stopPropagation(); }
 		this.activeMenuKey = '';
@@ -1315,6 +1461,62 @@ return view.extend({
 		]);
 	},
 
+	renderAWGCard: function() {
+		var status = this.awgStatus();
+		var statusUnavailable = !!status.__error;
+		var rawProfile = status.profile && typeof status.profile === 'object' ? status.profile : null;
+		var profile = rawProfile ? {
+			name: status.name,
+			protocol: status.protocol,
+			endpoint: rawProfile.endpoint,
+			interface_name: status.interface && status.interface.device,
+			address: Array.isArray(rawProfile.addresses) ? rawProfile.addresses.join(', ') : ''
+		} : null;
+		var state = statusUnavailable ? 'error' : awgState(status);
+		var presentation = statusUnavailable
+			? { label: _('Could not read AmneziaWG status'), help: _('Refresh the page or import the profile again.'), tone: 'error' }
+			: awgStatePresentation(status);
+		var preparing = state === 'preparing';
+		var active = status.active === true || state === 'connected';
+		var invalid = state === 'invalid' || state === 'error';
+		var disabled = !!this.awgBusy || preparing;
+		var probe = status.last_probe && typeof status.last_probe === 'object' ? status.last_probe : null;
+		var probeText = '';
+		if (probe && probe.checked_at) {
+			probeText = _('Last check') + ': ' + formatTime(probe.checked_at) + ' · ' + (probe.success === true ? formatLatency(probe.latency_ms) : _('failed'));
+		}
+		var fields = profile ? [
+			[ _('Profile'), trim(profile.name) || '—' ],
+			[ _('Protocol'), trim(profile.protocol) || 'AmneziaWG' ],
+			[ _('Endpoint'), trim(profile.endpoint) || '—' ],
+			[ _('Interface'), trim(profile.interface_name) || '—' ],
+			[ _('Address'), trim(profile.address) || '—' ]
+		] : [];
+		return E('section', { class: 'fl-awg-card', 'aria-label': _('Experimental AmneziaWG profile') }, [
+			E('div', { class: 'fl-awg-head' }, [
+				E('div', {}, [
+					E('div', { class: 'fl-awg-title-row' }, [ E('h2', { class: 'fl-awg-title' }, [ _('AmneziaWG') ]), E('span', { class: 'fl-awg-badge' }, [ _('AWG 2.0 prototype') ]) ]),
+					E('p', { class: 'fl-awg-description' }, [ _('One manual profile. It does not participate in automatic server selection.') ])
+				]),
+				E('div', { class: 'fl-awg-state fl-awg-state-' + presentation.tone, role: 'status', 'aria-live': 'polite' }, [
+					this.awgBusy || preparing ? E('span', { class: 'fl-inline-loader' }) : E('span', { class: 'fl-dot ' + (state === 'connected' ? 'fl-dot-on' : (state === 'direct' || state === 'preparing' ? 'fl-dot-recovering' : '')) }),
+					E('span', { class: 'fl-awg-state-copy' }, [ E('span', { class: 'fl-awg-state-label' }, [ this.awgBusy || presentation.label ]), E('span', { class: 'fl-awg-state-help' }, [ presentation.help ]) ])
+				])
+			]),
+			E('div', { class: 'fl-awg-body' }, [
+				profile ? E('div', { class: 'fl-awg-meta' }, fields.map(function(field) { return E('div', { class: 'fl-awg-meta-item' }, [ E('span', { class: 'fl-awg-meta-label' }, [ field[0] ]), E('span', { class: 'fl-awg-meta-value', title: field[1] }, [ field[1] ]) ]); })) : E('div', { class: 'fl-awg-empty' }, [ _('Import a profile to connect through AmneziaWG.') ]),
+				E('div', { class: 'fl-awg-actions' }, [
+					E('button', { class: 'fl-button', disabled: disabled ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGImportOpen') }, [ profile ? _('Replace profile') : _('Import profile') ]),
+					profile ? E('button', { class: 'fl-button fl-button-primary', disabled: disabled || active || invalid ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGConnect') }, [ _('Connect') ]) : '',
+					profile ? E('button', { class: 'fl-button', disabled: disabled || invalid ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGCheck') }, [ _('Check') ]) : '',
+					profile ? E('button', { class: 'fl-button fl-button-warning', disabled: disabled || !active ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGDisconnect') }, [ _('Disconnect') ]) : '',
+					profile ? E('button', { class: 'fl-button fl-button-danger', disabled: disabled ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGRemove') }, [ _('Delete') ]) : ''
+				])
+			]),
+			probeText ? E('div', { class: 'fl-awg-probe' }, [ probeText ]) : ''
+		]);
+	},
+
 	renderTabs: function() {
 		var subscriptions = this.subscriptions();
 		var availableSubscriptions = subscriptions.filter(function(sub) { return !isSubscriptionExpired(sub); });
@@ -1457,6 +1659,7 @@ return view.extend({
 			fastlaneShell.renderHeader('vpn'),
 			E('main', { class: 'fl-shell' }, [
 			this.renderStatus(),
+			this.renderAWGCard(),
 			this.busy ? E('div', { class: 'fl-busy', role: 'status', 'aria-live': 'polite' }, [ this.busy ]) : '',
 			backgroundActive ? E('div', { class: 'fl-busy', role: 'status', 'aria-live': 'polite' }, [
 				E('span', { class: 'fl-inline-loader' }),

@@ -9,6 +9,7 @@ type Paths struct {
 	SubscriptionsPath string
 	SettingsPath      string
 	StatePath         string
+	AWGProfilePath    string
 }
 
 // NewPaths constructs the default file layout for a root directory.
@@ -19,5 +20,6 @@ func NewPaths(root string) Paths {
 		SubscriptionsPath: filepath.Join(root, "subscriptions.json"),
 		SettingsPath:      filepath.Join(root, "settings.json"),
 		StatePath:         filepath.Join(root, "state.json"),
+		AWGProfilePath:    filepath.Join(root, "amneziawg.conf"),
 	}
 }

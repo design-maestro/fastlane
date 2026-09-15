@@ -131,7 +131,8 @@ harden_secret_storage() {
 		for path in \
 			/etc/fastlane/subscriptions.json \
 			/etc/fastlane/settings.json \
-			/etc/fastlane/state.json \
+		/etc/fastlane/state.json \
+			/etc/fastlane/amneziawg.conf \
 			/etc/fastlane/.fastlane.lock \
 			/etc/fastlane/speedtest.lock
 		do
@@ -173,7 +174,8 @@ register_languages
 rm -f /tmp/luci-indexcache
 rm -rf /tmp/luci-modulecache
 /etc/init.d/rpcd reload >/dev/null 2>&1 || true
-/etc/init.d/uhttpd reload >/dev/null 2>&1 || true
+/etc/init.d/uhttpd stop >/dev/null 2>&1 || true
+/etc/init.d/uhttpd start >/dev/null 2>&1 || true
 
 if [ -x /etc/init.d/fastlane ]; then
 	if [ "${PKG_UPGRADE:-0}" = "1" ]; then

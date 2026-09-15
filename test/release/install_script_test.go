@@ -118,7 +118,8 @@ func TestInstallScriptInstallsMatchedOpenWrtTarball(t *testing.T) {
 	for _, want := range []string{
 		"cron:restart",
 		"rpcd:reload",
-		"uhttpd:reload",
+		"uhttpd:stop",
+		"uhttpd:start",
 		"fastlane:enable",
 		"fastlane:restart",
 	} {
@@ -604,7 +605,8 @@ func TestInstallScriptBootstrapsBareRouterAcrossSupportedArchitectures(t *testin
 				"fastlane:enable",
 				"fastlane:restart",
 				"rpcd:reload",
-				"uhttpd:reload",
+				"uhttpd:stop",
+				"uhttpd:start",
 			} {
 				if !strings.Contains(string(serviceLog), want) {
 					t.Fatalf("expected service log to contain %q, got %q", want, string(serviceLog))

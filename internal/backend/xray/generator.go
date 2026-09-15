@@ -198,6 +198,43 @@ func managedOutboundForNode(node domain.Node, mark int) (any, string, error) {
 	return outbound, tag, nil
 }
 
+func managedInterfaceOutbound(interfaceName, sourceAddress string, mark int) (any, string, error) {
+	interfaceName = strings.TrimSpace(interfaceName)
+	if interfaceName == "" || len(interfaceName) > 15 {
+		return nil, "", fmt.Errorf("invalid managed interface name %q", interfaceName)
+	}
+	for _, character := range interfaceName {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') &&
+			(character < '0' || character > '9') && character != '_' && character != '-' {
+			return nil, "", fmt.Errorf("invalid managed interface name %q", interfaceName)
+		}
+	}
+	address, err := netip.ParseAddr(strings.TrimSpace(sourceAddress))
+	if err != nil || address.IsUnspecified() || address.IsLoopback() {
+		return nil, "", fmt.Errorf("invalid managed interface source address %q", sourceAddress)
+	}
+	sockopt := map[string]any{"interface": interfaceName}
+	if mark > 0 {
+		sockopt["mark"] = mark
+	}
+	outbound := map[string]any{
+		"protocol":    "freedom",
+		"sendThrough": address.String(),
+		"settings":    map[string]any{"domainStrategy": "UseIP"},
+		"streamSettings": map[string]any{
+			"sockopt": sockopt,
+		},
+	}
+	canonical, err := json.Marshal(outbound)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshal managed interface outbound: %w", err)
+	}
+	sum := sha256.Sum256(canonical)
+	tag := fmt.Sprintf("%sawg-%x", managedOutboundPrefix, sum[:8])
+	outbound["tag"] = tag
+	return outbound, tag, nil
+}
+
 func outboundWithMark(outbound any, mark int) any {
 	if mark <= 0 {
 		return outbound

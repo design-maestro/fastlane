@@ -1,0 +1,201 @@
+package amneziawg
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+type controllerCall struct {
+	stdin []byte
+	name  string
+	args  []string
+}
+
+type controllerRunner struct {
+	calls []controllerCall
+	run   func(controllerCall) ([]byte, error)
+}
+
+func (r *controllerRunner) Run(_ context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+	call := controllerCall{stdin: append([]byte(nil), stdin...), name: name, args: append([]string(nil), args...)}
+	r.calls = append(r.calls, call)
+	if r.run != nil {
+		return r.run(call)
+	}
+	return nil, nil
+}
+
+func newControllerForTest(t *testing.T, runner *controllerRunner) *OpenWrtController {
+	t.Helper()
+	root := t.TempDir()
+	path := filepath.Join(root, "lib/netifd/proto/amneziawg.sh")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return &OpenWrtController{InterfaceName: DefaultInterfaceName, SysRoot: root, Runner: runner, WaitTimeout: time.Second}
+}
+
+func successfulControllerRunner() *controllerRunner {
+	return &controllerRunner{run: func(call controllerCall) ([]byte, error) {
+		joined := call.name + " " + strings.Join(call.args, " ")
+		switch {
+		case joined == "uname -r":
+			return []byte("5.15.150\n"), nil
+		case strings.HasPrefix(joined, "awg --version"):
+			return []byte("amneziawg-tools v2\n"), nil
+		case strings.HasPrefix(joined, "modinfo "):
+			return []byte("5.15.150 SMP mod_unload\n"), nil
+		case strings.HasPrefix(joined, "modprobe -n "):
+			return nil, nil
+		case strings.HasPrefix(joined, "ubus call "):
+			return []byte(`{"up":true,"l3_device":"fastlane_awg","ipv4-address":[{"address":"10.8.0.2"}]}`), nil
+		case strings.HasPrefix(joined, "awg show "):
+			return []byte(testPublicKey + "\t1700000000\n"), nil
+		default:
+			return nil, nil
+		}
+	}}
+}
+
+func TestOpenWrtControllerPreparesSecretThroughStdinAndConnectsPolicyRoute(t *testing.T) {
+	profile, err := Parse([]byte(validProfile("")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := successfulControllerRunner()
+	controller := newControllerForTest(t, runner)
+	if err := controller.Prepare(context.Background(), profile); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	status, err := controller.Connect(context.Background())
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if !status.Up || status.Address != "10.8.0.2" {
+		t.Fatalf("status = %+v", status)
+	}
+
+	var batch string
+	for _, call := range runner.calls {
+		if call.name == "uci" && len(call.stdin) > 0 {
+			batch = string(call.stdin)
+		}
+		if strings.Contains(strings.Join(call.args, " "), testPrivateKey) {
+			t.Fatal("private key leaked into process arguments")
+		}
+	}
+	for _, expected := range []string{"proto='amneziawg'", "private_key='" + testPrivateKey + "'", "route_allowed_ips='0'", "awg_s3='30'", "awg_i1="} {
+		if !strings.Contains(batch, expected) {
+			t.Fatalf("UCI batch missing %q:\n%s", expected, batch)
+		}
+	}
+	joined := callsText(runner.calls)
+	if !strings.Contains(joined, "ubus call network reload") {
+		t.Fatalf("netifd configuration was not reloaded:\n%s", joined)
+	}
+	if !strings.Contains(joined, "ip -4 route replace default dev fastlane_awg table 51821") ||
+		!strings.Contains(joined, "ip -4 rule add fwmark 0x200 table 51821 priority 10900") {
+		t.Fatalf("policy route was not installed:\n%s", joined)
+	}
+}
+
+func TestOpenWrtControllerRejectsKernelVermagicMismatch(t *testing.T) {
+	runner := successfulControllerRunner()
+	runner.run = func(call controllerCall) ([]byte, error) {
+		joined := call.name + " " + strings.Join(call.args, " ")
+		switch {
+		case joined == "uname -r":
+			return []byte("6.6.1\n"), nil
+		case strings.HasPrefix(joined, "awg --version"):
+			return []byte("v2\n"), nil
+		case strings.HasPrefix(joined, "modinfo "):
+			return []byte("5.15.150 SMP\n"), nil
+		default:
+			return nil, nil
+		}
+	}
+	controller := newControllerForTest(t, runner)
+	status, err := controller.Preflight(context.Background())
+	if err == nil || status.Compatible || !strings.Contains(status.FailureReason, "different kernel") {
+		t.Fatalf("status=%+v err=%v", status, err)
+	}
+	if strings.Contains(callsText(runner.calls), "modprobe -f") {
+		t.Fatal("controller must never force-load a module")
+	}
+}
+
+func TestOpenWrtControllerUsesOpenWrtKernelABIWhenModinfoIsMissing(t *testing.T) {
+	runner := successfulControllerRunner()
+	runner.run = func(call controllerCall) ([]byte, error) {
+		joined := call.name + " " + strings.Join(call.args, " ")
+		switch {
+		case joined == "uname -r":
+			return []byte("6.6.119\n"), nil
+		case joined == "awg --version":
+			return []byte("amneziawg-tools v2\n"), nil
+		case strings.HasPrefix(joined, "modinfo "):
+			return nil, errors.New("not found")
+		case joined == "opkg status kmod-amneziawg":
+			return []byte("Package: kmod-amneziawg\nDepends: kernel (=6.6.119~abi-r1), kmod-foo\n"), nil
+		case joined == "opkg status kernel":
+			return []byte("Package: kernel\nVersion: 6.6.119~abi-r1\n"), nil
+		case strings.HasPrefix(joined, "modprobe -n "):
+			return nil, nil
+		default:
+			return nil, nil
+		}
+	}
+	controller := newControllerForTest(t, runner)
+	modulePath := filepath.Join(controller.SysRoot, "lib/modules/6.6.119/amneziawg.ko")
+	if err := os.MkdirAll(filepath.Dir(modulePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modulePath, []byte("module"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status, err := controller.Preflight(context.Background())
+	if err != nil || !status.Compatible || !strings.Contains(status.Module, "kernel ABI") {
+		t.Fatalf("status=%+v err=%v", status, err)
+	}
+}
+
+func TestOpenWrtControllerRemoveIsScopedToOwnedSections(t *testing.T) {
+	runner := successfulControllerRunner()
+	controller := newControllerForTest(t, runner)
+	if err := controller.Remove(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var batch string
+	for _, call := range runner.calls {
+		if call.name == "uci" && len(call.stdin) > 0 {
+			batch = string(call.stdin)
+		}
+	}
+	if batch != "delete network.fastlane_awg\ndelete network.amneziawg_fastlane_awg\n" {
+		t.Fatalf("unexpected removal scope: %q", batch)
+	}
+}
+
+func TestOpenWrtControllerPreflightRequiresNetifd(t *testing.T) {
+	controller := &OpenWrtController{SysRoot: t.TempDir(), Runner: successfulControllerRunner()}
+	status, err := controller.Preflight(context.Background())
+	if err == nil || status.Netifd {
+		t.Fatalf("status=%+v err=%v", status, err)
+	}
+}
+
+func callsText(calls []controllerCall) string {
+	var lines []string
+	for _, call := range calls {
+		lines = append(lines, call.name+" "+strings.Join(call.args, " "))
+	}
+	return strings.Join(lines, "\n")
+}

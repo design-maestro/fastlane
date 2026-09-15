@@ -44,6 +44,9 @@ func TestManagedBackendPrepareUsesStdinAndVerifiesTag(t *testing.T) {
 	}
 	runner.run = func(call apiCall) ([]byte, error) {
 		if len(call.args) > 1 && call.args[1] == "lso" {
+			if len(runner.calls) == 1 {
+				return []byte(`{"outbounds":[]}`), nil
+			}
 			return []byte(`{"outbounds":[{"tag":"` + expectedTag + `"}]}`), nil
 		}
 		return []byte(`{}`), nil
@@ -56,17 +59,88 @@ func TestManagedBackendPrepareUsesStdinAndVerifiesTag(t *testing.T) {
 	if tag != expectedTag {
 		t.Fatalf("tag = %q, want %q", tag, expectedTag)
 	}
-	if len(runner.calls) != 2 {
-		t.Fatalf("calls = %d, want 2", len(runner.calls))
+	if len(runner.calls) != 3 {
+		t.Fatalf("calls = %d, want 3", len(runner.calls))
 	}
-	if got := runner.calls[0].args; !reflect.DeepEqual(got[:4], []string{"api", "ado", "--server=" + managedAPIAddress, "--timeout=3"}) {
+	if got := runner.calls[1].args; !reflect.DeepEqual(got[:4], []string{"api", "ado", "--server=" + managedAPIAddress, "--timeout=3"}) {
 		t.Fatalf("unexpected add args: %#v", got)
 	}
-	if strings.Contains(strings.Join(runner.calls[0].args, " "), node.Address) {
+	if strings.Contains(strings.Join(runner.calls[1].args, " "), node.Address) {
 		t.Fatal("subscription parameters leaked into process arguments")
 	}
-	if !strings.Contains(string(runner.calls[0].stdin), expectedTag) {
+	if !strings.Contains(string(runner.calls[1].stdin), expectedTag) {
 		t.Fatal("managed outbound was not passed through stdin")
+	}
+}
+
+func TestManagedBackendPrepareInterfaceOutboundUsesStdinAndVerifiesTag(t *testing.T) {
+	t.Setenv("FASTLANE_XRAY_BINARY", "/test/xray")
+	runner := &scriptedAPIRunner{}
+	runtimeBackend := NewRuntimeBackend(filepath.Join(t.TempDir(), "config.json"), nil)
+	runtimeBackend.apiRunner = runner
+	_, expectedTag, err := managedInterfaceOutbound("fastlane_awg", "10.77.0.2", 0x100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.run = func(call apiCall) ([]byte, error) {
+		if len(call.args) > 1 && call.args[1] == "lso" {
+			if len(runner.calls) == 1 {
+				return []byte(`{"outbounds":[]}`), nil
+			}
+			return []byte(`{"outbounds":[{"tag":"` + expectedTag + `"}]}`), nil
+		}
+		return []byte(`{}`), nil
+	}
+
+	tag, err := runtimeBackend.PrepareInterfaceOutbound(context.Background(), "fastlane_awg", "10.77.0.2", 0x100)
+	if err != nil {
+		t.Fatalf("prepare interface outbound: %v", err)
+	}
+	if tag != expectedTag {
+		t.Fatalf("tag = %q, want %q", tag, expectedTag)
+	}
+	payload := string(runner.calls[1].stdin)
+	if !strings.Contains(payload, `"interface":"fastlane_awg"`) || !strings.Contains(payload, `"sendThrough":"10.77.0.2"`) {
+		t.Fatalf("interface binding missing from payload: %s", payload)
+	}
+	if strings.Contains(strings.Join(runner.calls[1].args, " "), "fastlane_awg") {
+		t.Fatal("interface parameters leaked into process arguments")
+	}
+}
+
+func TestManagedBackendPrepareInterfaceOutboundSkipsExistingTag(t *testing.T) {
+	runner := &scriptedAPIRunner{}
+	runtimeBackend := NewRuntimeBackend(filepath.Join(t.TempDir(), "config.json"), nil)
+	runtimeBackend.apiRunner = runner
+	_, expectedTag, err := managedInterfaceOutbound("fastlane_awg", "10.77.0.2", 0x100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.run = func(call apiCall) ([]byte, error) {
+		return []byte(`{"outbounds":[{"tag":"` + expectedTag + `"}]}`), nil
+	}
+
+	if _, err := runtimeBackend.PrepareInterfaceOutbound(context.Background(), "fastlane_awg", "10.77.0.2", 0x100); err != nil {
+		t.Fatalf("prepare existing interface outbound: %v", err)
+	}
+	if len(runner.calls) != 1 || runner.calls[0].args[1] != "lso" {
+		t.Fatalf("calls = %#v, want one list operation", runner.calls)
+	}
+}
+
+func TestManagedInterfaceOutboundRejectsUnsafeInputs(t *testing.T) {
+	for _, test := range []struct{ name, iface, address string }{
+		{"empty interface", "", "10.0.0.2"},
+		{"unsafe interface", "awg0;reboot", "10.0.0.2"},
+		{"long interface", "fastlane_amneziawg", "10.0.0.2"},
+		{"invalid address", "awg0", "not-an-ip"},
+		{"loopback", "awg0", "127.0.0.1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, _, err := managedInterfaceOutbound(test.iface, test.address, 0); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
 	}
 }
 

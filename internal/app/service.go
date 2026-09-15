@@ -30,6 +30,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/design-maestro/fastlane/internal/amneziawg"
 	"github.com/design-maestro/fastlane/internal/backend"
 	"github.com/design-maestro/fastlane/internal/domain"
 	"github.com/design-maestro/fastlane/internal/parser"
@@ -52,6 +53,14 @@ type Store interface {
 	SaveSettings(domain.Settings) error
 	LoadState() (domain.RuntimeState, error)
 	SaveState(domain.RuntimeState) error
+}
+
+// AWGProfileStore keeps the native profile separate from subscriptions and
+// runtime status because it contains private key material.
+type AWGProfileStore interface {
+	SaveAWGProfile([]byte) error
+	LoadAWGProfile() ([]byte, error)
+	RemoveAWGProfile() error
 }
 
 // Firewaller applies OpenWrt transparent proxy rules.
@@ -141,6 +150,8 @@ type Service struct {
 	now                     func() time.Time
 	autoHealthStateMu       sync.Mutex
 	autoHealthState         *autoHealthStateCache
+	awgStore                AWGProfileStore
+	awgController           amneziawg.Controller
 }
 
 // Dependencies groups the service construction inputs.
@@ -157,6 +168,8 @@ type Dependencies struct {
 	IPv6Manager        IPv6Manager
 	ZapretManager      ZapretManager
 	RuntimeEgressProbe bool
+	AWGStore           AWGProfileStore
+	AWGController      amneziawg.Controller
 }
 
 type subscriptionFetchMetadata struct {
@@ -236,6 +249,8 @@ func NewService(deps Dependencies) *Service {
 		nodeDialProbeTimeout:    2 * time.Second,
 		dialContext:             (&net.Dialer{}).DialContext,
 		now:                     time.Now,
+		awgStore:                deps.AWGStore,
+		awgController:           deps.AWGController,
 	}
 
 	if deps.RuntimeEgressProbe && deps.Backend != nil && deps.HTTPClient != nil {
@@ -1899,6 +1914,20 @@ func (s *Service) restoreRuntime(ctx context.Context) error {
 	if err := s.reapplyCurrentConnection(ctx); err != nil {
 		reason := fmt.Sprintf("restore runtime: %v", err)
 		s.logWarn("restore runtime failed", "subscription", state.ActiveSubscriptionID, "node", state.ActiveNodeID, "error", err.Error())
+		// A managed AWG runtime already has a live direct outbound in the same
+		// Xray process. If the tunnel is unavailable during daemon startup, keep
+		// Xray and DNS alive and fail open through that outbound. The normal
+		// recovery watcher can then confirm the tunnel twice and switch back.
+		if state.ActiveConnectionKind == "amneziawg" {
+			if managed, ok := s.backend.(backend.ManagedBackend); ok {
+				if directErr := s.activateManagedDirect(ctx, managed, state, reason); directErr == nil {
+					s.logWarn("restore degraded to managed direct", "reason", reason)
+					return nil
+				} else {
+					reason = fmt.Sprintf("%s; managed direct fallback: %v", reason, directErr)
+				}
+			}
+		}
 		if persistErr := s.persistRestoreFailure(ctx, reason); persistErr != nil {
 			return fmt.Errorf("%s: %v", reason, persistErr)
 		}
@@ -4169,6 +4198,7 @@ func (s *Service) applyNodeSelection(ctx context.Context, sub domain.Subscriptio
 	}
 
 	state.ActiveSubscriptionID = sub.ID
+	state.ActiveConnectionKind = "xray"
 	state.ActiveNodeID = node.ID
 	state.ActiveNodeName = node.DisplayName()
 	state.Mode = mode
@@ -4219,6 +4249,12 @@ func (s *Service) tryManagedNodeSelection(ctx context.Context, managed backend.M
 	currentTag := "fastlane-direct"
 	if directRecovery {
 		if err := managed.SelectDirect(ctx); err != nil {
+			return false, nil
+		}
+	} else if state.ActiveConnectionKind == "amneziawg" {
+		currentTag = strings.TrimSpace(state.SelectedOutboundTag)
+		actual, selectedErr := managed.SelectedOutbound(ctx)
+		if currentTag == "" || selectedErr != nil || actual != currentTag {
 			return false, nil
 		}
 	} else {
@@ -5310,6 +5346,14 @@ func (s *Service) reapplyCurrentConnectionWithOptions(ctx context.Context, force
 		return fmt.Errorf("load state: %w", err)
 	}
 	state.ActiveTransport = effectiveActiveTransport(state)
+	if state.ActiveConnectionKind == "amneziawg" && state.Connected {
+		if forceStaticReload {
+			if _, err := s.ensureAWGManagedRuntimeWithReload(ctx, true); err != nil {
+				return err
+			}
+		}
+		return s.connectAWGLocked(ctx)
+	}
 
 	if !state.Connected || state.ActiveSubscriptionID == "" {
 		if err := s.disconnectRuntime(ctx); err != nil {

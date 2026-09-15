@@ -86,6 +86,17 @@ func (s *Service) RunAutoFailover(ctx context.Context, failureReason string) err
 // RunConnectionFailover recovers either selection mode without changing the
 // user's mode. Auto uses the cached fast path; manual pins the replacement.
 func (s *Service) RunConnectionFailover(ctx context.Context, failureReason string) error {
+	if current, loadErr := s.store.LoadState(); loadErr == nil && current.ActiveConnectionKind == "amneziawg" && current.OperationalMode == domain.OperationalModeDirect {
+		if _, checkErr := s.CheckAWG(ctx); checkErr == nil {
+			if waitErr := sleepWithContext(ctx, s.managedRecoveryConfirmationDelay()); waitErr == nil {
+				if _, confirmErr := s.CheckAWG(ctx); confirmErr == nil {
+					if connectErr := s.ConnectAWG(ctx); connectErr == nil {
+						return nil
+					}
+				}
+			}
+		}
+	}
 	snapshot, err := s.captureAutoSelectionSnapshot()
 	if err != nil {
 		return err
@@ -384,6 +395,29 @@ func (s *Service) connectionRecoveryNeeded(ctx context.Context, includeManual bo
 	}
 	if !state.Connected || state.ActiveSubscriptionID == "" || state.ActiveNodeID == "" {
 		return true, "active route is disconnected", nil
+	}
+	if state.ActiveConnectionKind == "amneziawg" {
+		if s.awgController == nil {
+			return true, "AmneziaWG controller is unavailable", nil
+		}
+		iface, statusErr := s.awgController.Status(ctx)
+		if statusErr != nil || !iface.Up || iface.LastHandshake == 0 {
+			return true, "AmneziaWG interface or handshake is unavailable", nil
+		}
+		if s.backend != nil {
+			status, backendErr := s.backend.Status(ctx)
+			if backendErr != nil || !status.Running {
+				return true, "backend is not running", nil
+			}
+		}
+		if s.backendEgressProbe != nil {
+			probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			if probeErr := s.backendEgressProbe(probeCtx); probeErr != nil {
+				return true, fmt.Sprintf("%s%v", activeGETFailureReasonPrefix, probeErr), nil
+			}
+		}
+		return false, "", nil
 	}
 	sub, err := s.subscriptionByID(state.ActiveSubscriptionID)
 	if err != nil {

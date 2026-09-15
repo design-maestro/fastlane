@@ -45,6 +45,15 @@ type CandidateBackoffState struct {
 	RetryAfter          time.Time `json:"retry_after"`
 }
 
+// AWGProbeState contains connectivity metadata only; imported keys never enter
+// runtime state, status or diagnostics.
+type AWGProbeState struct {
+	Success   bool      `json:"success"`
+	CheckedAt time.Time `json:"checked_at"`
+	LatencyMS float64   `json:"latency_ms,omitempty"`
+	Error     string    `json:"error,omitempty"`
+}
+
 // ActiveConnection describes the currently applied runtime selection.
 type ActiveConnection struct {
 	SubscriptionID string        `json:"subscription_id"`
@@ -96,6 +105,9 @@ type RuntimeState struct {
 	LastFailureReason          string                           `json:"last_failure_reason"`
 	LastTransportFailureReason string                           `json:"last_transport_failure_reason"`
 	ZapretTest                 ZapretTestState                  `json:"zapret_test,omitempty"`
+	ActiveConnectionKind       string                           `json:"active_connection_kind,omitempty"`
+	AWGProfileName             string                           `json:"awg_profile_name,omitempty"`
+	AWGLastProbe               *AWGProbeState                   `json:"awg_last_probe,omitempty"`
 }
 
 // DefaultRuntimeState returns an empty persisted state.

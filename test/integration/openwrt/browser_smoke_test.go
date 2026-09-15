@@ -203,6 +203,64 @@ func (h *openWRTHarness) AssertLuCIVPNToolbarLayout(ctx context.Context) error {
 	return nil
 }
 
+type awgCardLayout struct {
+	ViewportWidth      int     `json:"viewportWidth"`
+	CardWidth          float64 `json:"cardWidth"`
+	CardOutsidePage    bool    `json:"cardOutsidePage"`
+	ContentOverflow    bool    `json:"contentOverflow"`
+	ButtonsOutsideCard bool    `json:"buttonsOutsideCard"`
+	BadgeText          string  `json:"badgeText"`
+	TranslationHash    string  `json:"translationHash"`
+	TranslationValue   string  `json:"translationValue"`
+	TranslatedValue    string  `json:"translatedValue"`
+	TranslationCount   int     `json:"translationCount"`
+}
+
+func (h *openWRTHarness) AssertLuCIAWGCardLayout(ctx context.Context) error {
+	var desktop, mobile awgCardLayout
+	expression := `(() => {
+		const card = document.querySelector('.fl-awg-card');
+		if (!card) return {};
+		const rect = card.getBoundingClientRect();
+		const buttons = Array.from(card.querySelectorAll('.fl-awg-actions button')).map((item) => item.getBoundingClientRect());
+		return {
+			viewportWidth: window.innerWidth,
+			cardWidth: rect.width,
+			cardOutsidePage: rect.left < -1 || rect.right > window.innerWidth + 1,
+			contentOverflow: card.scrollWidth > card.clientWidth + 1,
+			buttonsOutsideCard: buttons.some((button) => button.left < rect.left - 1 || button.right > rect.right + 1),
+			badgeText: (card.querySelector('.fl-awg-badge')?.textContent || '').trim(),
+			translationHash: typeof sfh === 'function' ? sfh('AWG 2.0 prototype') : '',
+			translationValue: typeof sfh === 'function' && window.TR ? (window.TR[sfh('AWG 2.0 prototype')] || '') : '',
+			translatedValue: typeof _ === 'function' ? _('AWG 2.0 prototype') : '',
+			translationCount: window.TR ? Object.keys(window.TR).length : 0
+		};
+	})()`
+	err := h.assertLuCIPageWithActions(ctx, luciVPNPage, []string{"AmneziaWG"},
+		chromedp.EmulateViewport(1440, 1000),
+		chromedp.Sleep(200*time.Millisecond),
+		chromedp.Evaluate(expression, &desktop),
+		chromedp.EmulateViewport(390, 844),
+		chromedp.Sleep(200*time.Millisecond),
+		chromedp.Evaluate(expression, &mobile),
+	)
+	if err != nil {
+		return err
+	}
+	for _, layout := range []awgCardLayout{desktop, mobile} {
+		if layout.ViewportWidth == 0 || layout.CardWidth == 0 {
+			return fmt.Errorf("AmneziaWG card geometry was not measurable: %+v", layout)
+		}
+		if layout.CardOutsidePage || layout.ContentOverflow || layout.ButtonsOutsideCard {
+			return fmt.Errorf("AmneziaWG card overflow at viewport %d: %+v", layout.ViewportWidth, layout)
+		}
+		if layout.BadgeText != "Прототип AWG 2.0" {
+			return fmt.Errorf("AmneziaWG badge translation was not loaded at viewport %d: %+v", layout.ViewportWidth, layout)
+		}
+	}
+	return nil
+}
+
 type vpnMenuScrollSnapshot struct {
 	WindowY     float64 `json:"windowY"`
 	DocumentTop float64 `json:"documentTop"`

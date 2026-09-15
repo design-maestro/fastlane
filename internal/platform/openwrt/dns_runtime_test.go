@@ -178,6 +178,80 @@ func TestDNSRuntimeManagerApplyWritesDNSOverrideSnippetAndRestarts(t *testing.T)
 	}
 }
 
+func TestDNSRuntimeManagerDisableRemovesOverridesFromAllRunningInstances(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	procRoot := filepath.Join(dir, "proc")
+	servicePath := writeExecutable(t, filepath.Join(dir, "dnsmasq-service"), "#!/bin/sh\nexit 0\n")
+
+	for _, pid := range []string{"99", "100"} {
+		configPath := filepath.Join(dir, pid, "dnsmasq.conf")
+		confDir := filepath.Join(dir, pid, "dnsmasq.d")
+		resolvFile := filepath.Join(dir, pid, "resolv.conf")
+		pidDir := filepath.Join(procRoot, pid)
+		for _, path := range []string{pidDir, confDir} {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("dnsmasq\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte("dnsmasq\x00--conf-file="+configPath+"\x00"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(configPath, []byte("conf-dir="+confDir+"\nresolv-file="+resolvFile+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(resolvFile, []byte("nameserver 192.0.2.1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(confDir, defaultDNSRuntimeSnippetName), []byte("server=127.0.0.1#1053\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	manager := DNSRuntimeManager{ProcRoot: procRoot, DNSMasqServicePath: servicePath}
+	if err := manager.Disable(context.Background()); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	for _, pid := range []string{"99", "100"} {
+		path := filepath.Join(dir, pid, "dnsmasq.d", defaultDNSRuntimeSnippetName)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("stale DNS override remained at %s: %v", path, err)
+		}
+	}
+}
+
+func TestDNSRuntimeManagerDisableRemovesGeneratedOverrideWhileDNSMasqRestarts(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	confDir := filepath.Join(dir, "dnsmasq.cfg01411c.d")
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	snippetPath := filepath.Join(confDir, defaultDNSRuntimeSnippetName)
+	if err := os.WriteFile(snippetPath, []byte("server=127.0.0.1#1053\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	servicePath := writeExecutable(t, filepath.Join(dir, "dnsmasq-service"), "#!/bin/sh\nexit 0\n")
+
+	manager := DNSRuntimeManager{
+		ProcRoot:           filepath.Join(dir, "empty-proc"),
+		DNSMasqServicePath: servicePath,
+		DNSMasqConfDirGlob: filepath.Join(dir, "dnsmasq*.d"),
+	}
+	if err := os.MkdirAll(manager.ProcRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Disable(context.Background()); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+	if _, err := os.Stat(snippetPath); !os.IsNotExist(err) {
+		t.Fatalf("stale DNS override remained during dnsmasq restart: %v", err)
+	}
+}
+
 func TestBuildDNSMasqFastLaneDNSConfigRejectsAdvancedMatchers(t *testing.T) {
 	t.Parallel()
 

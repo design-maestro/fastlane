@@ -34,6 +34,9 @@ func (b RuntimeBackend) PrepareOutbound(ctx context.Context, node domain.Node, o
 	if err != nil {
 		return "", err
 	}
+	if present, listErr := b.outboundPresent(ctx, tag); listErr == nil && present {
+		return tag, nil
+	}
 	payload, err := json.Marshal(map[string]any{"outbounds": []any{outbound}})
 	if err != nil {
 		return "", fmt.Errorf("marshal xray outbound: %w", err)
@@ -51,6 +54,33 @@ func (b RuntimeBackend) PrepareOutbound(ctx context.Context, node domain.Node, o
 	}
 	if !present {
 		return "", fmt.Errorf("xray did not expose prepared outbound %q", tag)
+	}
+	return tag, nil
+}
+
+func (b RuntimeBackend) PrepareInterfaceOutbound(ctx context.Context, interfaceName, sourceAddress string, outboundMark int) (string, error) {
+	outbound, tag, err := managedInterfaceOutbound(interfaceName, sourceAddress, outboundMark)
+	if err != nil {
+		return "", err
+	}
+	if present, listErr := b.outboundPresent(ctx, tag); listErr == nil && present {
+		return tag, nil
+	}
+	payload, err := json.Marshal(map[string]any{"outbounds": []any{outbound}})
+	if err != nil {
+		return "", fmt.Errorf("marshal xray interface outbound: %w", err)
+	}
+	if _, err := b.runAPI(ctx, payload, "ado"); err != nil {
+		if present, listErr := b.outboundPresent(ctx, tag); listErr != nil || !present {
+			return "", err
+		}
+	}
+	present, err := b.outboundPresent(ctx, tag)
+	if err != nil {
+		return "", err
+	}
+	if !present {
+		return "", fmt.Errorf("xray did not expose prepared interface outbound %q", tag)
 	}
 	return tag, nil
 }

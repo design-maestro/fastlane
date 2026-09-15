@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/design-maestro/fastlane/internal/amneziawg"
 	"github.com/design-maestro/fastlane/internal/app"
 	"github.com/design-maestro/fastlane/internal/backend"
 	"github.com/design-maestro/fastlane/internal/backend/xray"
@@ -91,6 +92,7 @@ func newRootCmd() *cobra.Command {
 		newTUICmd(opts),
 		newVersionCmd(opts),
 		newUpdateCmd(opts),
+		newAWGCmd(opts),
 	)
 
 	return cmd
@@ -143,6 +145,10 @@ func (o *rootOptions) initService(cmd *cobra.Command) error {
 		dnsManager = manager
 	}
 	var runtimeBackend backend.Backend = xray.NewRuntimeBackend(configPath, controller).WithLogger(logger)
+	var awgController amneziawg.Controller
+	if openwrt.IsOpenWrt() {
+		awgController = amneziawg.NewOpenWrtController()
+	}
 	o.service = app.NewService(app.Dependencies{
 		Store:              fileStore,
 		Backend:            runtimeBackend,
@@ -157,7 +163,9 @@ func (o *rootOptions) initService(cmd *cobra.Command) error {
 			LockPath:   filepath.Join(root, "speedtest.lock"),
 			BinaryPath: xray.BinaryPath(),
 		},
-		Logger: logger,
+		Logger:        logger,
+		AWGStore:      fileStore,
+		AWGController: awgController,
 	})
 
 	return nil

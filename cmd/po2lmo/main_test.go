@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -59,5 +60,53 @@ func TestParseContextAndPlural(t *testing.T) {
 	data, entries := encodeMessages(messages)
 	if len(entries) != 2 || len(data) == 0 {
 		t.Fatalf("got %d entries and %d data bytes", len(entries), len(data))
+	}
+}
+
+func TestEncodeMessagesIncludesPluralFormulaHeader(t *testing.T) {
+	messages := []message{{id: "", values: map[int]string{0: "Language: ru\nPlural-Forms: nplurals=3; plural=(n%10==1 ? 0 : 1);\n"}, seen: true}}
+	data, entries := encodeMessages(messages)
+	if len(entries) != 1 || entries[0].keyID != 0 || entries[0].valueN != 0 {
+		t.Fatalf("plural formula entry = %+v", entries)
+	}
+	if got := string(data[:entries[0].length]); got != "nplurals=3; plural=(n%10==1 ? 0 : 1);" {
+		t.Fatalf("plural formula = %q", got)
+	}
+}
+
+func TestRepositoryCatalogContainsAWGPrototypeTranslation(t *testing.T) {
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate test source")
+	}
+	inputPath := filepath.Join(filepath.Dir(source), "..", "..", "luci-app-fastlane", "po", "ru", "fastlane.po")
+	input, err := os.Open(inputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	messages, err := parsePO(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var translated bool
+	hashes := make(map[uint32]string)
+	for _, msg := range messages {
+		if msg.id == "AWG 2.0 prototype" && msg.values[0] == "Прототип AWG 2.0" {
+			translated = true
+		}
+		key := msg.id
+		if msg.context != "" {
+			key = msg.context + "\x01" + key
+		}
+		hash := sfhHash([]byte(key))
+		if previous, exists := hashes[hash]; exists && previous != key {
+			t.Fatalf("catalog hash collision %08x between %q and %q", hash, previous, key)
+		}
+		hashes[hash] = key
+	}
+	if !translated {
+		t.Fatal("repository catalog is missing AWG prototype translation")
 	}
 }
