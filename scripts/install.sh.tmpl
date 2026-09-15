@@ -116,6 +116,7 @@ record_installed_ipk_packages() {
 
 persist_install_manifest() {
 	destination="$(install_manifest_path)"
+	transaction_save "${destination}" || return 1
 
 	if [ -z "${FASTLANE_INSTALL_MANIFEST_TMP}" ] || [ ! -f "${FASTLANE_INSTALL_MANIFEST_TMP}" ]; then
 		remove_path="${destination}"
@@ -125,9 +126,156 @@ persist_install_manifest() {
 		return 0
 	fi
 
-	mkdir -p "$(dirname "${destination}")"
-	cp "${FASTLANE_INSTALL_MANIFEST_TMP}" "${destination}"
-	chmod 0600 "${destination}" >/dev/null 2>&1 || true
+	mkdir -p "$(dirname "${destination}")" || return 1
+	chmod 0600 "${FASTLANE_INSTALL_MANIFEST_TMP}" || return 1
+	transaction_replace "${FASTLANE_INSTALL_MANIFEST_TMP}" "${destination}" || return 1
+}
+
+# Only installer-owned files are copied. Runtime settings are never backed up
+# here: permission hardening records metadata only. The private journal is also
+# used on signals; a failed rollback keeps its recovery copies, never their data
+# in logs. Package-manager changes and SIGKILL/power loss are not transactional.
+transaction_save() {
+	txn_target="$1"
+	if grep -Fxq "${txn_target}" "${tmp_dir}/saved"; then
+		return 0
+	fi
+	# The installer publishes from subshells. Check the journal entries as the
+	# source of truth too, so a duplicate target can never replace the original
+	# preimage even if a shell/filesystem delays the append-only index.
+	for txn_existing in "${tmp_dir}"/entry.*; do
+		[ -f "${txn_existing}/target" ] || continue
+		if [ "$(cat "${txn_existing}/target")" = "${txn_target}" ]; then
+			return 0
+		fi
+	done
+	txn_entry="$(mktemp -d "${tmp_dir}/entry.XXXXXX")" || exit 1
+	[ ! -d "${txn_target}" ] || die "install destination is a directory"
+	if [ -L "${txn_target}" ] || [ -f "${txn_target}" ]; then
+		cp -pP "${txn_target}" "${txn_entry}/original" || exit 1
+	elif [ -e "${txn_target}" ]; then
+		die "install destination is not a regular file"
+	fi
+	printf '%s\n' "${txn_target}" > "${txn_entry}/target" || exit 1
+	printf '%s\n' "${txn_target}" >> "${tmp_dir}/saved" || exit 1
+}
+
+transaction_replace() {
+	transaction_save "$2" || exit 1
+	mkdir -p "$(dirname "$2")" || exit 1
+	# A sibling rename keeps an executing daemon's old inode intact.
+	txn_new="$(mktemp "$2.fastlane-new.XXXXXX")" || exit 1
+	printf '%s\n' "${txn_new}" >> "${tmp_dir}/pending" || exit 1
+	cp -p "$1" "${txn_new}" || exit 1
+	mv -f "${txn_new}" "$2" || exit 1
+}
+
+transaction_save_mode() {
+	[ -e "$1" ] && [ ! -L "$1" ] || return 0
+	# File preimages already include their original modes.
+	if grep -Fxq "$1" "${tmp_dir}/saved"; then return 0; fi
+	txn_mode="$(LC_ALL=C ls -ld "$1" | awk '
+		{
+			permissions = substr($1, 2, 9)
+			mode = 0
+			for (i = 1; i <= 9; i++) {
+				if (substr(permissions, i, 1) != "-") mode += 2 ^ (9 - i)
+			}
+			printf "%03o\n", mode
+		}')" || return 1
+	[ -n "${txn_mode}" ] || return 1
+	printf '%s %s\n' "${txn_mode}" "$1" >> "${tmp_dir}/modes" || return 1
+}
+
+transaction_capture_services() {
+	for txn_service in fastlane xray cron rpcd uhttpd; do
+		txn_script="$(service_path "${txn_service}")"
+		# Explicit runtime overrides must never operate on the staging host.
+		case "${txn_script}" in "${FASTLANE_INSTALL_ROOT%/}/"*) ;; *) continue ;; esac
+		[ -x "${txn_script}" ] || continue
+		if "${txn_script}" running >/dev/null 2>&1; then
+			: > "${tmp_dir}/${txn_service}.running"
+		fi
+		if "${txn_script}" enabled >/dev/null 2>&1; then
+			: > "${tmp_dir}/${txn_service}.enabled"
+		fi
+	done
+}
+
+transaction_finish() {
+	txn_status="$1"
+	trap - EXIT HUP INT TERM
+	set +e
+	txn_failed=0
+	if [ "${txn_status}" -ne 0 ]; then
+		# Stop the candidate before replacing its service script/binary. Leave
+		# a still-running old daemon alone when failure preceded service changes.
+		if [ -f "${tmp_dir}/fastlane.touched" ]; then
+			run_service_if_present fastlane stop || txn_failed=1
+			run_service_if_present fastlane disable || txn_failed=1
+		fi
+		for txn_entry in "${tmp_dir}"/entry.*; do
+			[ -f "${txn_entry}/target" ] || continue
+			txn_target="$(cat "${txn_entry}/target")"
+			if [ -e "${txn_entry}/original" ] || [ -L "${txn_entry}/original" ]; then
+				# The private journal already contains the full preimage. Restore it
+				# directly so rollback does not require a second binary-sized extent
+				# on a nearly full router filesystem. A failed copy keeps the journal.
+				if mkdir -p "$(dirname "${txn_target}")"; then
+					if [ -L "${txn_entry}/original" ]; then
+						rm -f "${txn_target}" && cp -pP "${txn_entry}/original" "${txn_target}" || txn_failed=1
+					else
+						cp -p "${txn_entry}/original" "${txn_target}" || txn_failed=1
+					fi
+				else
+					txn_failed=1
+				fi
+				if [ -L "${txn_entry}/original" ]; then
+					[ -L "${txn_target}" ] &&
+						[ "$(readlink "${txn_entry}/original")" = "$(readlink "${txn_target}")" ] || txn_failed=1
+				else
+					if [ ! -f "${txn_target}" ] ||
+						[ "$(sha256sum "${txn_entry}/original" | awk '{print $1}')" != "$(sha256sum "${txn_target}" | awk '{print $1}')" ]; then
+						txn_failed=1
+					fi
+				fi
+			else
+				rm -f "${txn_target}" || txn_failed=1
+				[ ! -e "${txn_target}" ] && [ ! -L "${txn_target}" ] || txn_failed=1
+			fi
+		done
+		while IFS=' ' read -r txn_mode txn_target; do
+			chmod "${txn_mode}" "${txn_target}" || txn_failed=1
+		done < "${tmp_dir}/modes"
+		# Do not start any service against partially restored files.
+		if [ "${txn_failed}" -eq 0 ]; then
+			for txn_service in fastlane xray cron rpcd uhttpd; do
+				[ -f "${tmp_dir}/${txn_service}.touched" ] || continue
+				if [ -f "${tmp_dir}/${txn_service}.enabled" ]; then
+					run_service_if_present "${txn_service}" enable || txn_failed=1
+				else
+					run_service_if_present "${txn_service}" disable || txn_failed=1
+				fi
+				if [ -f "${tmp_dir}/${txn_service}.running" ]; then
+					run_service_if_present "${txn_service}" restart || txn_failed=1
+				else
+					run_service_if_present "${txn_service}" stop || txn_failed=1
+				fi
+			done
+		fi
+		if [ "${txn_failed}" -eq 0 ]; then
+			warn "installation failed; previous files and service state restored"
+		else
+			warn "rollback incomplete; private recovery files retained at ${tmp_dir}"
+		fi
+	fi
+	while IFS= read -r txn_pending; do
+		rm -f "${txn_pending}" || txn_failed=1
+	done < "${tmp_dir}/pending"
+	if [ "${txn_failed}" -eq 0 ]; then
+		rm -rf "${tmp_dir}"
+	fi
+	exit "${txn_status}"
 }
 
 chmod_if_exists() {
@@ -135,17 +283,21 @@ chmod_if_exists() {
 	mode="$2"
 
 	[ -e "${path}" ] || return 0
+	transaction_save_mode "${path}" || return 1
 	chmod "${mode}" "${path}" >/dev/null 2>&1 || return 1
 }
 
 harden_secret_storage() {
 	fastlane_root="$(root_path "etc/fastlane")"
 	if [ -d "${fastlane_root}" ]; then
+		transaction_save_mode "${fastlane_root}"
 		chmod 0700 "${fastlane_root}" >/dev/null 2>&1 || true
 		for name in subscriptions.json settings.json state.json .fastlane.lock speedtest.lock; do
 			chmod_if_exists "${fastlane_root}/${name}" 0600 || true
 		done
-		find "${fastlane_root}" -maxdepth 1 -type f -name '*.corrupt-*' -exec chmod 0600 {} \; >/dev/null 2>&1 || true
+		for corrupt_file in "${fastlane_root}"/*.corrupt-*; do
+			chmod_if_exists "${corrupt_file}" 0600 || true
+		done
 	fi
 
 	xray_config="$(xray_config_path)"
@@ -451,30 +603,17 @@ download_verified_asset() {
 }
 
 install_fastlane_asset() {
-	if [ -z "${FASTLANE_ASSET_DIR:-}" ]; then
-		tar -xzf "${asset_path}" -C "${FASTLANE_INSTALL_ROOT}"
-		return
-	fi
 	# The UI updater validates every archive path and rejects links before this
 	# step. Publish each regular file by rename, not truncation: the old daemon
 	# and updater can keep executing their inode while the new binary is placed.
-	stage_dir="${tmp_dir}/staged"
-	mkdir -p "${stage_dir}"
-	tar -xzf "${asset_path}" -C "${stage_dir}"
-	find "${stage_dir}" -type f > "${tmp_dir}/files"
+	stage_dir="$(mktemp -d "${tmp_dir}/staged.XXXXXX")" || exit 1
+	tar -xzf "$1" -C "${stage_dir}" || exit 1
+	find "${stage_dir}" -type f > "${tmp_dir}/files-unsorted" || exit 1
+	LC_ALL=C sort "${tmp_dir}/files-unsorted" > "${tmp_dir}/files" || exit 1
 	while IFS= read -r staged_file; do
 		relative_file="${staged_file#"${stage_dir}/"}"
 		target_file="$(root_path "${relative_file}")"
-		mkdir -p "$(dirname "${target_file}")"
-		new_file="${target_file}.fastlane-new.$$"
-		if ! cp -p "${staged_file}" "${new_file}"; then
-			rm -f "${new_file}"
-			die "could not stage ${relative_file}"
-		fi
-		if ! mv -f "${new_file}" "${target_file}"; then
-			rm -f "${new_file}"
-			die "could not replace ${relative_file}"
-		fi
+		transaction_replace "${staged_file}" "${target_file}" || exit 1
 	done < "${tmp_dir}/files"
 }
 
@@ -485,16 +624,7 @@ restore_release_data_file() {
 
 	[ -f "${staged_file}" ] || die "release archive is missing ${relative_file}"
 	target_file="$(root_path "${relative_file}")"
-	mkdir -p "$(dirname "${target_file}")"
-	new_file="${target_file}.fastlane-new.$$"
-	if ! cp -p "${staged_file}" "${new_file}"; then
-		rm -f "${new_file}"
-		die "could not stage ${relative_file}"
-	fi
-	if ! mv -f "${new_file}" "${target_file}"; then
-		rm -f "${new_file}"
-		die "could not replace ${relative_file}"
-	fi
+	transaction_replace "${staged_file}" "${target_file}" || return 1
 }
 
 restore_release_data() {
@@ -509,9 +639,15 @@ restore_release_data() {
 		usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md \
 		usr/share/licenses/fastlane/UPSTREAM-MIT.txt
 	do
-		restore_release_data_file "${relative_file}"
+		restore_release_data_file "${relative_file}" || return 1
 	done
 
+	# Include pre-existing payload files not present in this release before
+	# preserving the established successful-install payload cleanup behavior.
+	find "${payload_root}" \( -type f -o -type l \) > "${tmp_dir}/payload-files" || return 1
+	while IFS= read -r payload_file; do
+		transaction_save "${payload_file}" || return 1
+	done < "${tmp_dir}/payload-files"
 	rm -rf "${payload_root}"
 }
 
@@ -530,6 +666,8 @@ version_is_older() {
 ensure_xray_log_retention() {
 	helper="$(fastlane_cron_helper_path)"
 	[ -x "${helper}" ] || return 0
+	transaction_save "$(root_path "etc/crontabs/root")"
+	: > "${tmp_dir}/cron.touched"
 	FASTLANE_INSTALL_ROOT="${FASTLANE_INSTALL_ROOT}" "${helper}" ensure-xray-log-retention
 }
 
@@ -553,6 +691,8 @@ ensure_geodata() {
 		# A staged install may validate its staged Xray binary/config, but it must
 		# never stop or restart a service on the host running the installer.
 		geodata_xray_service="$(root_path "var/run/fastlane-xray-service-disabled")"
+	else
+		: > "${tmp_dir}/xray.touched"
 	fi
 	FASTLANE_GEODATA_DIR="$(root_path "usr/share/xray")" \
 		FASTLANE_XRAY_BIN="$(xray_binary_path)" \
@@ -658,11 +798,17 @@ fi
 
 command_exists tar || die "tar is required to install release assets"
 
-tmp_dir="${TMPDIR:-/tmp}/fastlane-install.$$"
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/fastlane-install.XXXXXX")"
 asset_path="${tmp_dir}/${asset_name}"
 xray_asset_path="${tmp_dir}/${xray_asset_name}"
-mkdir -p "${tmp_dir}"
-trap 'rm -rf "${tmp_dir}"' EXIT HUP INT TERM
+: > "${tmp_dir}/saved"
+: > "${tmp_dir}/pending"
+: > "${tmp_dir}/modes"
+trap 'transaction_finish "$?"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+transaction_capture_services
 FASTLANE_INSTALL_MANIFEST_TMP="${tmp_dir}/install-manifest.txt"
 if [ -f "$(install_manifest_path)" ]; then
 	cp "$(install_manifest_path)" "${FASTLANE_INSTALL_MANIFEST_TMP}"
@@ -677,7 +823,7 @@ else
 	log "Xray asset: ${xray_asset_url}"
 		download_verified_asset "${xray_asset_url}" "${xray_asset_path}"
 		mkdir -p "${FASTLANE_INSTALL_ROOT}"
-		tar -xzf "${xray_asset_path}" -C "${FASTLANE_INSTALL_ROOT}"
+		install_fastlane_asset "${xray_asset_path}" || die "could not install bundled Xray files"
 		record_owned_runtime xray
 	xray_service="$(service_path xray)"
 	if [ -f "${xray_service}" ]; then
@@ -691,8 +837,8 @@ download_verified_asset "${asset_url}" "${asset_path}"
 
 log "Extracting files into ${FASTLANE_INSTALL_ROOT}"
 mkdir -p "${FASTLANE_INSTALL_ROOT}"
-install_fastlane_asset
-restore_release_data
+install_fastlane_asset "${asset_path}" || die "could not install Fast Lane files"
+restore_release_data || die "could not publish Fast Lane release data"
 
 fastlane_service="$(service_path fastlane)"
 if [ -f "${fastlane_service}" ]; then
@@ -703,19 +849,20 @@ harden_secret_storage
 register_fastlane_languages
 ensure_geodata
 ensure_xray_log_retention
-persist_install_manifest
+persist_install_manifest || die "could not publish the install manifest"
 
 rm -f "$(root_path "tmp/luci-indexcache")"
 rm -rf "$(root_path "tmp/luci-modulecache")"
+: > "${tmp_dir}/rpcd.touched"
 run_service_if_present rpcd reload || true
+: > "${tmp_dir}/uhttpd.touched"
 run_service_if_present uhttpd stop || true
 run_service_if_present uhttpd start || true
+: > "${tmp_dir}/fastlane.touched"
 run_service_if_present fastlane enable || true
-if [ -n "${FASTLANE_ASSET_DIR:-}" ]; then
-	run_service_if_present fastlane restart || run_service_if_present fastlane start || die "Fast Lane service did not restart; inspect the service before retrying"
-else
-	run_service_if_present fastlane restart || run_service_if_present fastlane start || true
-fi
+: > "${tmp_dir}/xray.touched"
+run_service_if_present xray enable || die "Xray service could not be enabled for boot"
+run_service_if_present fastlane restart || run_service_if_present fastlane start || die "Fast Lane service did not restart; inspect the service before retrying"
 
 log "Fast Lane installed successfully"
 log "Open LuCI: Services -> Fast Lane"

@@ -116,7 +116,7 @@ Maintainer: design-maestro
 License: PolyForm-Noncommercial-1.0.0
 Section: net
 Priority: optional
-Depends: ca-bundle, nftables, kmod-nft-tproxy, rpcd-mod-file
+Depends: ca-bundle, nftables, kmod-nft-tproxy, dnsmasq-full, rpcd-mod-file
 Description: Fast Lane OpenWrt subscription proxy manager with LuCI frontend files
  This standalone IPK requires an existing /usr/bin/xray runtime; use install.sh for the bundled Xray installer.
 EOF

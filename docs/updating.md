@@ -71,14 +71,15 @@ and `install` enqueue work and return immediately; read the result through
 - The verified archive is passed to the installer locally; a missing file is
   not replaced with a new network download.
 - Files are replaced by rename, so a running binary is never overwritten in
-  place.
+  place. The installer journals its own files, modes and service state and
+  restores them when a normal installation step or service restart fails.
 - The new binary version is verified after installation. Failures are not
   reported as success.
 - Job state and temporary assets live in `/tmp/fastlane-update` with restricted
   permissions. No persistent update log is streamed to flash, and temporary
   files are removed after completion.
 
-Per-file replacement is not a full-system transaction and cannot guarantee a
-complete rollback after power loss. Back up an important router before updating.
-Validate every release with a separate install/upgrade smoke test on relevant
-hardware.
+Package-manager changes are outside that file transaction, and no userspace
+installer can guarantee a complete rollback after SIGKILL or power loss. Back up
+an important router before updating. Validate every release with a separate
+install/upgrade smoke test on relevant hardware.
