@@ -14,6 +14,7 @@ type jobSnapshot struct {
 	StartedAt   string `json:"started_at,omitempty"`
 	CompletedAt string `json:"completed_at,omitempty"`
 	Succeeded   bool   `json:"succeeded"`
+	Cancelled   bool   `json:"cancelled,omitempty"`
 	Error       string `json:"error,omitempty"`
 }
 
@@ -21,6 +22,7 @@ type jobTracker struct {
 	mu       sync.Mutex
 	sequence uint64
 	current  jobSnapshot
+	cancel   context.CancelFunc
 }
 
 func (j *jobTracker) start(ctx context.Context, kind string, run func(context.Context) error) (jobSnapshot, bool) {
@@ -40,8 +42,11 @@ func (j *jobTracker) start(ctx context.Context, kind string, run func(context.Co
 		StartedAt: now.Format(time.RFC3339),
 	}
 	started := j.current
+	ctx, cancel := context.WithCancel(ctx)
+	j.cancel = cancel
 
 	go func(sequence uint64) {
+		defer cancel()
 		err := run(ctx)
 		completedAt := time.Now().UTC().Format(time.RFC3339)
 
@@ -53,6 +58,12 @@ func (j *jobTracker) start(ctx context.Context, kind string, run func(context.Co
 		j.current.Running = false
 		j.current.CompletedAt = completedAt
 		j.current.Succeeded = err == nil
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			j.current.Succeeded = false
+			j.current.Cancelled = true
+			j.current.Error = "operation_cancelled"
+			return
+		}
 		if err != nil {
 			j.current.Error = "operation_failed"
 			var public panelJobError
@@ -63,6 +74,18 @@ func (j *jobTracker) start(ctx context.Context, kind string, run func(context.Co
 	}(started.Sequence)
 
 	return started, true
+}
+
+// Cancellation applies only to a currently running check, never to settings,
+// subscription writes, or a different operation that replaced an old check.
+func (j *jobTracker) cancelCheck(sequence uint64) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if !j.current.Running || j.current.Sequence != sequence || (j.current.Kind != "health-check" && j.current.Kind != "connect-auto") || j.cancel == nil {
+		return false
+	}
+	j.cancel()
+	return true
 }
 
 func (j *jobTracker) snapshot() jobSnapshot {

@@ -2,13 +2,31 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/design-maestro/fastlane/internal/app"
 	"github.com/design-maestro/fastlane/internal/domain"
 )
+
+func TestManagementHealthCheckReportsCancellationWithoutChangingCLIContract(t *testing.T) {
+	for _, management := range []bool{false, true} {
+		opts := &rootOptions{rootDir: t.TempDir(), service: app.NewService(app.Dependencies{Store: &cliMemoryStore{}})}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := runTrackedHealthCheckResult(ctx, opts, "all", true, management)
+		if management && !errors.Is(err, context.Canceled) || !management && err != nil {
+			t.Fatalf("management=%t: unexpected cancellation result %v", management, err)
+		}
+		progress, err := readHealthCheckProgress(healthCheckProgressPath(opts))
+		if err != nil || progress.Status != "cancelled" {
+			t.Fatalf("management=%t: cancellation receipt %+v, %v", management, progress, err)
+		}
+	}
+}
 
 func TestQueueHealthCheckPersistsRequestAndProgress(t *testing.T) {
 	t.Parallel()

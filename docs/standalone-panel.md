@@ -16,31 +16,44 @@ truth; `TestPanelDesignMatchesLuCI` checks for export drift.
   disconnect via the common status bar. The stored profile remains separate from
   subscriptions; it does not enter automatic ranking. Existing AWG replacement
   requires confirmation; failed validation retains the old profile.
-- Split/bypass routing and excluded LAN devices; explicit confirmation before applying.
-- DNS, keyword hiding, refresh and mass-check intervals; unsaved forms survive polling.
-- Diagnostics, active outbound and reserve timestamps.
+- Original Routing screen: country selection and GeoIP/GeoSite, the route flow,
+  named direct-exclusion groups, group editing/toggles/removal and HAPP preview.
+- Original Settings controls: duration segments, keyword chips, URL checks,
+  switch policy, language and application management. DNS editing remains an API/
+  CLI capability; no new DNS card is inserted into the incumbent Settings screen.
+- Original Diagnostics overview and expandable technical state, including files
+  and runtime adapters on OpenWrt.
 
-This is not yet full LuCI parity: this prototype is Russian-only, uses simple
-selector forms instead of named exception groups, and does not provide the
-release installer, Geo database administration, language selection or all legacy
-routing editors. Existing `hosts`/`targets` routing is preserved and labelled;
-the user must explicitly choose a replacement mode to change it. Existing CLI
-and LuCI remain available. No home-router deployment is performed by this change.
+The source for Routing is mechanically exported by `sync-routing-panel.cjs`;
+Settings/Diagnostics retain the original renderers and exported CSS. Adapter code
+replaces LuCI transport, not product behavior. HAPP remains preview-only because
+the existing LuCI screen also disables partial application. CLI and LuCI remain
+available. No home-router deployment is performed by this change.
 
 The panel reuses the original source tabs, status strip, table, row menus and
-two-tab import dialog. Duration inputs and keyword editing remain simplified.
-Country-name inference, per-row manual hiding and the LuCI chip/group editors
-are not ported yet. Flags already present in names are displayed. Existing manual
-exclusions remain respected. The local system font varies across operating
+two-tab import dialog. Country and protocol filters, source/ping/name sorting,
+hidden-server tab, row checks, hide/restore and individual-source refresh use the
+existing service. AWG remains in the common list, not a separate card. Language
+selection applies to the full panel and reloads the page; the initial language is
+Russian, with English and browser-language selection available.
+The local system font varies across operating
 systems; no webfont or third-party asset is downloaded by the panel.
 
 ## Architecture and security
 
-The browser submits commands to the running Fast Lane service. Mutating jobs are
-serialized with daemon health passes and retain service/store locking. The tab
+The browser submits commands to the running Fast Lane service. Runtime mutations
+are serialized with daemon health passes and retain service/store locking. Update
+downloads do not hold the health mutex. Explicit Geo maintenance uses the existing
+indivisible helper and is serialized for its full duration, including validation,
+reload and rollback; splitting its download/commit phases remains follow-up work. The tab
 can close without cancelling the job. The job tracker is process-local: a daemon
 restart loses its progress display; durable settings/runtime recovery remains
 owned by the service, not by JavaScript.
+
+Panel Geo maintenance runs the helper in the foreground, not its detached `start`
+mode. Cancellation signals its owned process group and waits for transaction
+cleanup before releasing the runtime lock. The work deadline is fifteen minutes;
+rollback/cleanup may extend that wait rather than be forcibly killed halfway.
 
 The listener is opt-in. See [configuration](config.md#optional-management-http-api)
 for start flags. Do not run a second daemon against an already active store.
@@ -104,3 +117,41 @@ a fixed loopback URL. Changes are discarded. Do not import real secrets into a p
 
 These checks do not establish working VPN/AWG tunnels or NanoPi performance.
 Router installation and traffic/failover tests remain separate acceptance steps.
+
+## OpenWrt runtime acceptance
+
+```sh
+FASTLANE_RUN_OPENWRT_INTEGRATION=1 go test ./test/integration/openwrt \
+  -run '^TestOpenWrtStandaloneAWGPanel$' -count=1 -timeout=25m -v
+```
+
+This exercises HTTP
+import, check, connect, HTTPS egress, unchanged Xray PID, exclusion-group CRUD and
+disconnect against a disposable QEMU guest with its own generated AWG server.
+It never uses the home router or the user's VPN credentials.
+
+On 2026-09-15 this scenario passed against OpenWrt 24.10.5, pinned Xray v26.7.28,
+kernel AWG and a generated test-server namespace. The stand needs `dnsmasq-full`
+for domain-exclusion nftset support. This confirms the tested panel/network path,
+not a 24-hour soak, all failure cases or NanoPi performance.
+
+To retain that **real** stand behind a loopback-only panel for twelve hours:
+
+```sh
+FASTLANE_RUN_OPENWRT_INTEGRATION=1 \
+FASTLANE_STANDALONE_PREVIEW_ADDR=127.0.0.1:56663 \
+  go test ./test/integration/openwrt \
+  -run '^TestOpenWrtStandaloneAWGPanel$' -count=1 -timeout=13h -v
+```
+
+Wait for `Working isolated stand ready` before opening the address. Unlike the
+store-only preview above, actions control the disposable OpenWrt guest and its
+real test tunnel. A loopback proxy supplies the guest-only test credential and
+enforces exact Host/Origin checks; browser login/logout is not the authentication
+test in this mode. Guest changes are discarded when the stand stops. The tunnel
+carries guest traffic only, never the host's or home network's traffic. Do not
+import real credentials into the stand.
+
+The store-only macOS playground explicitly refuses VPN connection success without
+a VPN backend. Geo updates, package management and uninstall require their actual
+OpenWrt helpers; missing helpers are reported as unavailable, not simulated.

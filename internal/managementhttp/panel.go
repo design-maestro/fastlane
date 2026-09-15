@@ -23,11 +23,25 @@ func (e panelJobError) Error() string { return string(e) }
 
 func servePanel(w http.ResponseWriter, r *http.Request) bool {
 	name := map[string]string{"/": "index.html", "/panel.js": "panel.js", "/panel.css": "panel.css", "/legacy.css": "legacy.css", "/legacy-brand.png": "legacy-brand.png", "/legacy-icons.js": "legacy-icons.js"}[r.URL.Path]
+	if r.URL.Path == "/legacy-countries.js" || r.URL.Path == "/panel-i18n.js" {
+		name = strings.TrimPrefix(r.URL.Path, "/")
+	}
+	for _, asset := range []string{"routing-panel.js", "routing-panel.css", "settings-panel.js", "settings-panel.css", "diagnostics-panel.js", "diagnostics-panel.css"} {
+		if r.URL.Path == "/"+asset {
+			name = asset
+		}
+	}
 	if name == "" || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
 		return false
 	}
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 	w.Header().Set("Content-Type", map[string]string{"index.html": "text/html; charset=utf-8", "panel.js": "text/javascript; charset=utf-8", "panel.css": "text/css; charset=utf-8", "legacy.css": "text/css; charset=utf-8", "legacy-brand.png": "image/png", "legacy-icons.js": "text/javascript; charset=utf-8"}[name])
+	if strings.HasSuffix(name, ".js") {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	}
+	if strings.HasSuffix(name, ".css") {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	}
 	data, err := panelFiles.ReadFile("web/" + name)
 	if err != nil {
 		http.Error(w, "Panel unavailable", 500)

@@ -11,8 +11,23 @@ import (
 	"time"
 
 	"github.com/design-maestro/fastlane/internal/app"
+	"github.com/design-maestro/fastlane/internal/domain"
 	"github.com/design-maestro/fastlane/internal/store"
 )
+
+// A store-only playground must never mark a VLESS connection successful merely
+// because app.Service allows a nil backend in unit tests.
+type previewService struct{ *app.Service }
+
+func (previewService) ConnectManual(context.Context, string, string) error {
+	return panelJobError("vpn_runtime_unavailable")
+}
+func (previewService) ConnectAuto(context.Context, string) (domain.Node, error) {
+	return domain.Node{}, panelJobError("vpn_runtime_unavailable")
+}
+func (previewService) RunAutoHealthCheck(context.Context) error {
+	return panelJobError("vpn_runtime_unavailable")
+}
 
 // Local, opt-in UI playground. No Xray, firewall, DNS or AWG controllers are
 // installed, and all data lives in a disposable store, never in /etc/fastlane.
@@ -29,7 +44,7 @@ func TestStandalonePanelPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := mustHandler(t, context.Background(), s, HandlerConfig{LoopbackOnly: true})
+	h := mustHandler(t, context.Background(), previewService{s}, HandlerConfig{LoopbackOnly: true})
 	if _, err := s.ImportAWGProfile("AWG — демонстрационный файл", []byte(panelAWGFixture())); err != nil {
 		t.Fatal(err)
 	}

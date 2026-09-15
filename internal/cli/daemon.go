@@ -72,7 +72,10 @@ func newDaemonCmd(opts *rootOptions) *cobra.Command {
 					Logger:       opts.logger,
 					RunExclusive: scheduler.RunExclusiveHealthOperation,
 					HealthCheck: func(checkCtx context.Context) error {
-						return runTrackedHealthCheck(checkCtx, opts, "", false)
+						return runManagementHealthCheck(checkCtx, opts, "", false)
+					},
+					HealthCheckScope: func(checkCtx context.Context, scope string) error {
+						return runManagementHealthCheck(checkCtx, opts, normalizeHealthScope(scope), true)
 					},
 				}, opts.service)
 				if err != nil {

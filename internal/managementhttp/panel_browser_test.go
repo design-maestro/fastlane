@@ -88,16 +88,29 @@ func TestStandalonePanelBrowser(t *testing.T) {
 	if err := chromedp.Run(ctx, chromedp.Click("#add-cancel")); err != nil {
 		t.Fatal(err)
 	}
+	// Manual hide/restore must use the real shared settings, and the original
+	// hidden-source tab must remain reachable without a separate checkbox.
+	if err := chromedp.Run(ctx, chromedp.Click(`tr:not([data-key="local-awg/awg-profile"]) .fl-more-toggle`), chromedp.Click(`tr:not([data-key="local-awg/awg-profile"]) [data-action=hide]`), chromedp.WaitVisible(`[data-source=hidden]`), chromedp.Click(`[data-source=hidden]`), chromedp.WaitVisible(`.fl-hidden-row`), chromedp.Click(`.fl-hidden-row .fl-more-toggle`), chromedp.Click(`.fl-hidden-row [data-action=hide]`), chromedp.WaitNotPresent(`[data-source=hidden]`)); err != nil {
+		t.Fatal("hide/restore browser flow: ", err)
+	}
 	for _, viewport := range []struct {
 		name          string
 		width, height int64
-	}{{"desktop", 1440, 1000}, {"mobile", 390, 844}} {
+	}{{"desktop", 1440, 1000}, {"panel", 1024, 900}, {"tablet", 850, 1000}, {"landscape", 768, 600}, {"small-mobile", 320, 740}, {"mobile", 390, 844}} {
 		var shot []byte
 		if err := chromedp.Run(ctx, chromedp.EmulateViewport(viewport.width, viewport.height), chromedp.Evaluate(`document.documentElement.scrollWidth <= innerWidth`, &valid), chromedp.FullScreenshot(&shot, 90)); err != nil {
 			t.Fatal(err)
 		}
 		if !valid {
 			t.Fatalf("horizontal overflow at %s", viewport.name)
+		}
+		if err := chromedp.Run(ctx, chromedp.Evaluate(`(()=>{
+		  const controls=[...document.querySelectorAll('.fl-toolbar input:not([type=checkbox]),.fl-toolbar select,.fl-toolbar button,.fl-more-toggle')];
+		  const rects=controls.map(e=>e.getBoundingClientRect());
+		  if(rects.some(r=>r.width<44 || r.height<44 || r.left<0 || r.right>innerWidth)) return false;
+		  return [...document.querySelectorAll('.fl-table .fl-meta-cell:not([hidden])')].every(e=>e.scrollWidth<=e.clientWidth+1);
+		})()`, &valid)); err != nil || !valid {
+			t.Fatalf("cramped controls or server metadata at %s: %v", viewport.name, err)
 		}
 		if dir := os.Getenv("FASTLANE_PANEL_SCREENSHOTS"); dir != "" {
 			if err := os.MkdirAll(dir, 0700); err != nil {
@@ -124,12 +137,34 @@ func TestStandalonePanelBrowser(t *testing.T) {
 		t.Fatalf("AWG removal affected ordinary subscription: %v", err)
 	}
 	for _, page := range []string{"routing", "diagnostics", "settings"} {
-		if err := chromedp.Run(ctx, chromedp.Navigate(server.URL+"/#"+page), chromedp.WaitVisible("#"+page), chromedp.Evaluate(`document.documentElement.scrollWidth <= innerWidth`, &valid)); err != nil || !valid {
+		root := map[string]string{"routing": ".flr-control", "diagnostics": ".fld-overview", "settings": ".fastlane-settings"}[page]
+		if err := chromedp.Run(ctx, chromedp.Navigate(server.URL+"/#"+page), chromedp.WaitVisible(root), chromedp.Evaluate(`document.documentElement.scrollWidth <= innerWidth`, &valid)); err != nil || !valid {
 			t.Fatalf("mobile page %s failed or overflowed: %v", page, err)
 		}
+		for _, width := range []int64{390, 850, 1440} {
+			var shot []byte
+			if err := chromedp.Run(ctx, chromedp.EmulateViewport(width, 1000), chromedp.Evaluate(`window.scrollTo(0,0);document.documentElement.scrollWidth <= innerWidth`, &valid), chromedp.FullScreenshot(&shot, 90)); err != nil || !valid {
+				t.Fatalf("page %s at %d: %v", page, width, err)
+			}
+			if dir := os.Getenv("FASTLANE_PANEL_SCREENSHOTS"); dir != "" {
+				if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%s-%d.png", page, width)), shot, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
 	}
-	if err := chromedp.Run(ctx, chromedp.Click(`nav a[href="#settings"]`), chromedp.SendKeys(`#settings-form input[name="refresh-interval"]`, "7"), chromedp.Sleep(3500*time.Millisecond), chromedp.Evaluate(`document.querySelector('#settings-form input').value.endsWith('7')`, &valid)); err != nil || !valid {
+	if err := chromedp.Run(ctx, chromedp.Click(`nav a[href="#settings"]`), chromedp.SetValue(`[data-setting-key="refresh_interval"][data-duration-unit="h"]`, "7"), chromedp.Evaluate(`document.querySelector('[data-setting-key="refresh_interval"][data-duration-unit="h"]').dispatchEvent(new Event('input',{bubbles:true}))`, nil), chromedp.Sleep(3500*time.Millisecond), chromedp.Evaluate(`document.querySelector('[data-setting-key="refresh_interval"][data-duration-unit="h"]').value==='7'`, &valid)); err != nil || !valid {
 		t.Fatalf("poll overwrote form: %v", err)
+	}
+	if err := chromedp.Run(ctx, chromedp.Click(".fls-head .fls-primary"), chromedp.Sleep(3500*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := fs.LoadSettings()
+	if err != nil || saved.RefreshInterval.Duration() != 7*time.Hour {
+		t.Fatalf("settings screen did not persist duration: %v", err)
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`localStorage.setItem('fastlane.panel.language','en')`, nil), chromedp.Navigate(server.URL+"/#vpn"), chromedp.Reload(), chromedp.WaitVisible("#server-list tbody tr"), chromedp.Evaluate(`document.querySelector('nav a[href="#routing"]').textContent.trim()==='Routing' && document.querySelector('#add-toggle').textContent.trim()==='Add servers' && document.documentElement.lang==='en'`, &valid)); err != nil || !valid {
+		t.Fatalf("full-panel language: %v", err)
 	}
 	if err := chromedp.Run(ctx, chromedp.Click("#logout"), chromedp.WaitVisible("#login")); err != nil {
 		t.Fatal(err)
