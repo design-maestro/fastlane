@@ -400,6 +400,9 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 		LastFailureReason          *string                                  `json:"last_failure_reason"`
 		LastTransportFailureReason *string                                  `json:"last_transport_failure_reason"`
 		ZapretTest                 *rawZapretTestState                      `json:"zapret_test"`
+		ActiveConnectionKind       *string                                  `json:"active_connection_kind"`
+		AWGProfileName             *string                                  `json:"awg_profile_name"`
+		AWGLastProbe               *domain.AWGProbeState                    `json:"awg_last_probe"`
 	}
 
 	var raw rawState
@@ -494,6 +497,16 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 	}
 	if raw.LastTransportFailureReason != nil {
 		state.LastTransportFailureReason = *raw.LastTransportFailureReason
+	}
+	if raw.ActiveConnectionKind != nil {
+		state.ActiveConnectionKind = *raw.ActiveConnectionKind
+	}
+	if raw.AWGProfileName != nil {
+		state.AWGProfileName = *raw.AWGProfileName
+	}
+	if raw.AWGLastProbe != nil {
+		probe := *raw.AWGLastProbe
+		state.AWGLastProbe = &probe
 	}
 	if raw.ZapretTest != nil {
 		if raw.ZapretTest.Active != nil {

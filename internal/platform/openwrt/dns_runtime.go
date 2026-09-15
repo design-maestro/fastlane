@@ -20,10 +20,16 @@ type dnsmasqRuntimeInfo struct {
 	ResolvFile string
 }
 
+type dnsmasqRuntimeProcess struct {
+	PID  int
+	Info dnsmasqRuntimeInfo
+}
+
 // DNSRuntimeManager manages dnsmasq forwarding into the local Xray DNS runtime.
 type DNSRuntimeManager struct {
 	DNSMasqServicePath string
 	DNSMasqSnippetPath string
+	DNSMasqConfDirGlob string
 	ProcRoot           string
 }
 
@@ -32,6 +38,7 @@ func NewDNSRuntimeManager() DNSRuntimeManager {
 	return DNSRuntimeManager{
 		DNSMasqServicePath: dnsmasqServicePath(),
 		DNSMasqSnippetPath: dnsRuntimeSnippetOverridePath(),
+		DNSMasqConfDirGlob: "/tmp/dnsmasq*.d",
 		ProcRoot:           "/proc",
 	}
 }
@@ -85,17 +92,45 @@ func (m DNSRuntimeManager) Apply(ctx context.Context, settings domain.DNSSetting
 
 // Disable removes the Fast Lane dnsmasq override and restarts dnsmasq when needed.
 func (m DNSRuntimeManager) Disable(ctx context.Context) error {
-	snippetPath := strings.TrimSpace(m.DNSMasqSnippetPath)
-	if snippetPath == "" {
-		info, err := m.runtimeInfo()
-		if err != nil {
-			return nil
+	snippetPaths := []string{}
+	if snippetPath := firstNonEmpty(m.DNSMasqSnippetPath, dnsRuntimeSnippetOverridePath()); snippetPath != "" {
+		snippetPaths = append(snippetPaths, snippetPath)
+	} else {
+		processes, _ := m.runtimeProcesses()
+		seen := make(map[string]struct{}, len(processes))
+		for _, process := range processes {
+			snippetPath := m.snippetPath(process.Info)
+			if _, exists := seen[snippetPath]; exists {
+				continue
+			}
+			seen[snippetPath] = struct{}{}
+			snippetPaths = append(snippetPaths, snippetPath)
 		}
-		snippetPath = m.snippetPath(info)
+		// A preceding firewall update also restarts dnsmasq. During that short
+		// window /proc may contain no usable dnsmasq command line even though
+		// OpenWrt's generated conf-dir (and our old snippet) still exists.
+		// Remove the exact Fast Lane filename from every generated instance so
+		// a newly started dnsmasq cannot load a stale local-Xray forwarder.
+		if pattern := strings.TrimSpace(m.DNSMasqConfDirGlob); pattern != "" {
+			matches, globErr := filepath.Glob(pattern)
+			if globErr != nil {
+				return fmt.Errorf("find dnsmasq runtime directories: %w", globErr)
+			}
+			for _, confDir := range matches {
+				snippetPath := filepath.Join(confDir, defaultDNSRuntimeSnippetName)
+				if _, exists := seen[snippetPath]; exists {
+					continue
+				}
+				seen[snippetPath] = struct{}{}
+				snippetPaths = append(snippetPaths, snippetPath)
+			}
+		}
 	}
 
-	if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove dnsmasq dns runtime snippet: %w", err)
+	for _, snippetPath := range snippetPaths {
+		if err := os.Remove(snippetPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove dnsmasq dns runtime snippet: %w", err)
+		}
 	}
 
 	return m.restartDNSMasq(ctx)
@@ -148,20 +183,33 @@ func (m DNSRuntimeManager) restartDNSMasq(ctx context.Context) error {
 }
 
 func (m DNSRuntimeManager) runtimeInfo() (dnsmasqRuntimeInfo, error) {
+	processes, err := m.runtimeProcesses()
+	if err != nil {
+		return dnsmasqRuntimeInfo{}, err
+	}
+	latest := processes[0]
+	for _, process := range processes[1:] {
+		if process.PID > latest.PID {
+			latest = process
+		}
+	}
+	return latest.Info, nil
+}
+
+func (m DNSRuntimeManager) runtimeProcesses() ([]dnsmasqRuntimeProcess, error) {
 	procRoot := firstNonEmpty(m.ProcRoot, "/proc")
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
-		return dnsmasqRuntimeInfo{}, fmt.Errorf("read %s: %w", procRoot, err)
+		return nil, fmt.Errorf("read %s: %w", procRoot, err)
 	}
 
-	latestPID := -1
-	latest := dnsmasqRuntimeInfo{}
+	processes := make([]dnsmasqRuntimeProcess, 0, 2)
 	for _, entry := range entries {
 		if !entry.IsDir() || !isNumeric(entry.Name()) {
 			continue
 		}
 		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= latestPID {
+		if err != nil {
 			continue
 		}
 
@@ -190,15 +238,14 @@ func (m DNSRuntimeManager) runtimeInfo() (dnsmasqRuntimeInfo, error) {
 			}
 		}
 		if info.ConfDir != "" && info.ResolvFile != "" {
-			latestPID = pid
-			latest = info
+			processes = append(processes, dnsmasqRuntimeProcess{PID: pid, Info: info})
 		}
 	}
-	if latestPID >= 0 {
-		return latest, nil
+	if len(processes) > 0 {
+		return processes, nil
 	}
 
-	return dnsmasqRuntimeInfo{}, fmt.Errorf("detect dnsmasq runtime: no running dnsmasq with conf-dir and resolv-file found")
+	return nil, fmt.Errorf("detect dnsmasq runtime: no running dnsmasq with conf-dir and resolv-file found")
 }
 
 func (m DNSRuntimeManager) snippetPath(info dnsmasqRuntimeInfo) string {

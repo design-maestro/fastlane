@@ -189,6 +189,18 @@ func encodeMessages(messages []message) ([]byte, []indexEntry) {
 	var entries []indexEntry
 	for _, msg := range messages {
 		if msg.id == "" {
+			if formula := poPluralFormula(msg.values[0]); formula != "" {
+				entries = append(entries, indexEntry{
+					keyID:  0,
+					valueN: 0,
+					offset: uint32(len(data)),
+					length: uint32(len(formula)),
+				})
+				data = append(data, formula...)
+				for len(data)%4 != 0 {
+					data = append(data, 0)
+				}
+			}
 			continue
 		}
 		valueN := len(msg.values)
@@ -220,6 +232,15 @@ func encodeMessages(messages []message) ([]byte, []indexEntry) {
 		}
 	}
 	return data, entries
+}
+
+func poPluralFormula(header string) string {
+	for _, line := range strings.Split(header, "\n") {
+		if strings.HasPrefix(line, "Plural-Forms: ") {
+			return strings.TrimPrefix(line, "Plural-Forms: ")
+		}
+	}
+	return ""
 }
 
 // sfhHash matches LuCI's canonical SuperFastHash implementation. The LuCI

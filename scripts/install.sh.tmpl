@@ -708,7 +708,8 @@ persist_install_manifest
 rm -f "$(root_path "tmp/luci-indexcache")"
 rm -rf "$(root_path "tmp/luci-modulecache")"
 run_service_if_present rpcd reload || true
-run_service_if_present uhttpd reload || true
+run_service_if_present uhttpd stop || true
+run_service_if_present uhttpd start || true
 run_service_if_present fastlane enable || true
 if [ -n "${FASTLANE_ASSET_DIR:-}" ]; then
 	run_service_if_present fastlane restart || run_service_if_present fastlane start || die "Fast Lane service did not restart; inspect the service before retrying"

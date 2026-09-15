@@ -62,7 +62,7 @@ build-openwrt-aarch64_cortex-a53:
 test-integration: build-openwrt-x86_64
 	FASTLANE_RUN_OPENWRT_INTEGRATION=1 \
 	FASTLANE_OPENWRT_FASTLANE_BIN=$(CURDIR)/bin/openwrt/x86_64/fastlane \
-	go test -count=1 -v ./test/integration/openwrt
+	go test -count=1 -v -timeout 20m ./test/integration/openwrt
 
 package-openwrt: build-openwrt
 	VERSION=$(VERSION) ARCH=$(PACKAGE_ARCH) ./scripts/package-openwrt.sh

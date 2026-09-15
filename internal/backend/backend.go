@@ -83,3 +83,12 @@ type ManagedBackend interface {
 	ProbeHTTPPort(slot int) (int, error)
 	PersistConfig(ctx context.Context, req ConfigRequest) error
 }
+
+// InterfaceManagedBackend extends live route management with an outbound whose
+// sockets are pinned to an already prepared network interface. Fast Lane uses
+// this boundary for externally managed tunnels such as AmneziaWG while Xray
+// remains the owner of GeoIP/GeoSite routing policy.
+type InterfaceManagedBackend interface {
+	ManagedBackend
+	PrepareInterfaceOutbound(ctx context.Context, interfaceName, sourceAddress string, outboundMark int) (string, error)
+}

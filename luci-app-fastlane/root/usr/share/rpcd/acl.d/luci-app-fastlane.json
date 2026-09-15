@@ -21,6 +21,8 @@
 		"write": {
 			"uci": [ "luci" ],
 			"file": {
+				"/var/run/fastlane/awg-import.conf": [ "write" ],
+				"/usr/libexec/fastlane-awg-import-prepare": [ "exec" ],
 				"/usr/bin/fastlane *": [ "exec" ],
 				"/usr/libexec/fastlane-uninstall --confirm": [ "exec" ],
 				"/usr/libexec/fastlane-self-update": [ "exec" ],
