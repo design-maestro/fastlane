@@ -2,6 +2,7 @@ package managementhttp
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -54,6 +55,10 @@ func (j *jobTracker) start(ctx context.Context, kind string, run func(context.Co
 		j.current.Succeeded = err == nil
 		if err != nil {
 			j.current.Error = "operation_failed"
+			var public panelJobError
+			if errors.As(err, &public) {
+				j.current.Error = string(public)
+			}
 		}
 	}(started.Sequence)
 

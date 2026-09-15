@@ -63,7 +63,8 @@ type Handler struct {
 	baseContext  context.Context
 	accessToken  string
 	loopbackOnly bool
-	sessionToken string
+	sessionMu    sync.Mutex
+	sessions     map[string]time.Time
 	logger       *slog.Logger
 	runExclusive func(context.Context, func(context.Context) error) error
 	healthCheck  func(context.Context) error
@@ -83,8 +84,8 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-// NewHandler creates an API-only HTTP handler. It never serves third-party UI
-// assets and never creates a second Fast Lane service.
+// NewHandler serves the embedded Fast Lane panel and authenticated API.
+// It never creates a second Fast Lane service.
 func NewHandler(ctx context.Context, service Service, config HandlerConfig) (http.Handler, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -93,10 +94,6 @@ func NewHandler(ctx context.Context, service Service, config HandlerConfig) (htt
 		return nil, fmt.Errorf("management service is required")
 	}
 
-	sessionBytes := make([]byte, 32)
-	if _, err := rand.Read(sessionBytes); err != nil {
-		return nil, fmt.Errorf("create management session secret: %w", err)
-	}
 	logger := config.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -107,7 +104,7 @@ func NewHandler(ctx context.Context, service Service, config HandlerConfig) (htt
 		baseContext:  ctx,
 		accessToken:  strings.TrimSpace(config.AccessToken),
 		loopbackOnly: config.LoopbackOnly,
-		sessionToken: hex.EncodeToString(sessionBytes),
+		sessions:     make(map[string]time.Time),
 		logger:       logger,
 		runExclusive: config.RunExclusive,
 		healthCheck:  config.HealthCheck,
@@ -129,12 +126,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if servePanel(w, r) {
+		return
+	}
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/session" {
 		h.login(w, r)
 		return
 	}
 	if !h.authenticated(r) {
 		h.writeError(w, http.StatusUnauthorized, "auth_required")
+		return
+	}
+	if h.panelAPI(w, r) {
 		return
 	}
 
@@ -335,9 +338,28 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionBytes := make([]byte, 32)
+	if _, err := rand.Read(sessionBytes); err != nil {
+		h.internalError(w, "create session", err)
+		return
+	}
+	token := hex.EncodeToString(sessionBytes)
+	h.sessionMu.Lock()
+	for key, expiry := range h.sessions {
+		if !expiry.After(h.now()) {
+			delete(h.sessions, key)
+		}
+	}
+	if len(h.sessions) >= maxLoginClients {
+		h.sessionMu.Unlock()
+		h.writeError(w, http.StatusTooManyRequests, "auth_rate_limited")
+		return
+	}
+	h.sessions[token] = h.now().Add(sessionLifetime)
+	h.sessionMu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name:     "fastlane_session",
-		Value:    h.sessionToken,
+		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   r.TLS != nil,
@@ -351,8 +373,17 @@ func (h *Handler) authenticated(r *http.Request) bool {
 	if h.accessToken == "" {
 		return true
 	}
-	if cookie, err := r.Cookie("fastlane_session"); err == nil && safeEqual(cookie.Value, h.sessionToken) {
-		return true
+	if cookie, err := r.Cookie("fastlane_session"); err == nil {
+		h.sessionMu.Lock()
+		expiry, exists := h.sessions[cookie.Value]
+		valid := exists && expiry.After(h.now())
+		if exists && !valid {
+			delete(h.sessions, cookie.Value)
+		}
+		h.sessionMu.Unlock()
+		if valid {
+			return true
+		}
 	}
 	const prefix = "Bearer "
 	authorization := r.Header.Get("Authorization")

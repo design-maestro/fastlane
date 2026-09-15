@@ -52,8 +52,9 @@ imported again.
 ## Optional management HTTP API
 
 Fast Lane can expose the existing application service on a separate TCP port.
-This is an API-only foundation for a future standalone Fast Lane interface; it
-does not bundle or copy another project's UI and is disabled by default.
+The listener serves the experimental standalone Fast Lane panel at `/` and its
+API under `/api/v1`. It embeds its own assets, requires no LuCI or frontend build
+runtime, and is disabled by default. See [panel scope](standalone-panel.md).
 
 Loopback development does not require a token:
 
