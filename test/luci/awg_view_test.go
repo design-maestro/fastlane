@@ -24,6 +24,22 @@ func TestFastLaneVPNViewUsesAWGCLIContract(t *testing.T) {
 	}
 }
 
+func TestFastLaneVPNViewImportsAWGConfThroughCommonFilePicker(t *testing.T) {
+	t.Parallel()
+	source := readVPNViewSource(t)
+	for _, want := range []string{
+		"accept: '.yaml,.yml,.json,.txt,.conf,application/x-yaml,text/yaml,text/plain'",
+		"Choose configuration files",
+		"/\\.conf$/i.test(file.name || '')",
+		"self.importAWGFileContent(file.name, content)",
+		"You can import only one AmneziaWG profile at a time.",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("VPN view missing common AWG file import marker %q", want)
+		}
+	}
+}
+
 func TestFastLaneVPNViewRendersAllAWGStatesAndActions(t *testing.T) {
 	t.Parallel()
 	source := readVPNViewSource(t)

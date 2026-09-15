@@ -209,12 +209,14 @@ const diagnosticsFixture = {
 };
 
 let commands = [];
+let fileWrites = [];
 let resolver = defaultResolver;
 const fsStub = {
 	exec: async (commandPath, args) => {
 		commands.push({ path: commandPath, args: [...args] });
 		return resolver(commandPath, [...args]);
-	}
+	},
+	write: async (filePath, content) => { fileWrites.push({ path: filePath, content }); }
 };
 
 function defaultResolver(commandPath, args) {
@@ -278,6 +280,7 @@ function treeText(node) {
 
 function resetHarness() {
 	commands = [];
+	fileWrites = [];
 	toasts.length = 0;
 	modals.length = 0;
 	modalHidden = 0;
@@ -893,6 +896,31 @@ async function smoke(section, name, run) {
 		commandSeen(['add', '--file-name', 'europe.yaml', '--raw', 'proxies:\n  - name: NL']);
 		commandSeen(['add', '--file-name', 'backup.yml', '--raw', 'payload:\n  - name: DE']);
 		assert.ok(toasts.some((toast) => toast.type === 'success' && /Files added: 2/.test(toast.message)));
+	});
+
+	await smoke('VPN', 'imports one AWG conf through the common file picker', async () => {
+		const page = makeVPN();
+		const fileInput = E('input'), error = E('div'), submit = E('button');
+		const config = '[Interface]\nPrivateKey = secret\nS1 = 1\nS2 = 2\nS3 = 3\nS4 = 4\n[Peer]\nPublicKey = peer\nEndpoint = vpn.example:51820';
+		fileInput.files = [{ name: 'Backup AWG.conf', size: config.length, content: config }];
+		await page.handleFileAddSubmit(fileInput, error, submit);
+		commandSeen([], '/fastlane-awg-import-prepare');
+		assert.deepEqual(fileWrites, [{ path: '/var/run/fastlane/awg-import.conf', content: config }]);
+		commandSeen(['awg', 'import', '--file', '/var/run/fastlane/awg-import.conf', '--name', 'Backup AWG']);
+		assert.ok(toasts.some((toast) => toast.type === 'success' && /Files added: 1/.test(toast.message)));
+	});
+
+	await smoke('VPN', 'rejects multiple AWG profiles before importing anything', async () => {
+		const page = makeVPN();
+		const fileInput = E('input'), error = E('div'), submit = E('button');
+		fileInput.files = [
+			{ name: 'first.conf', size: 10, content: 'first' },
+			{ name: 'second.CONF', size: 10, content: 'second' }
+		];
+		await page.handleFileAddSubmit(fileInput, error, submit);
+		assert.match(error.textContent, /only one AmneziaWG profile/i);
+		assert.equal(commands.length, 0);
+		assert.equal(fileWrites.length, 0);
 	});
 
 	await smoke('VPN', 'restores the add form after a backend error', async () => {
