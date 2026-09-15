@@ -1,14 +1,21 @@
 # Standalone Fast Lane panel
 
 An experimental web interface embedded in the Fast Lane binary, served by the
-existing optional management listener. No LuCI assets, Node.js runtime, CDN,
-second VPN service, or separate networking coordinator is required.
+existing optional management listener. No installed LuCI, Node.js runtime, CDN,
+second VPN service, or separate networking coordinator is required. The existing
+Fast Lane LuCI CSS, logo and icon renderer are mechanically exported into the
+binary by `node scripts/sync-panel-design.cjs`. They remain the visual source of
+truth; `TestPanelDesignMatchesLuCI` checks for export drift.
 
 ## Scope
 
 - VPN status, actual route, auto/manual connection and disconnect.
 - Subscription/file import, source removal, filtering and HTTPS health checks.
-- One experimental AWG profile: import, check, connect, disconnect, remove.
+- One experimental AWG profile in the common server table: import via
+  **Add servers → File → .conf**, check/connect/remove from its row menu,
+  disconnect via the common status bar. The stored profile remains separate from
+  subscriptions; it does not enter automatic ranking. Existing AWG replacement
+  requires confirmation; failed validation retains the old profile.
 - Split/bypass routing and excluded LAN devices; explicit confirmation before applying.
 - DNS, keyword hiding, refresh and mass-check intervals; unsaved forms survive polling.
 - Diagnostics, active outbound and reserve timestamps.
@@ -20,9 +27,10 @@ routing editors. Existing `hosts`/`targets` routing is preserved and labelled;
 the user must explicitly choose a replacement mode to change it. Existing CLI
 and LuCI remain available. No home-router deployment is performed by this change.
 
-The compact prototype also uses a source dropdown, an inline import form, plain
-duration inputs and a keyword textarea. Country flags, latency sorting, per-row
-manual hiding and the LuCI chip/group editors are not ported yet. Existing manual
+The panel reuses the original source tabs, status strip, table, row menus and
+two-tab import dialog. Duration inputs and keyword editing remain simplified.
+Country-name inference, per-row manual hiding and the LuCI chip/group editors
+are not ported yet. Flags already present in names are displayed. Existing manual
 exclusions remain respected. The local system font varies across operating
 systems; no webfont or third-party asset is downloaded by the panel.
 
@@ -87,11 +95,12 @@ For a local playground (synthetic profile; no network controller), run:
 
 ```sh
 FASTLANE_PANEL_PREVIEW=1 go test ./internal/managementhttp \
-  -run '^TestStandalonePanelPreview$' -count=1 -timeout=65m -v
+  -run '^TestStandalonePanelPreview$' -count=1 -timeout=13h -v
 ```
 
 The test prints a loopback URL, labels its data as demonstration-only, and exits
-after an hour. Changes are discarded. Do not import real secrets into a preview.
+after twelve hours. `FASTLANE_PANEL_PREVIEW_ADDR=127.0.0.1:56663` optionally keeps
+a fixed loopback URL. Changes are discarded. Do not import real secrets into a preview.
 
 These checks do not establish working VPN/AWG tunnels or NanoPi performance.
 Router installation and traffic/failover tests remain separate acceptance steps.

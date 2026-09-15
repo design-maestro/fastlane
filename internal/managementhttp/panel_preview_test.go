@@ -3,6 +3,7 @@ package managementhttp
 import (
 	"bytes"
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,7 +30,10 @@ func TestStandalonePanelPreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := mustHandler(t, context.Background(), s, HandlerConfig{LoopbackOnly: true})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.ImportAWGProfile("AWG — демонстрационный файл", []byte(panelAWGFixture())); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" || r.Method != http.MethodGet {
 			h.ServeHTTP(w, r)
 			return
@@ -40,9 +44,22 @@ func TestStandalonePanelPreview(t *testing.T) {
 			w.Header()[key] = values
 		}
 		w.WriteHeader(recorder.Code)
-		_, _ = w.Write(bytes.Replace(recorder.Body.Bytes(), []byte(`<main id="main">`), []byte(`<main id="main"><p>Локальный прототип · данные демонстрационные · сеть роутера не изменяется</p>`), 1))
+		_, _ = w.Write(bytes.Replace(recorder.Body.Bytes(), []byte(`<main id="main" class="fl-shell">`), []byte(`<main id="main" class="fl-shell"><p class="preview-note">Локальный прототип · данные демонстрационные · сеть роутера не изменяется</p>`), 1))
 	}))
+	if address := os.Getenv("FASTLANE_PANEL_PREVIEW_ADDR"); address != "" {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+			t.Fatal("preview address must be loopback")
+		}
+		listener, err := net.Listen("tcp", address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = server.Listener.Close()
+		server.Listener = listener
+	}
+	server.Start()
 	defer server.Close()
-	t.Logf("Standalone panel preview: %s (available for 60 minutes)", server.URL)
-	<-time.After(time.Hour)
+	t.Logf("Standalone panel preview: %s (available for 12 hours)", server.URL)
+	<-time.After(12 * time.Hour)
 }

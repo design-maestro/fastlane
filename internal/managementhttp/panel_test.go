@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 
 func TestPanelAssetsDoNotExposeStateWithoutLogin(t *testing.T) {
 	h := mustHandler(t, context.Background(), &fakeService{}, HandlerConfig{AccessToken: testAccessToken})
-	for _, path := range []string{"/", "/panel.js", "/panel.css"} {
+	for _, path := range []string{"/", "/panel.js", "/panel.css", "/legacy.css", "/legacy-icons.js", "/legacy-brand.png"} {
 		r := request(h, "GET", path, "", "", "")
 		if r.Code != 200 || strings.Contains(r.Body.String(), testAccessToken) {
 			t.Fatalf("asset %s: %d", path, r.Code)
@@ -31,6 +32,17 @@ func TestPanelAssetsDoNotExposeStateWithoutLogin(t *testing.T) {
 	}
 	if r := request(h, "GET", "/../handler.go", "", "", ""); r.Code == 200 {
 		t.Fatal("served source code")
+	}
+}
+
+func TestPanelDesignMatchesLuCI(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is required for frontend asset drift check")
+	}
+	cmd := exec.Command("node", "scripts/sync-panel-design.cjs", "--check")
+	cmd.Dir = "../.."
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("shared design drift: %v\n%s", err, output)
 	}
 }
 
