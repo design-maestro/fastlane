@@ -1176,7 +1176,7 @@ return view.extend({
 		if (ev) ev.preventDefault();
 		var name = E('input', { placeholder: _('For example, Liberty'), autocomplete: 'off' });
 		var source = E('textarea', { placeholder: _('Subscription link, VLESS key, Base64, or Xray JSON'), spellcheck: 'false', autocapitalize: 'none' });
-		var files = E('input', { type: 'file', multiple: 'multiple', accept: '.yaml,.yml,.json,.txt,application/x-yaml,text/yaml' });
+		var files = E('input', { type: 'file', multiple: 'multiple', accept: '.yaml,.yml,.json,.txt,.conf,application/x-yaml,text/yaml,text/plain' });
 		var fileList = E('div', { class: 'fl-file-list' });
 		var subscriptionPane = E('div', { class: 'fl-add-pane' }, [
 			E('label', { class: 'fl-add-field fl-dialog-field' }, [
@@ -1187,9 +1187,9 @@ return view.extend({
 			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('The format is detected automatically. Links are refreshed on schedule.') ])
 		]);
 		var filePane = E('div', { class: 'fl-add-pane', hidden: 'hidden' }, [
-			E('label', { class: 'fl-file-picker' }, [ files, E('span', {}, [ E('strong', {}, [ _('Choose YAML files') ]), _('You can add several files at once') ]) ]),
+			E('label', { class: 'fl-file-picker' }, [ files, E('span', {}, [ E('strong', {}, [ _('Choose configuration files') ]), _('You can add several files at once') ]) ]),
 			fileList,
-			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('Use a Clash/Mihomo YAML file with a proxies: array or a provider file with payload:. Each file becomes a separate source; removing it also removes its servers.') ])
+			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('Use Clash/Mihomo YAML, a provider file, or one AmneziaWG 2.0 .conf profile. AmneziaWG is imported as the experimental tunnel.') ])
 		]);
 		var mode = 'subscription';
 		var subscriptionButton = E('button', { class: 'fl-add-mode-button fl-add-mode-button-active', type: 'button' }, [ _('Subscription') ]);
@@ -1273,7 +1273,13 @@ return view.extend({
 		var selected = Array.prototype.slice.call(fileInput.files || []);
 		if (!selected.length) {
 			errorBox.className = 'fl-modal-status';
-			errorBox.textContent = _('Choose at least one YAML file.');
+			errorBox.textContent = _('Choose at least one configuration file.');
+			return;
+		}
+		var awgFiles = selected.filter(function(file) { return /\.conf$/i.test(file.name || ''); });
+		if (awgFiles.length > 1) {
+			errorBox.className = 'fl-modal-status';
+			errorBox.textContent = _('You can import only one AmneziaWG profile at a time.');
 			return;
 		}
 		if (selected.length > 10 || selected.some(function(file) { return file.size > 96 * 1024; })) {
@@ -1299,6 +1305,15 @@ return view.extend({
 			chain = chain.then(function() {
 				errorBox.textContent = _('Adding') + ' ' + (index + 1) + ' / ' + selected.length + ': ' + file.name;
 				return read(file).then(function(content) {
+					if (/\.conf$/i.test(file.name || '')) {
+						return self.importAWGFileContent(file.name, content).then(function(result) {
+							content = '';
+							return result;
+						}, function(err) {
+							content = '';
+							throw err;
+						});
+					}
 					return self.exec([ 'add', '--file-name', file.name, '--raw', content ]);
 				});
 			});
@@ -1308,12 +1323,27 @@ return view.extend({
 			fastlaneShell.showToast(_('Files added:') + ' ' + selected.length + '.', 'success');
 			return self.refreshView();
 		}).catch(function(err) {
-			var error = friendlyError((err && err.message) || String(err), _('Could not add the file. Check the YAML format.'));
+			var error = friendlyError((err && err.message) || String(err), _('Could not add the file. Check the YAML or AmneziaWG format.'));
 			errorBox.className = 'fl-modal-status';
 			errorBox.textContent = error.message;
 			submitButton.disabled = false;
 			submitButton.textContent = _('Add');
 		});
+	},
+
+	importAWGFileContent: function(fileName, content) {
+		var importPath = '/var/run/fastlane/awg-import.conf';
+		var profileName = trim(String(fileName || '').replace(/\.conf$/i, '')).slice(0, 80);
+		return fs.exec('/usr/libexec/fastlane-awg-import-prepare', []).then(function(result) {
+			if (result.code !== 0)
+				throw new Error(commandError(result));
+			return fs.write(importPath, content);
+		}).then(L.bind(function() {
+			var args = [ 'awg', 'import', '--file', importPath ];
+			if (profileName)
+				args.push('--name', profileName);
+			return this.exec(args);
+		}, this));
 	},
 
 	handleRemove: function(subID, ev) {

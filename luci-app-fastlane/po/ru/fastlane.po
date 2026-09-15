@@ -171,8 +171,8 @@ msgstr "Проверяется"
 msgid "Checking…"
 msgstr "Проверяю…"
 
-msgid "Choose YAML files"
-msgstr "Выбрать YAML-файлы"
+msgid "Choose configuration files"
+msgstr "Выбрать файлы конфигурации"
 
 msgid "Choose a country"
 msgstr "Выберите страну"
@@ -183,8 +183,8 @@ msgstr "Сначала выберите страну."
 msgid "Choose a server from the list to pin it manually."
 msgstr "Выберите сервер в списке, чтобы закрепить его вручную."
 
-msgid "Choose at least one YAML file."
-msgstr "Выберите хотя бы один YAML-файл."
+msgid "Choose at least one configuration file."
+msgstr "Выберите хотя бы один файл конфигурации."
 
 msgid "Choose which traffic goes directly and which goes through VPN. Geo databases are managed automatically."
 msgstr "Выберите, какой трафик идёт напрямую, а какой через VPN. Geo-базы обновляются автоматически."
@@ -213,8 +213,8 @@ msgstr "Подключаю выбранный сервер…"
 msgid "Connection mode"
 msgstr "Режим подключения"
 
-msgid "Could not add the file. Check the YAML format."
-msgstr "Не удалось добавить файл. Проверьте формат YAML."
+msgid "Could not add the file. Check the YAML or AmneziaWG format."
+msgstr "Не удалось добавить файл. Проверьте формат YAML или AmneziaWG."
 
 msgid "Could not add the subscription. Check the link or configuration."
 msgstr "Не удалось добавить подписку. Проверьте ссылку или конфигурацию."
@@ -861,8 +861,8 @@ msgstr "Обновлено"
 msgid "Updating subscriptions…"
 msgstr "Загружаю свежие подписки…"
 
-msgid "Use a Clash/Mihomo YAML file with a proxies: array or a provider file with payload:. Each file becomes a separate source; removing it also removes its servers."
-msgstr "Подойдёт Clash/Mihomo YAML с массивом proxies: или provider-файл с payload:. Каждый файл будет отдельным источником; его удаление удалит и серверы."
+msgid "Use Clash/Mihomo YAML, a provider file, or one AmneziaWG 2.0 .conf profile. AmneziaWG is imported as the experimental tunnel."
+msgstr "Подойдёт Clash/Mihomo YAML, provider-файл или один профиль AmneziaWG 2.0 в формате .conf. AmneziaWG будет импортирован как экспериментальный туннель."
 
 msgid "VPN configuration"
 msgstr "Конфигурация VPN"
@@ -905,6 +905,9 @@ msgstr "Можно добавить не более 10 файлов за раз.
 
 msgid "You can add several files at once"
 msgstr "Можно добавить несколько файлов сразу"
+
+msgid "You can import only one AmneziaWG profile at a time."
+msgstr "За один раз можно импортировать только один профиль AmneziaWG."
 
 msgid "You can close the admin panel; the task will continue on the router."
 msgstr "Можно закрыть админку — задача продолжится на роутере."
