@@ -152,6 +152,10 @@ test in this mode. Guest changes are discarded when the stand stops. The tunnel
 carries guest traffic only, never the host's or home network's traffic. Do not
 import real credentials into the stand.
 
+Interactive mode mounts a 128 MiB guest-memory volume for Geo databases because
+the stock test image has a small root partition. This storage is disposable and
+does not claim production upgrade capacity or reboot persistence.
+
 The store-only macOS playground explicitly refuses VPN connection success without
 a VPN backend. Geo updates, package management and uninstall require their actual
 OpenWrt helpers; missing helpers are reported as unavailable, not simulated.

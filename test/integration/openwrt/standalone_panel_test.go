@@ -38,6 +38,13 @@ func TestOpenWrtStandaloneAWGPanel(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("Isolated OpenWrt booted")
+	if previewAddress != "" {
+		// The stock image has a tiny root partition. Keep optional Geo downloads
+		// in guest RAM for this disposable, non-persistent interactive stand.
+		if err = h.sshCommand(ctx, "mkdir -p /usr/share/xray && mount -t tmpfs -o size=128m tmpfs /usr/share/xray"); err != nil {
+			t.Fatal("prepare preview Geo storage: ", err)
+		}
+	}
 	if err = h.sshCommand(ctx, "opkg update && opkg install ca-bundle nftables kmod-nft-tproxy rpcd-mod-file"); err != nil {
 		t.Fatal(err)
 	}
