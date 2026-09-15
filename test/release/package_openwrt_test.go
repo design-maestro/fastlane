@@ -10,6 +10,22 @@ import (
 	updatepkg "github.com/design-maestro/fastlane/internal/update"
 )
 
+func TestXrayInitScriptRegistersOpenWrtBoot(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join(repoRoot(t), "openwrt", "root", "etc", "init.d", "xray"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(script)
+	for _, required := range []string{"#!/bin/sh /etc/rc.common", "START=89", "STOP=11", `EXTRA_COMMANDS="status running"`, "start()", "stop()", "running()", "status()"} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("Xray init script does not register boot lifecycle: missing %q", required)
+		}
+	}
+	if strings.Contains(text, "enable|disable) exit 0") {
+		t.Fatal("Xray init script must let rc.common manage boot symlinks")
+	}
+}
+
 func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	t.Parallel()
 
@@ -97,7 +113,7 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated package control: %v", err)
 	}
-	if !strings.Contains(string(control), "Depends: ca-bundle, nftables, kmod-nft-tproxy, rpcd-mod-file\n") {
+	if !strings.Contains(string(control), "Depends: ca-bundle, nftables, kmod-nft-tproxy, dnsmasq-full, rpcd-mod-file\n") {
 		t.Fatalf("expected generated package control to declare OpenWrt runtime dependencies, got:\n%s", control)
 	}
 	if !strings.Contains(string(control), "This standalone IPK requires an existing /usr/bin/xray runtime") {

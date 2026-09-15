@@ -118,7 +118,7 @@ func TestOpenWrtAmneziaWGPrototype(t *testing.T) {
 	if err := harness.sshCommand(ctx, "ip -4 rule add from 198.18.0.2 table 51821 priority 10899; result=0; printf 'fastlane-udp' | socat -T 3 - UDP4:198.18.0.1:9999,bind=198.18.0.2 | grep -q fastlane-udp || result=$?; ip -4 rule del from 198.18.0.2 table 51821 priority 10899; exit $result"); err != nil {
 		t.Fatalf("marked UDP through AWG: %v", err)
 	}
-	if err := harness.sshCommand(ctx, "ip -4 rule add from 198.18.0.2 table 51821 priority 10899; dig +time=3 +tries=1 -b 198.18.0.2 @1.1.1.1 example.com A >/dev/null; ip -4 rule del from 198.18.0.2 table 51821 priority 10899"); err != nil {
+	if err := assertAWGStandDNS(ctx, harness); err != nil {
 		t.Fatalf("DNS through AWG route table: %v", err)
 	}
 	dnsmasqPID, err := harness.sshOutput(ctx, "pidof dnsmasq")
@@ -134,6 +134,9 @@ func TestOpenWrtAmneziaWGPrototype(t *testing.T) {
 		t.Fatalf("AWG did not fail open to direct: %v\n%s", err, diagnostics)
 	}
 	t.Logf("AWG failure to managed direct: %s", time.Since(failureStarted).Round(time.Millisecond))
+	if err := harness.sshCommand(ctx, "curl -fsS --max-time 15 --proxy http://127.0.0.1:10809 https://cp.cloudflare.com/generate_204 -o /dev/null && dig +time=5 +tries=1 +short @127.0.0.1 example.com A | grep -Eq '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$'"); err != nil {
+		t.Fatalf("direct fallback must carry HTTPS and resolve DNS, not merely set state: %v", err)
+	}
 	recoveryStarted := time.Now()
 	if err := harness.sshCommand(ctx, "ip netns exec awgserver ip link set awgsrv up"); err != nil {
 		t.Fatalf("restore AWG server: %v", err)
@@ -152,6 +155,12 @@ func TestOpenWrtAmneziaWGPrototype(t *testing.T) {
 	if err := harness.sshCommand(ctx, "test ! -e /etc/fastlane/amneziawg.conf; ! uci -q get network.fastlane_awg >/dev/null; ! ip -4 rule show | grep -q 'lookup 51821'"); err != nil {
 		t.Fatalf("owned resources remained: %v", err)
 	}
+}
+
+func assertAWGStandDNS(ctx context.Context, h *openWRTHarness) error {
+	// Preserve the query's failure and require an actual A record. The previous
+	// final route-delete command masked failed dig exits and empty DNS answers.
+	return h.sshCommand(ctx, "ip -4 rule add from 198.18.0.2 table 51821 priority 10899 || exit 1; answer=$(dig +time=3 +tries=1 +short -b 198.18.0.2 @1.1.1.1 example.com A); result=$?; ip -4 rule del from 198.18.0.2 table 51821 priority 10899 || exit 1; test $result = 0 && printf '%s\\n' \"$answer\" | grep -Eq '^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$'")
 }
 
 func installAWGStandPackages(ctx context.Context, h *openWRTHarness) error {

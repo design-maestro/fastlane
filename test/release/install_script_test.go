@@ -10,12 +10,232 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 func supportedReleaseArches() []string {
 	return []string{"mipsel_24kc", "x86_64", "aarch64_cortex-a53"}
+}
+
+func TestInstallScriptRollsBackPartialReplacement(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, command, failTarget string
+		local, missingXray        bool
+		failRollback              bool
+	}{
+		{"local-copy", "cp", "fifth", true, false, false},
+		{"local-rename", "mv", "fifth", true, false, false},
+		{"download-rename", "mv", "fifth", false, false, false},
+		{"late-manifest", "mv", "manifest", true, false, false},
+		{"bundled-xray", "mv", "manifest", true, true, false},
+		{"rollback-failure-keeps-recovery", "cp", "fifth", true, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			script := renderInstallScript(t, "1.2.3", supportedReleaseArches()...)
+			assets, root, bins, scratch := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+			control := t.TempDir()
+			log := filepath.Join(control, "services.log")
+			writeTestTarball(t, filepath.Join(assets, "fastlane_1.2.3_x86_64.tar.gz"))
+			writeExecutable(t, filepath.Join(root, "usr/bin/fastlane"), "#!/bin/sh\nexit 0\n")
+			writeFile(t, filepath.Join(root, "usr/libexec/fastlane-cron"), "old cron helper\n", 0700)
+			writeFile(t, filepath.Join(root, "etc/fastlane/settings.json"), "fixture-private-marker-never-log\n", 0640)
+			writeFile(t, filepath.Join(root, "etc/fastlane/install-manifest.txt"), "runtime=existing\n", 0640)
+			writeFile(t, filepath.Join(root, "etc/crontabs/root"), "# old cron\n", 0640)
+			writeFile(t, filepath.Join(root, "usr/share/licenses/fastlane/LICENSE"), "old license\n", 0600)
+			if err := os.Symlink("LICENSE", filepath.Join(root, "usr/share/licenses/fastlane/NOTICE")); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(root, "usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/LICENSE"), "old payload\n", 0600)
+			writeFile(t, filepath.Join(root, "usr/libexec/fastlane-release-data/previous-only"), "old extra payload\n", 0640)
+			writeExecutable(t, filepath.Join(root, "etc/init.d/fastlane"), "#!/bin/sh\nexit 0\n")
+			if tc.missingXray {
+				writeXrayTarball(t, filepath.Join(assets, "xray_1.2.3_x86_64.tar.gz"))
+				writeFile(t, filepath.Join(root, "usr/bin/xray"), "old non-executable runtime\n", 0640)
+			} else {
+				writeExecutable(t, filepath.Join(root, "usr/bin/xray"), "#!/bin/sh\nexit 0\n")
+				writeExecutable(t, filepath.Join(root, "etc/init.d/xray"), "#!/bin/sh\nexit 0\n")
+			}
+			if tc.local {
+				writeExecutable(t, filepath.Join(bins, "wget"), "#!/bin/sh\nexit 99\n")
+			} else {
+				writeInstallWgetStub(t, filepath.Join(bins, "wget"))
+			}
+			writeExecutable(t, filepath.Join(bins, "curl"), "#!/bin/sh\nexit 99\n")
+			realCommand, err := exec.LookPath(tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Fail once after several successful publications, not while making
+			// recovery copies. The same real command remains usable for rollback.
+			writeExecutable(t, filepath.Join(bins, tc.command), `#!/bin/sh
+set -eu
+previous=''
+last=''
+for arg do previous="$last"; last="$arg"; done
+case "$previous:$last" in
+  */entry.*/original:*)
+    [ "$FASTLANE_TEST_FAIL_ROLLBACK" != true ] || exit 74
+    ;;
+  *.fastlane-rollback.*)
+    [ "$FASTLANE_TEST_FAIL_ROLLBACK" != true ] || exit 74
+    ;;
+  *.fastlane-new.*)
+    count=0
+    [ ! -f "$FASTLANE_TEST_COUNT" ] || count="$(cat "$FASTLANE_TEST_COUNT")"
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$FASTLANE_TEST_COUNT"
+    fail=0
+    if [ "$FASTLANE_TEST_FAIL_TARGET" = fifth ] && [ "$count" -eq 5 ]; then fail=1; fi
+    if [ "$FASTLANE_TEST_FAIL_TARGET" = manifest ] && [ "$last" = "$FASTLANE_TEST_MANIFEST" ]; then fail=1; fi
+    if [ "$fail" -eq 1 ] && [ ! -f "$FASTLANE_TEST_FAILED" ]; then
+      : > "$FASTLANE_TEST_FAILED"
+      echo injected-replacement-failure >&2
+      exit 73
+    fi
+    ;;
+esac
+exec "$FASTLANE_TEST_REAL_COMMAND" "$@"
+`)
+			before := installFileSnapshot(t, root)
+			args := []string{"--arch", "x86_64", "--install-root", root, "--without-deps", "--base-url", "https://example.test/releases/download/v1.2.3"}
+			if tc.local {
+				args = append(args, "--asset-dir", assets)
+			}
+			stdout, stderr, err := runInstallScriptWithEnv(t, script, root, bins, assets, log, map[string]string{
+				"TMPDIR": scratch, "FASTLANE_TEST_REAL_COMMAND": realCommand,
+				"FASTLANE_TEST_COUNT":         filepath.Join(control, "count"),
+				"FASTLANE_TEST_FAILED":        filepath.Join(control, "failed"),
+				"FASTLANE_TEST_FAIL_TARGET":   tc.failTarget,
+				"FASTLANE_TEST_FAIL_ROLLBACK": fmt.Sprint(tc.failRollback),
+				"FASTLANE_TEST_MANIFEST":      filepath.Join(root, "etc/fastlane/install-manifest.txt"),
+			}, args...)
+			if err == nil || !strings.Contains(stderr, "injected-replacement-failure") {
+				t.Fatalf("expected injected failure and rollback, got %v\n%s\n%s", err, stdout, stderr)
+			}
+			if strings.Contains(stdout+stderr, "installed successfully") || strings.Contains(stdout+stderr, "fixture-private-marker-never-log") {
+				t.Fatal("false success or fixture contents exposed in installer output")
+			}
+			if tc.failRollback {
+				if !strings.Contains(stderr, "rollback incomplete; private recovery files retained") || strings.Contains(stderr, "previous files and service state restored") {
+					t.Fatalf("failed rollback must report incomplete recovery: %s", stderr)
+				}
+				transactions, err := filepath.Glob(filepath.Join(scratch, "fastlane-install.*"))
+				if err != nil || len(transactions) != 1 {
+					t.Fatalf("missing recovery transaction: %v %v", transactions, err)
+				}
+				assertMode(t, transactions[0], 0700)
+				originals, err := filepath.Glob(filepath.Join(transactions[0], "entry.*", "original"))
+				if err != nil || len(originals) == 0 {
+					t.Fatalf("recovery copies discarded: %v %v", originals, err)
+				}
+				return
+			}
+			if !strings.Contains(stderr, "previous files and service state restored") {
+				t.Fatalf("missing rollback completion: %s", stderr)
+			}
+			if after := installFileSnapshot(t, root); !reflect.DeepEqual(before, after) {
+				t.Fatalf("rollback changed file contents, modes, links or existence\nbefore: %v\nafter: %v", before, after)
+			}
+			assertInstallTransactionCleaned(t, scratch)
+		})
+	}
+}
+
+func TestInstallScriptRollsBackFailedServiceRestart(t *testing.T) {
+	t.Parallel()
+	for _, initial := range []string{"running-enabled", "stopped-disabled", "absent"} {
+		t.Run(initial, func(t *testing.T) {
+			t.Parallel()
+			script := renderInstallScript(t, "1.2.3", supportedReleaseArches()...)
+			assets, root, bins, scratch, state := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+			oldService := `#!/bin/sh
+set -eu
+case "${1:-}" in
+  running|enabled) test -f "$FASTLANE_TEST_SERVICE_STATE/$1" ;;
+  enable) touch "$FASTLANE_TEST_SERVICE_STATE/enabled" ;;
+  disable) rm -f "$FASTLANE_TEST_SERVICE_STATE/enabled" ;;
+  restart|start) touch "$FASTLANE_TEST_SERVICE_STATE/running" ;;
+  stop) rm -f "$FASTLANE_TEST_SERVICE_STATE/running" ;;
+esac
+`
+			candidateService := strings.Replace(oldService,
+				`restart|start) touch "$FASTLANE_TEST_SERVICE_STATE/running" ;;`,
+				`restart|start) touch "$FASTLANE_TEST_SERVICE_STATE/running"; exit 1 ;;`, 1)
+			writeTestTarball(t, filepath.Join(assets, "fastlane_1.2.3_x86_64.tar.gz"), candidateService)
+			writeExecutable(t, filepath.Join(root, "usr/bin/fastlane"), "#!/bin/sh\nexit 0\n")
+			writeExecutable(t, filepath.Join(root, "usr/bin/xray"), "#!/bin/sh\nexit 0\n")
+			writeExecutable(t, filepath.Join(root, "etc/init.d/xray"), "#!/bin/sh\nexit 0\n")
+			if initial != "absent" {
+				writeExecutable(t, filepath.Join(root, "etc/init.d/fastlane"), oldService)
+			}
+			if initial == "running-enabled" {
+				writeFile(t, filepath.Join(state, "running"), "", 0600)
+				writeFile(t, filepath.Join(state, "enabled"), "", 0600)
+			}
+			before := installFileSnapshot(t, root)
+			stdout, stderr, err := runInstallScriptWithEnv(t, script, root, bins, assets, filepath.Join(t.TempDir(), "services.log"), map[string]string{
+				"TMPDIR": scratch, "FASTLANE_TEST_SERVICE_STATE": state,
+			}, "--arch", "x86_64", "--install-root", root, "--without-deps", "--asset-dir", assets)
+			if err == nil || !strings.Contains(stderr, "previous files and service state restored") || strings.Contains(stdout, "installed successfully") {
+				t.Fatalf("expected service failure rollback: %v\n%s\n%s", err, stdout, stderr)
+			}
+			if after := installFileSnapshot(t, root); !reflect.DeepEqual(before, after) {
+				t.Fatalf("service failure did not restore original files\nbefore: %v\nafter: %v", before, after)
+			}
+			for _, flag := range []string{"running", "enabled"} {
+				_, err := os.Stat(filepath.Join(state, flag))
+				if (err == nil) != (initial == "running-enabled") {
+					t.Fatalf("previous %s state not restored: %v", flag, err)
+				}
+			}
+			assertInstallTransactionCleaned(t, scratch)
+		})
+	}
+}
+
+// Compare every file, including newly created files, without treating harmless
+// empty parent directories as installed payloads. Fixtures contain no secrets.
+func installFileSnapshot(t *testing.T, root string) map[string]string {
+	t.Helper()
+	result := make(map[string]string)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		var contents string
+		if info.Mode()&os.ModeSymlink != 0 {
+			contents, err = os.Readlink(path)
+		} else {
+			var data []byte
+			data, err = os.ReadFile(path)
+			contents = string(data)
+		}
+		result[strings.TrimPrefix(path, root)] = fmt.Sprintf("%v:%s", info.Mode(), contents)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func assertInstallTransactionCleaned(t *testing.T, scratch string) {
+	t.Helper()
+	entries, err := os.ReadDir(scratch)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("transaction temporary files not cleaned: %v %v", entries, err)
+	}
 }
 
 func TestInstallScriptUsesApprovedLocalAssetsAndPreservesSettings(t *testing.T) {
@@ -763,7 +983,7 @@ func runInstallScriptWithEnv(
 	return stdout.String(), stderr.String(), err
 }
 
-func writeTestTarball(t *testing.T, path string) {
+func writeTestTarball(t *testing.T, path string, serviceScripts ...string) {
 	t.Helper()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -783,7 +1003,11 @@ func writeTestTarball(t *testing.T, path string) {
 	}
 
 	addTarFile(t, tw, "./usr/bin/fastlane", 0o755, "#!/bin/sh\nprintf 'fastlane stub\\n'\n")
-	addTarFile(t, tw, "./etc/init.d/fastlane", 0o755, "#!/bin/sh\nset -eu\nprintf '%s:%s\\n' \"$(basename \"$0\")\" \"${1:-}\" >> \"${FASTLANE_TEST_SERVICE_LOG:?}\"\n")
+	serviceScript := "#!/bin/sh\nset -eu\nprintf '%s:%s\\n' \"$(basename \"$0\")\" \"${1:-}\" >> \"${FASTLANE_TEST_SERVICE_LOG:?}\"\n"
+	if len(serviceScripts) > 0 {
+		serviceScript = serviceScripts[0]
+	}
+	addTarFile(t, tw, "./etc/init.d/fastlane", 0o755, serviceScript)
 	addTarFile(t, tw, "./usr/libexec/fastlane-cron", 0o755, string(cronHelper))
 	addTarFile(t, tw, "./usr/libexec/fastlane-geodata", 0o755, "#!/bin/sh\nset -eu\n[ -n \"${FASTLANE_TEST_GEODATA_ENV_LOG:-}\" ] || exit 0\nprintf 'asset=%s\\nbinary=%s\\nservice=%s\\nconfig=%s\\n' \"${FASTLANE_GEODATA_DIR:-}\" \"${FASTLANE_XRAY_BIN:-}\" \"${FASTLANE_XRAY_SERVICE:-}\" \"${FASTLANE_XRAY_CONFIG:-}\" >\"${FASTLANE_TEST_GEODATA_ENV_LOG}\"\n")
 	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/etc/uci-defaults/luci-i18n-fastlane-ru", 0o755, "#!/bin/sh\nexit 0\n")

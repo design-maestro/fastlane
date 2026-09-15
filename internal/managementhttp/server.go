@@ -17,11 +17,12 @@ const minAccessTokenLength = 32
 
 // Config controls the optional management HTTP listener.
 type Config struct {
-	ListenAddr   string
-	AccessToken  string
-	Logger       *slog.Logger
-	RunExclusive func(context.Context, func(context.Context) error) error
-	HealthCheck  func(context.Context) error
+	ListenAddr       string
+	AccessToken      string
+	Logger           *slog.Logger
+	RunExclusive     func(context.Context, func(context.Context) error) error
+	HealthCheck      func(context.Context) error
+	HealthCheckScope func(context.Context, string) error
 }
 
 // Server is the lifecycle wrapper used by the Fast Lane daemon.
@@ -50,11 +51,12 @@ func NewServer(ctx context.Context, config Config, service Service) (*Server, er
 	}
 
 	handler, err := NewHandler(ctx, service, HandlerConfig{
-		AccessToken:  config.AccessToken,
-		LoopbackOnly: loopback,
-		Logger:       config.Logger,
-		RunExclusive: config.RunExclusive,
-		HealthCheck:  config.HealthCheck,
+		AccessToken:      config.AccessToken,
+		LoopbackOnly:     loopback,
+		Logger:           config.Logger,
+		RunExclusive:     config.RunExclusive,
+		HealthCheck:      config.HealthCheck,
+		HealthCheckScope: config.HealthCheckScope,
 	})
 	if err != nil {
 		_ = listener.Close()

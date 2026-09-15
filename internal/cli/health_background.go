@@ -182,6 +182,16 @@ func writeHealthCheckProgress(path string, progress healthCheckProgress) error {
 }
 
 func runTrackedHealthCheck(ctx context.Context, opts *rootOptions, scope string, connect bool) error {
+	return runTrackedHealthCheckResult(ctx, opts, scope, connect, false)
+}
+
+// HTTP jobs need a cancellation result even when cancellation came from LuCI's
+// marker rather than the HTTP job context. Keep the established CLI contract.
+func runManagementHealthCheck(ctx context.Context, opts *rootOptions, scope string, connect bool) error {
+	return runTrackedHealthCheckResult(ctx, opts, scope, connect, true)
+}
+
+func runTrackedHealthCheckResult(ctx context.Context, opts *rootOptions, scope string, connect, reportCancellation bool) error {
 	if !connect {
 		// A cancelled queued request can leave a marker behind when the daemon
 		// never consumed it. It must not cancel an unrelated scheduled pass.
@@ -219,6 +229,9 @@ func runTrackedHealthCheck(ctx context.Context, opts *rootOptions, scope string,
 		progress.Status = "cancelled"
 		progress.Error = ""
 		runErr = nil
+		if reportCancellation {
+			runErr = context.Canceled
+		}
 	} else if runErr != nil {
 		progress.Status = "failed"
 		progress.Error = runErr.Error()

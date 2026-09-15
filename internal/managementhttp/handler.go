@@ -51,26 +51,30 @@ type Service interface {
 
 // HandlerConfig controls HTTP authentication without changing application state.
 type HandlerConfig struct {
-	AccessToken  string
-	LoopbackOnly bool
-	Logger       *slog.Logger
-	RunExclusive func(context.Context, func(context.Context) error) error
-	HealthCheck  func(context.Context) error
+	AccessToken      string
+	LoopbackOnly     bool
+	Logger           *slog.Logger
+	RunExclusive     func(context.Context, func(context.Context) error) error
+	HealthCheck      func(context.Context) error
+	HealthCheckScope func(context.Context, string) error
 }
 
 type Handler struct {
-	service      Service
-	baseContext  context.Context
-	accessToken  string
-	loopbackOnly bool
-	sessionToken string
-	logger       *slog.Logger
-	runExclusive func(context.Context, func(context.Context) error) error
-	healthCheck  func(context.Context) error
-	jobs         jobTracker
-	loginMu      sync.Mutex
-	loginByIP    map[string][]time.Time
-	now          func() time.Time
+	service          Service
+	baseContext      context.Context
+	accessToken      string
+	loopbackOnly     bool
+	sessionMu        sync.Mutex
+	sessions         map[string]time.Time
+	logger           *slog.Logger
+	runExclusive     func(context.Context, func(context.Context) error) error
+	healthCheck      func(context.Context) error
+	healthCheckScope func(context.Context, string) error
+	jobs             jobTracker
+	probes           panelProbeResults
+	loginMu          sync.Mutex
+	loginByIP        map[string][]time.Time
+	now              func() time.Time
 }
 
 type stateResponse struct {
@@ -83,8 +87,8 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-// NewHandler creates an API-only HTTP handler. It never serves third-party UI
-// assets and never creates a second Fast Lane service.
+// NewHandler serves the embedded Fast Lane panel and authenticated API.
+// It never creates a second Fast Lane service.
 func NewHandler(ctx context.Context, service Service, config HandlerConfig) (http.Handler, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -93,26 +97,23 @@ func NewHandler(ctx context.Context, service Service, config HandlerConfig) (htt
 		return nil, fmt.Errorf("management service is required")
 	}
 
-	sessionBytes := make([]byte, 32)
-	if _, err := rand.Read(sessionBytes); err != nil {
-		return nil, fmt.Errorf("create management session secret: %w", err)
-	}
 	logger := config.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	return &Handler{
-		service:      service,
-		baseContext:  ctx,
-		accessToken:  strings.TrimSpace(config.AccessToken),
-		loopbackOnly: config.LoopbackOnly,
-		sessionToken: hex.EncodeToString(sessionBytes),
-		logger:       logger,
-		runExclusive: config.RunExclusive,
-		healthCheck:  config.HealthCheck,
-		loginByIP:    make(map[string][]time.Time),
-		now:          time.Now,
+		service:          service,
+		baseContext:      ctx,
+		accessToken:      strings.TrimSpace(config.AccessToken),
+		loopbackOnly:     config.LoopbackOnly,
+		sessions:         make(map[string]time.Time),
+		logger:           logger,
+		runExclusive:     config.RunExclusive,
+		healthCheck:      config.HealthCheck,
+		healthCheckScope: config.HealthCheckScope,
+		loginByIP:        make(map[string][]time.Time),
+		now:              time.Now,
 	}, nil
 }
 
@@ -129,6 +130,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if servePanel(w, r) {
+		return
+	}
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/session" {
 		h.login(w, r)
 		return
@@ -137,16 +141,43 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusUnauthorized, "auth_required")
 		return
 	}
+	if h.routingPanelAPI(w, r) || h.settingsPanelAPI(w, r) || h.vpnPanelAPI(w, r) || h.panelAPI(w, r) {
+		return
+	}
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/state":
 		h.getState(w)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/jobs/health-check":
+		if h.healthCheckScope != nil && r.ContentLength != 0 {
+			var input struct {
+				SubscriptionID string `json:"subscription_id"`
+			}
+			if r.ContentLength != 0 && decodeJSON(w, r, &input) != nil {
+				h.writeError(w, 400, "invalid_request")
+				return
+			}
+			h.startJob(w, "health-check", func(ctx context.Context) error { return h.healthCheckScope(ctx, input.SubscriptionID) })
+			return
+		}
 		check := h.healthCheck
 		if check == nil {
 			check = h.service.RunAutoHealthCheck
 		}
 		h.startJob(w, "health-check", check)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/jobs/cancel-check":
+		var input struct {
+			Sequence uint64 `json:"sequence"`
+		}
+		if decodeJSON(w, r, &input) != nil {
+			h.writeError(w, 400, "invalid_request")
+			return
+		}
+		if !h.jobs.cancelCheck(input.Sequence) {
+			h.writeError(w, 409, "check_not_running")
+			return
+		}
+		h.writeJSON(w, 200, map[string]bool{"ok": true})
 	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/jobs/refresh":
 		h.startJob(w, "refresh", func(ctx context.Context) error {
 			_, err := h.service.RefreshAll(ctx)
@@ -298,9 +329,19 @@ func (h *Handler) patchSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) startJob(w http.ResponseWriter, kind string, run func(context.Context) error) {
+	h.startManagedJob(w, kind, run, true)
+}
+
+// Downloads and detached host maintenance do not own the active-route health
+// mutex. They still use the single panel job slot. Runtime commits acquire the
+// scheduler lock separately, after preparation has finished.
+func (h *Handler) startMaintenanceJob(w http.ResponseWriter, kind string, run func(context.Context) error) {
+	h.startManagedJob(w, kind, run, false)
+}
+func (h *Handler) startManagedJob(w http.ResponseWriter, kind string, run func(context.Context) error, exclusive bool) {
 	job, ok := h.jobs.start(h.baseContext, kind, func(ctx context.Context) error {
 		var err error
-		if h.runExclusive != nil {
+		if exclusive && h.runExclusive != nil {
 			err = h.runExclusive(ctx, run)
 		} else {
 			err = run(ctx)
@@ -335,9 +376,28 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionBytes := make([]byte, 32)
+	if _, err := rand.Read(sessionBytes); err != nil {
+		h.internalError(w, "create session", err)
+		return
+	}
+	token := hex.EncodeToString(sessionBytes)
+	h.sessionMu.Lock()
+	for key, expiry := range h.sessions {
+		if !expiry.After(h.now()) {
+			delete(h.sessions, key)
+		}
+	}
+	if len(h.sessions) >= maxLoginClients {
+		h.sessionMu.Unlock()
+		h.writeError(w, http.StatusTooManyRequests, "auth_rate_limited")
+		return
+	}
+	h.sessions[token] = h.now().Add(sessionLifetime)
+	h.sessionMu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name:     "fastlane_session",
-		Value:    h.sessionToken,
+		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   r.TLS != nil,
@@ -351,8 +411,17 @@ func (h *Handler) authenticated(r *http.Request) bool {
 	if h.accessToken == "" {
 		return true
 	}
-	if cookie, err := r.Cookie("fastlane_session"); err == nil && safeEqual(cookie.Value, h.sessionToken) {
-		return true
+	if cookie, err := r.Cookie("fastlane_session"); err == nil {
+		h.sessionMu.Lock()
+		expiry, exists := h.sessions[cookie.Value]
+		valid := exists && expiry.After(h.now())
+		if exists && !valid {
+			delete(h.sessions, cookie.Value)
+		}
+		h.sessionMu.Unlock()
+		if valid {
+			return true
+		}
 	}
 	const prefix = "Bearer "
 	authorization := r.Header.Get("Authorization")

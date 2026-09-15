@@ -1,5 +1,9 @@
-#!/bin/sh
-set -eu
+#!/bin/sh /etc/rc.common
+set -e
+
+START=89
+STOP=11
+EXTRA_COMMANDS="status running"
 
 BIN="${FASTLANE_XRAY_BINARY:-/usr/bin/xray}"
 CONFIG="${FASTLANE_XRAY_CONFIG:-/etc/xray/config.json}"
@@ -29,19 +33,17 @@ reload() {
 	start
 }
 
-status() {
+running() {
 	if [ -f "${PIDFILE}" ] && kill -0 "$(cat "${PIDFILE}")" >/dev/null 2>&1; then
-		echo running
-	else
-		echo inactive
+		return 0
 	fi
+	return 1
 }
 
-case "${1:-}" in
-	start) start ;;
-	stop) stop ;;
-	reload|restart) reload ;;
-	status) status ;;
-	enable|disable) exit 0 ;;
-	*) exit 1 ;;
-esac
+status() {
+	if running; then
+		echo running
+		return 0
+	fi
+	echo inactive
+}
