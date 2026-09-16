@@ -321,8 +321,8 @@ function makeVPN() {
 	page.dismissedErrors = {};
 	page.expandedErrors = {};
 	page.pings = {
-		'durev:nl': { healthy: true, latency_ms: 131, checked_at: '2026-09-03T18:03:00Z', url_test: true },
-		'blanc:pl': { healthy: true, latency_ms: 144, checked_at: '2026-09-03T18:03:00Z', url_test: true }
+		'durev:nl': { healthy: true, latency_ms: 131, checked_at: '2026-09-03T18:03:00Z', country_code: 'NL', url_test: true },
+		'blanc:pl': { healthy: true, latency_ms: 144, checked_at: '2026-09-03T18:03:00Z', country_code: 'PL', url_test: true }
 	};
 	page.testingNodes = {};
 	page.activeMenuKey = '';
@@ -493,21 +493,23 @@ async function smoke(section, name, run) {
 		assert.deepEqual(page.visibleRows().map((row) => row.node.id).sort(), ['nl', 'pl']);
 	});
 
-	await smoke('VPN', 'normalizes localized country labels into one filter option', async () => {
+	await smoke('VPN', 'filters by measured egress country without rewriting server labels', async () => {
 		const page = makeVPN();
 		page.pageData[1][1].nodes.push(
 			{ id: 'ru-en', name: '🇷🇺 Russia, Extra Whitelist', protocol: 'vless', address: 'ru-one.example', port: 443 },
 			{ id: 'ru-ru', name: 'Россия · Москва', protocol: 'vless', address: 'ru-two.example', port: 443 },
 			{ id: 'ar-ru', name: 'Буэнос-Айрес, Аргентина, Extra', protocol: 'vless', address: 'ar.example', port: 443 }
 		);
+		page.pings['blanc:ru-en'] = { healthy: true, latency_ms: 50, checked_at: '2026-09-03T18:03:00Z', country_code: 'RU' };
+		page.pings['blanc:ru-ru'] = { healthy: true, latency_ms: 51, checked_at: '2026-09-03T18:03:00Z', country_code: 'RU' };
+		page.pings['blanc:ar-ru'] = { healthy: true, latency_ms: 52, checked_at: '2026-09-03T18:03:00Z', country_code: 'AR' };
 		assert.equal(page.filterCountries().filter((code) => code === 'RU').length, 1);
 		page.handleCountry({ target: { value: 'RU' } });
 		assert.deepEqual(page.visibleRows().map((row) => row.node.id).sort(), ['ru-en', 'ru-ru']);
 		page.country = 'AR';
 		const text = treeText(page.renderTable());
-		assert.match(text, /Argentina/);
 		assert.match(text, /Буэнос-Айрес/);
-		assert.doesNotMatch(text, /Argentina.*Argentina/);
+		assert.doesNotMatch(text, /Argentina/);
 	});
 
 	await smoke('VPN', 'sorts by GET latency, name and source', async () => {
@@ -571,7 +573,7 @@ async function smoke(section, name, run) {
 		assert.match(treeText(page.renderTable()), /Hidden by rule.*LTE.*Edit hide rules/);
 	});
 
-	await smoke('VPN', 'hides a flag-only server by its rendered localized country name', async () => {
+	await smoke('VPN', 'does not treat an egress flag as server title text', async () => {
 		const page = makeVPN();
 		const originalCountryName = countries.name;
 		countries.name = (code) => code === 'RU' ? 'Россия' : originalCountryName(code);
@@ -583,8 +585,9 @@ async function smoke(section, name, run) {
 				protocol: 'vless', address: 'ru.example', port: 443
 			};
 			const matched = page.pageData[1][0].nodes[0];
-			assert.equal(page.isHidden('durev', 'ru-bypass', matched), true);
-			assert.equal(page.visibleRows().some((row) => row.node.id === 'ru-bypass'), false);
+			page.pings['durev:ru-bypass'] = { healthy: true, latency_ms: 30, checked_at: '2026-09-03T18:03:00Z', country_code: 'RU' };
+			assert.equal(page.isHidden('durev', 'ru-bypass', matched), false);
+			assert.equal(page.visibleRows().some((row) => row.node.id === 'ru-bypass'), true);
 		} finally {
 			countries.name = originalCountryName;
 		}
@@ -666,7 +669,7 @@ async function smoke(section, name, run) {
 		assert.equal(window.pageYOffset, 640);
 	});
 
-	await smoke('VPN', 'resolves country flags locally for every numeric server address', async () => {
+	await smoke('VPN', 'uses measured egress country only for the icon', async () => {
 		const page = loadPage('vpn');
 		resolver = async (commandPath, args) => {
 			if (args.join(' ') === '--json list subscriptions') return {
@@ -676,18 +679,29 @@ async function smoke(section, name, run) {
 			};
 			if (args.join(' ') === '--json awg list') return {
 				code: 0,
-				stdout: JSON.stringify([{ id: 'awg-one', state: 'imported', name: 'AWG one', profile: { endpoint: '85.234.103.60:36599', version: '2.0' } }]),
+				stdout: JSON.stringify([{ id: 'awg-one', state: 'imported', name: 'AWG one', profile: { endpoint: '85.234.103.60:36599', version: '2.0' }, last_probe: { success: true, latency_ms: 50, checked_at: '2026-09-03T18:03:00Z', egress_ip: '203.0.113.8', country_code: 'CH' } }]),
 				stderr: ''
 			};
 			return defaultResolver(commandPath, args);
 		};
 		await page.load();
-		commandSeen([ '--json', 'inspect', 'geoip-lookup', '--ip', '85.234.103.29', '--ip', '85.234.103.60' ]);
-		const rows = page.subscriptions().find((sub) => sub.id === 'server-list').nodes;
-		assert.ok(rows.every((node) => node.extras.country_code === 'CH'));
-		assert.match(treeText(page.renderTable()), /🇨🇭/);
+		page.pings['server-list:custom'] = { healthy: true, latency_ms: 51, checked_at: '2026-09-03T18:03:00Z', egress_ip: '203.0.113.9', country_code: 'CH' };
+		assert.match(treeText(page.renderTable()), /🇨🇭.*Custom server.*85\.234\.103\.29:443/s);
+		assert.match(treeText(page.renderTable()), /🇨🇭.*AWG one.*85\.234\.103\.60:36599/s);
 		await page.fetchData();
-		assert.equal(commandCount('--json inspect geoip-lookup'), 1);
+		assert.equal(commandCount('--json inspect geoip-lookup'), 0);
+	});
+
+	await smoke('VPN', 'keeps title and address while the icon follows measured egress', async () => {
+		const page = makeVPN();
+		page.pageData[1] = [{
+			id: 'server-list', display_name: 'Server List', provider_name: 'Server List', source_type: 'raw',
+			nodes: [{ id: 'pl-server', name: '🇵🇱 Польша', remark: '🇵🇱 Польша', protocol: 'vless', address: '91.240.87.221', port: 443 }]
+		}];
+		page.pings['server-list:pl-server'] = { healthy: true, latency_ms: 40, checked_at: '2026-09-03T18:03:00Z', country_code: 'RU' };
+		const text = treeText(page.renderTable());
+		assert.match(text, /🇷🇺.*Польша.*91\.240\.87\.221:443/s);
+		assert.doesNotMatch(text, /Russia/);
 	});
 
 	await smoke('VPN', 'rolls back optimistic hide when persistence fails', async () => {

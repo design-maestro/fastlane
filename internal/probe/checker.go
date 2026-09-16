@@ -9,14 +9,16 @@ import (
 
 // Result is the outcome of a probe execution.
 type Result struct {
-	NodeID   string
-	Latency  time.Duration
-	Healthy  bool
-	Checked  time.Time
-	Err      error
-	Score    domain.ScoreResult
-	Health   domain.NodeHealth
-	Selected bool
+	NodeID      string
+	Latency     time.Duration
+	Healthy     bool
+	Checked     time.Time
+	Err         error
+	Score       domain.ScoreResult
+	Health      domain.NodeHealth
+	EgressIP    string
+	CountryCode string
+	Selected    bool
 }
 
 // Checker actively probes a node.

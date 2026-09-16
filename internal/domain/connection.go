@@ -48,10 +48,12 @@ type CandidateBackoffState struct {
 // AWGProbeState contains connectivity metadata only; imported keys never enter
 // runtime state, status or diagnostics.
 type AWGProbeState struct {
-	Success   bool      `json:"success"`
-	CheckedAt time.Time `json:"checked_at"`
-	LatencyMS float64   `json:"latency_ms,omitempty"`
-	Error     string    `json:"error,omitempty"`
+	Success     bool      `json:"success"`
+	CheckedAt   time.Time `json:"checked_at"`
+	LatencyMS   float64   `json:"latency_ms,omitempty"`
+	EgressIP    string    `json:"egress_ip,omitempty"`
+	CountryCode string    `json:"country_code,omitempty"`
+	Error       string    `json:"error,omitempty"`
 }
 
 // ActiveConnection describes the currently applied runtime selection.

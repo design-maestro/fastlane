@@ -16,5 +16,7 @@ type NodeHealth struct {
 	LastCheckedAt        time.Time `json:"last_checked_at"`
 	Healthy              bool      `json:"healthy"`
 	Score                float64   `json:"score"`
+	EgressIP             string    `json:"egress_ip,omitempty"`
+	CountryCode          string    `json:"country_code,omitempty"`
 	LastFailureReason    string    `json:"last_failure_reason"`
 }

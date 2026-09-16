@@ -350,17 +350,20 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 	}
 	tag, err := managed.PrepareInterfaceOutbound(ctx, iface.Device, iface.Address, amneziawg.RouteMark)
 	latency := time.Duration(0)
+	egressIP := ""
+	countryCode := ""
 	if err == nil {
 		if s.managedOutboundProbe != nil {
 			started := time.Now()
 			err = s.managedOutboundProbe(ctx, managed, 0, tag)
 			latency = time.Since(started)
 		} else {
-			latency, err = s.probeManagedOutboundLatency(ctx, managed, 0, tag, true)
+			observation, probeErr := s.probeManagedOutboundObservation(ctx, managed, 0, tag, true)
+			latency, egressIP, countryCode, err = observation.latency, observation.egressIP, observation.countryCode, probeErr
 		}
 	}
 	checkedAt := s.currentTime().UTC()
-	probeState := &domain.AWGProbeState{Success: err == nil, CheckedAt: checkedAt, LatencyMS: float64(latency) / float64(time.Millisecond)}
+	probeState := &domain.AWGProbeState{Success: err == nil, CheckedAt: checkedAt, LatencyMS: float64(latency) / float64(time.Millisecond), EgressIP: egressIP, CountryCode: countryCode}
 	if err != nil {
 		probeState.Error = err.Error()
 		probeState.LatencyMS = 0
@@ -381,7 +384,12 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 		}
 		previousHealth := state.Health[id]
 		previousHealth.NodeID = id
-		state.Health[id] = probe.UpdateHealth(previousHealth, err == nil, latency, checkedAt, probeState.Error, failureThreshold)
+		updatedHealth := probe.UpdateHealth(previousHealth, err == nil, latency, checkedAt, probeState.Error, failureThreshold)
+		if err == nil && countryCode != "" {
+			updatedHealth.EgressIP = egressIP
+			updatedHealth.CountryCode = countryCode
+		}
+		state.Health[id] = updatedHealth
 		reportAutoHealthProgress(ctx, state.Health[id])
 		if saveErr := s.saveState(state); saveErr != nil && err == nil {
 			err = saveErr
