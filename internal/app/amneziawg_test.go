@@ -212,6 +212,37 @@ func TestAWGRepeatedCheckReusesPreparedInterface(t *testing.T) {
 	}
 }
 
+func TestAWGCheckPreservesLastConfirmedEgressCountry(t *testing.T) {
+	profile, err := amneziawg.Parse([]byte(validAWGProfile))
+	if err != nil {
+		t.Fatalf("parse profile: %v", err)
+	}
+	profileID := profile.StableID()
+	state := domain.DefaultRuntimeState()
+	state.AWGProfileProbes = map[string]domain.AWGProbeState{
+		profileID: {Success: true, EgressIP: "203.0.113.8", CountryCode: "SE"},
+	}
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: state}
+	profileStore := &awgProfileMemoryStore{raw: []byte(validAWGProfile)}
+	controller := &awgControllerFake{}
+	managed := &awgManagedBackend{managedRecordingBackend: &managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: "fastlane-direct"}}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: profileStore, AWGController: controller, Backend: managed})
+	// The tunnel check succeeds, while the optional egress identity lookup has
+	// no result. This must not erase the last confirmed country from the UI.
+	service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error { return nil }
+
+	if _, err := service.CheckAWGProfile(context.Background(), profileID); err != nil {
+		t.Fatalf("CheckAWGProfile: %v", err)
+	}
+	got := stateStore.state.AWGProfileProbes[profileID]
+	if got.EgressIP != "203.0.113.8" || got.CountryCode != "SE" {
+		t.Fatalf("egress identity was erased: %+v", got)
+	}
+	if stateStore.state.AWGLastProbe == nil || stateStore.state.AWGLastProbe.CountryCode != "SE" {
+		t.Fatalf("last probe identity = %+v", stateStore.state.AWGLastProbe)
+	}
+}
+
 func TestConnectAutoIncludesAWGProfilesInSharedRanking(t *testing.T) {
 	normal := domain.Node{ID: "normal", SubscriptionID: awgSubscriptionID, Name: "Normal", Protocol: domain.ProtocolSocks, Address: "192.0.2.10", Port: 1080}
 	settings := domain.DefaultSettings()
