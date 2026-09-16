@@ -62,7 +62,7 @@ function pingClass(health) {const value=latencyMS(health);return value===null?''
 function awgNodes() {
   return awgs.filter(profile=>profile&&profile.state!=='absent').map(profile=>{
     const version=profile.profile?.version==='legacy'?'Legacy':'2.0';
-    return {id:profile.id,subscription_id:'server-list',kind:'awg',name:profile.name || 'AmneziaWG',remark:tr('Экспериментально')+' · AWG '+version,protocol:'amneziawg',address:profile.profile?.endpoint || ''};
+    return {id:profile.id,subscription_id:'server-list',kind:'awg',name:profile.name || 'AmneziaWG',remark:'AWG '+version,protocol:'amneziawg',address:profile.profile?.endpoint || ''};
   });
 }
 function subscriptions() {
@@ -136,7 +136,7 @@ function renderServers() {
         const hide=element('button',tr('Скрыть'),'fl-button fl-button-warning');hide.dataset.operation='';hide.dataset.action='hide';hide.onclick=()=>{menu.hidden=true;if(keywordHidden(row.flNode)){location.hash='settings';return;}operation('vpn/hidden','POST',{subscription_id:'server-list',node_id:row.flNode.id,hidden:!hidden(row.flNode)});};
         const remove=element('button',tr('Удалить профиль'),'fl-button fl-button-danger');remove.dataset.operation='';remove.onclick=()=>confirmAction(tr('Удалить профиль AWG? Если он активен, интернет пойдёт напрямую.'),()=>operation('awg/profiles/'+encodeURIComponent(row.flNode.id),'DELETE'));
         const version=profile?.profile?.version==='legacy'?'Legacy':'2.0';
-        menu.append(check,hide,remove,element('span','AWG '+version+' · '+tr('Экспериментально. Участвует в общей GET-проверке и автовыборе.'),'fl-more-note'),element('span','','fl-more-note awg-probe-detail'));
+        menu.append(check,hide,remove,element('span','AWG '+version+' · '+tr('Участвует в общей GET-проверке и автовыборе.'),'fl-more-note'),element('span','','fl-more-note awg-probe-detail'));
       }else{
         const check=element('button',tr('Проверить пинг (GET)'),'fl-button');check.dataset.operation='';check.dataset.action='check';check.onclick=()=>{menu.hidden=true;operation('vpn/check','POST',{subscription_id:row.flNode.subscription_id,node_id:row.flNode.id});};
         const hide=element('button',tr('Скрыть'),'fl-button fl-button-warning');hide.dataset.operation='';hide.dataset.action='hide';hide.onclick=()=>{menu.hidden=true;if(keywordHidden(row.flNode)){location.hash='settings';return;}operation('vpn/hidden','POST',{subscription_id:row.flNode.subscription_id,node_id:row.flNode.id,hidden:!hidden(row.flNode)});};
@@ -147,10 +147,10 @@ function renderServers() {
       row.onclick=event=>{if(!event.target.closest('button')&&!row.flUnavailable)connectNode(row.flNode);};
       row.onkeydown=event=>{if(event.target===row&&(event.key==='Enter'||event.key===' ')){event.preventDefault();if(!row.flUnavailable)connectNode(row.flNode);}};
     }
-    existing.delete(key);row.flNode=node;row.flUnavailable=unavailable;row.tabIndex=unavailable?-1:0;row.className=(isActive?'fl-active-row ':'')+(isHidden?'fl-hidden-row ':'');row.setAttribute('aria-label',node.name+(node.kind==='awg'?tr(' · AmneziaWG, экспериментально'):''));
+    existing.delete(key);row.flNode=node;row.flUnavailable=unavailable;row.tabIndex=unavailable?-1:0;row.className=(isActive?'fl-active-row ':'')+(isHidden?'fl-hidden-row ':'');row.setAttribute('aria-label',node.name+(node.kind==='awg'?' · AmneziaWG':''));
     const cells=row.children,mark=row.querySelector('.fl-server-mark'),flag=node.name.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u)?.[0];
     mark.replaceChildren(flag?document.createTextNode(flag):window.fastlaneIcon(isActive?'bolt':'server'));mark.classList.toggle('fl-server-flag-glyph',!!flag);
-    row.querySelector('.fl-server-name').textContent=node.name || node.address;row.querySelector('.fl-server-address').textContent=node.kind==='awg'?tr('Экспериментально · ')+node.address:(node.remark!==node.name?node.remark:node.address);
+    row.querySelector('.fl-server-name').textContent=node.name || node.address;row.querySelector('.fl-server-address').textContent=node.kind==='awg'?node.address:(node.remark!==node.name?node.remark:node.address);
     cells[1].textContent=sub.display_name || sub.id;cells[1].hidden=!!selected;cells[2].firstChild.textContent=node.kind==='awg'?'AmneziaWG':node.protocol.toUpperCase();
     cells[3].firstChild.textContent=pingText(health);cells[3].firstChild.className='fl-latency '+pingClass(health);
     const stateLabel=expired(sub)?tr('Истекла'):isHidden?tr('Скрыт'):isActive?tr('Активен'):node.kind==='awg'&&profile?.state==='incompatible'?tr('Несовместим'):node.kind==='awg'&&profile?.state==='invalid'?tr('Ошибка профиля'):health?.healthy?(latencyMS(health)>1000?tr('Медленный'):tr('Готов')):health?.last_checked_at?tr('Недоступен'):tr('Не проверен');

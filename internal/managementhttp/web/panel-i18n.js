@@ -61,6 +61,7 @@ const dictionary={
   "Удалить профиль AWG? Если он активен, интернет пойдёт напрямую.": "Delete AWG profile? If active, traffic will go directly.",
 	"Экспериментально. Не участвует в автовыборе.": "Experimental. Not used by automatic selection.",
 	"Экспериментально. Участвует в общей GET-проверке и автовыборе.": "Experimental. Participates in shared GET checks and automatic selection.",
+	"Участвует в общей GET-проверке и автовыборе.": "Participates in shared GET checks and automatic selection.",
   "Скрыть": "Hide",
   "Удалить сервер": "Remove server",
   "Удалить сервер? Если он активен, VPN отключится.": "Remove server? If active, VPN will disconnect.",
