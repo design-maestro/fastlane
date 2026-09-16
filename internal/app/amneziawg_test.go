@@ -289,7 +289,7 @@ func TestAutoProbeChecksEveryImportedAWGProfile(t *testing.T) {
 	}
 	for _, id := range []string{first.StableID(), second.StableID()} {
 		health := stateStore.state.Health[id]
-		if !health.Healthy || health.SuccessCount != 1 || health.LastLatency.Duration() <= 0 {
+		if health.NodeID != id || !health.Healthy || health.SuccessCount != 1 || health.LastLatency.Duration() <= 0 {
 			t.Fatalf("health[%s] = %+v", id, health)
 		}
 	}
