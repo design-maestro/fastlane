@@ -4,7 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const resources = 'luci-app-fastlane/htdocs/luci-static/resources/';
-const sources = [resources+'view/fastlane/vpn-20260910-hide-keywords-v27.js', resources+'fastlane/fastlane-20260906-v4.js'];
+const sources = [resources+'view/fastlane/vpn-20260910-hide-keywords-v28.js', resources+'fastlane/fastlane-20260906-v4.js'];
 const css = sources.map(source => {
   const text = fs.readFileSync(path.join(root, source), 'utf8');
   const template = text.match(/var css = (`[\s\S]*?`);/);

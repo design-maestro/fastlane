@@ -412,6 +412,27 @@ async function smoke(section, name, run) {
 		assert.ok(toasts.some((toast) => toast.type === 'error'));
 	});
 
+	await smoke('VPN', 'keeps AWG profiles visible across a transient read failure', async () => {
+		let awgUnavailable = false;
+		resolver = async (commandPath, args) => {
+			if (args.join(' ') === '--json awg list') {
+				if (awgUnavailable)
+					return { code: 1, stdout: '', stderr: 'service restarting' };
+				return { code: 0, stdout: JSON.stringify([{ id: 'awg-one', state: 'imported', name: 'AWG one', profile: { endpoint: '85.234.103.60:36599', version: '2.0' } }]), stderr: '' };
+			}
+			return defaultResolver(commandPath, args);
+		};
+		const page = loadPage('vpn');
+		await page.load();
+		assert.ok(page.subscriptions().find((sub) => sub.id === 'server-list').nodes.some((node) => node.id === 'awg-one'));
+		awgUnavailable = true;
+		await page.fetchData();
+		assert.ok(page.subscriptions().find((sub) => sub.id === 'server-list').nodes.some((node) => node.id === 'awg-one'));
+		assert.match(page.fetchErrors.awg, /service restarting/);
+		page.renderContent();
+		assert.ok(toasts.some((toast) => toast.type === 'error'));
+	});
+
 	await smoke('VPN', 'renders connected, country-city rows and empty state', async () => {
 		const page = makeVPN();
 		let text = treeText(page.render(page.pageData));
