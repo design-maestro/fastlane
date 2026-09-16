@@ -4431,12 +4431,23 @@ func (s *Service) probeManagedOutbound(ctx context.Context, managed backend.Mana
 // cold TLS connection do not masquerade as network latency in the shared
 // selector.
 func (s *Service) probeManagedOutboundLatency(ctx context.Context, managed backend.ManagedBackend, slot int, tag string, warmup bool) (time.Duration, error) {
+	observation, err := s.probeManagedOutboundObservation(ctx, managed, slot, tag, warmup)
+	return observation.latency, err
+}
+
+type managedProbeObservation struct {
+	latency     time.Duration
+	egressIP    string
+	countryCode string
+}
+
+func (s *Service) probeManagedOutboundObservation(ctx context.Context, managed backend.ManagedBackend, slot int, tag string, warmup bool) (managedProbeObservation, error) {
 	port, err := managed.ProbeHTTPPort(slot)
 	if err != nil {
-		return 0, err
+		return managedProbeObservation{}, err
 	}
 	if err := managed.SetProbeOutbound(ctx, slot, tag); err != nil {
-		return 0, fmt.Errorf("select probe outbound: %w", err)
+		return managedProbeObservation{}, fmt.Errorf("select probe outbound: %w", err)
 	}
 	defer func() {
 		if err := managed.ClearProbeOutbound(context.Background(), slot); err != nil {
@@ -4446,7 +4457,7 @@ func (s *Service) probeManagedOutboundLatency(ctx context.Context, managed backe
 	proxyURL := &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}
 	transport, ok := cloneSubscriptionTransportWithProxy(s.httpClient.Transport, proxyURL)
 	if !ok {
-		return 0, fmt.Errorf("HTTP transport cannot be cloned for managed probe")
+		return managedProbeObservation{}, fmt.Errorf("HTTP transport cannot be cloned for managed probe")
 	}
 	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 	runRound := func() (time.Duration, error) {
@@ -4491,10 +4502,15 @@ func (s *Service) probeManagedOutboundLatency(ctx context.Context, managed backe
 	}
 	if warmup {
 		if _, err := runRound(); err != nil {
-			return 0, err
+			return managedProbeObservation{}, err
 		}
 	}
-	return runRound()
+	latency, err := runRound()
+	if err != nil {
+		return managedProbeObservation{}, err
+	}
+	egressIP, countryCode := speedtest.ProbeEgressIdentity(ctx, client, 4*time.Second)
+	return managedProbeObservation{latency: latency, egressIP: egressIP, countryCode: countryCode}, nil
 }
 
 func selectionOptionsForState(state domain.RuntimeState) applyNodeSelectionOptions {
@@ -4698,6 +4714,8 @@ func (s *Service) probeSubscription(ctx context.Context, sub domain.Subscription
 					result.Healthy = true
 					result.Latency = time.Duration(urlResult.LatencyMS * float64(time.Millisecond))
 					result.Checked = urlResult.CheckedAt
+					result.EgressIP = urlResult.EgressIP
+					result.CountryCode = urlResult.CountryCode
 				}
 				completed <- indexedProbeResult{index: job.index, result: result}
 			}
@@ -4715,6 +4733,10 @@ func (s *Service) probeSubscription(ctx context.Context, sub domain.Subscription
 		updated := probe.UpdateHealth(health[node.ID], result.Healthy, result.Latency, result.Checked, compactProbeFailure(result.Err), failureThreshold)
 		updated.NodeID = node.ID
 		updated.Score = probe.CalculateScore(updated, probe.DefaultScoreConfig()).Score
+		if result.Healthy && result.CountryCode != "" {
+			updated.EgressIP = result.EgressIP
+			updated.CountryCode = result.CountryCode
+		}
 		health[node.ID] = updated
 		result.Health = updated
 		s.logDebug("probe result", "subscription", sub.ID, "node", node.ID, "healthy", result.Healthy, "latency", result.Latency, "error", errString(result.Err))

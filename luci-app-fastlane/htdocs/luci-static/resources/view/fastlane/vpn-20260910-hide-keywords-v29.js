@@ -10,7 +10,6 @@
 
 var binary = '/usr/bin/fastlane';
 var pingKey = 'fastlane.vpn.get.results.v1';
-var geoCountryKey = 'fastlane.vpn.geo-countries.v1';
 var vpnPollInterval = 5;
 
 function trim(value) {
@@ -47,11 +46,6 @@ function nodeRawName(node) {
 	return trim(node && (node.name || node.remark || node.address));
 }
 
-function flagEmoji(value) {
-	var match = trim(value).match(/(?:\uD83C[\uDDE6-\uDDFF]){2}/);
-	return match ? match[0] : '';
-}
-
 function flagEmojiFromCode(code) {
 	code = trim(code).toUpperCase();
 	if (!/^[A-Z]{2}$/.test(code))
@@ -60,16 +54,6 @@ function flagEmojiFromCode(code) {
 		0x1F1E6 + code.charCodeAt(0) - 65,
 		0x1F1E6 + code.charCodeAt(1) - 65
 	);
-}
-
-function countryCodeFromFlag(value) {
-	var emoji = flagEmoji(value);
-	if (!emoji)
-		return '';
-	var points = Array.from(emoji).map(function(character) { return character.codePointAt(0); });
-	if (points.length !== 2 || points[0] < 0x1F1E6 || points[0] > 0x1F1FF || points[1] < 0x1F1E6 || points[1] > 0x1F1FF)
-		return '';
-	return String.fromCharCode(points[0] - 0x1F1E6 + 65, points[1] - 0x1F1E6 + 65);
 }
 
 function nodeName(node) {
@@ -199,6 +183,8 @@ function persistedObservation(value) {
 		latency_ms: healthy ? latency : null,
 		checked_at: checkedAt,
 		last_latency: value.last_latency,
+		egress_ip: trim(value.egress_ip),
+		country_code: trim(value.country_code).toUpperCase(),
 		url_test: true
 	};
 }
@@ -230,109 +216,23 @@ function fresherObservation(persisted, session) {
 		: persisted;
 }
 
-var countryAliasCache = null;
-
-function normalizeCountryAlias(value) {
-	return trim(value).toLocaleLowerCase().replace(/[.()]/g, '').replace(/\s+/g, ' ');
-}
-
-function countryAliases() {
-	if (countryAliasCache)
-		return countryAliasCache;
-	var exact = {};
-	var searchable = [];
-	var codes = Array.isArray(countryCatalog.codes) ? countryCatalog.codes : [];
-	var locales = [ 'en', 'ru' ];
-	for (var i = 0; i < codes.length; i++) {
-		var code = trim(codes[i]).toUpperCase();
-		exact[code.toLowerCase()] = code;
-		for (var l = 0; l < locales.length; l++) {
-			try {
-				var label = new window.Intl.DisplayNames([ locales[l] ], { type: 'region' }).of(code);
-				var alias = normalizeCountryAlias(label);
-				if (alias && alias !== code.toLowerCase()) {
-					exact[alias] = code;
-					searchable.push({ alias: alias, code: code });
-				}
-			} catch (err) {}
-		}
-	}
-	searchable.sort(function(a, b) { return b.alias.length - a.alias.length; });
-	countryAliasCache = { exact: exact, searchable: searchable };
-	return countryAliasCache;
-}
-
-function labelParts(value) {
-	return trim(value).split(/\s*(?:,|·|—|\|)\s*/).map(trim).filter(Boolean);
-}
-
-function exactCountryCode(value) {
-	return countryAliases().exact[normalizeCountryAlias(value)] || '';
-}
-
-function countryCodeFromLabel(value) {
-	var parts = labelParts(value);
-	for (var i = 0; i < parts.length; i++) {
-		var exact = exactCountryCode(parts[i]);
-		if (exact)
-			return exact;
-	}
-	var normalized = ' ' + normalizeCountryAlias(value).replace(/[,·—|/:;[\]{}]+/g, ' ') + ' ';
-	var aliases = countryAliases().searchable;
-	for (var a = 0; a < aliases.length; a++)
-		if (normalized.indexOf(' ' + aliases[a].alias + ' ') >= 0)
-			return aliases[a].code;
-	return '';
-}
-
-function nodeCountryCode(node) {
-	var extra = trim(node && node.extras && (node.extras.country_code || node.extras.country)).toUpperCase();
-	if (/^[A-Z]{2}$/.test(extra))
-		return extra;
-	return countryCodeFromFlag(nodeRawName(node)) || countryCodeFromLabel(nodeName(node)) || nodeFlag(node);
-}
-
-function nodeLocation(node) {
+function nodeLocation(node, observed) {
 	var value = nodeName(node);
-	var code = nodeCountryCode(node);
-	if (!code)
-		return { code: '', country: value, city: '' };
-	var details = labelParts(value).filter(function(part) { return exactCountryCode(part) !== code; });
-	return { code: code, country: countryCatalog.name(code), city: details.join(' · ') };
+	var egress = trim(observed && observed.country_code).toUpperCase();
+	return { code: /^[A-Z]{2}$/.test(egress) ? egress : '', country: value, city: '', measured: !!egress };
 }
 
-function nodePresentation(node) {
-	var location = nodeLocation(node);
+function nodePresentation(node, observed) {
+	var location = nodeLocation(node, observed);
+	var address = trim(node && node.address);
+	var endpoint = address;
+	if (address && trim(node && node.port) && address.indexOf(':') < 0)
+		endpoint += ':' + String(node.port);
 	return {
 		code: location.code,
-		title: location.country,
-		description: location.city || trim(node && node.address) + ':' + String(node && node.port || '')
+		title: nodeName(node),
+		description: endpoint
 	};
-}
-
-function numericHost(value) {
-	value = trim(value);
-	var bracketed = value.match(/^\[([^\]]+)\](?::\d+)?$/);
-	if (bracketed)
-		return bracketed[1];
-	var ipv4WithPort = value.match(/^((?:\d{1,3}\.){3}\d{1,3})(?::\d+)?$/);
-	if (ipv4WithPort)
-		return ipv4WithPort[1].split('.').every(function(part) { return Number(part) >= 0 && Number(part) <= 255; }) ? ipv4WithPort[1] : '';
-	return value.indexOf(':') >= 0 && /^[0-9a-f:.]+$/i.test(value) ? value : '';
-}
-
-function nodeFlag(node) {
-	var haystack = (nodeName(node) + ' ' + trim(node && node.address)).toLowerCase();
-	var flags = {
-		nl: /netherlands|amsterdam|\bnl[.-]/,
-		pl: /poland|warsaw|warszawa|\bpl[.-]/,
-		se: /sweden|stockholm|\bse[.-]/,
-		ee: /estonia|tallinn|\bee[.-]/,
-		de: /germany|frankfurt|\bde[.-]/
-	};
-	for (var code in flags)
-		if (flags[code].test(haystack)) return code;
-	return '';
 }
 
 function commandError(result) {
@@ -446,7 +346,6 @@ return view.extend({
 		this.dismissedErrors = this.dismissedErrors || {};
 		this.expandedErrors = this.expandedErrors || {};
 		this.pings = this.readPings();
-		this.geoCountries = this.readGeoCountries();
 		this.testingNodes = this.testingNodes || {};
 		this.activeMenuKey = '';
 		this.activeMenuElement = null;
@@ -495,73 +394,12 @@ return view.extend({
 				delete this.toastErrors.awg;
 			}
 			var subscriptionList = Array.isArray(subscriptions) ? subscriptions : [];
-			var awgList = Array.isArray(awgs) ? awgs : [];
-			return this.refreshGeoCountries(subscriptionList, awgList).then(L.bind(function() {
-				this.applyGeoCountries(subscriptionList);
-				this.pageData = [ status, subscriptions, data[2] || { status: 'idle' }, awgs ];
-				this.mergePersistedPings(status, subscriptionList);
-				this.mergeBackgroundPings(data[2], subscriptionList);
-				if (!this.showHidden && this.filter !== 'all' && !this.subscriptions().some(L.bind(function(sub) { return sub.id === this.filter; }, this)))
-					this.filter = 'all';
-				return this.pageData;
-			}, this));
-		}, this));
-	},
-
-	readGeoCountries: function() {
-		try {
-			var value = JSON.parse(window.sessionStorage.getItem(geoCountryKey) || '{}');
-			return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-		}
-		catch (err) { return {}; }
-	},
-
-	writeGeoCountries: function() {
-		try { window.sessionStorage.setItem(geoCountryKey, JSON.stringify(this.geoCountries || {})); }
-		catch (err) {}
-	},
-
-	collectGeoIPs: function(subscriptions, awgs) {
-		var seen = {};
-		var result = [];
-		(Array.isArray(subscriptions) ? subscriptions : []).forEach(function(sub) {
-			(Array.isArray(sub.nodes) ? sub.nodes : []).forEach(function(node) {
-				var ip = numericHost(node && node.address);
-				if (ip && !seen[ip]) { seen[ip] = true; result.push(ip); }
-			});
-		});
-		(Array.isArray(awgs) ? awgs : []).forEach(function(awg) {
-			var ip = numericHost(awg && awg.profile && awg.profile.endpoint);
-			if (ip && !seen[ip]) { seen[ip] = true; result.push(ip); }
-		});
-		return result;
-	},
-
-	refreshGeoCountries: function(subscriptions, awgs) {
-		this.geoCountries = this.geoCountries || {};
-		var missing = this.collectGeoIPs(subscriptions, awgs).filter(L.bind(function(ip) {
-			return !Object.prototype.hasOwnProperty.call(this.geoCountries, ip);
-		}, this));
-		if (!missing.length)
-			return Promise.resolve();
-		var args = [ '--json', 'inspect', 'geoip-lookup' ];
-		missing.forEach(function(ip) { args.push('--ip', ip); });
-		return this.execJSON(args).then(L.bind(function(result) {
-			missing.forEach(L.bind(function(ip) { this.geoCountries[ip] = trim(result && result[ip]).toUpperCase(); }, this));
-			this.writeGeoCountries();
-		}, this)).catch(L.bind(function() {
-			missing.forEach(L.bind(function(ip) { this.geoCountries[ip] = ''; }, this));
-			this.writeGeoCountries();
-		}, this));
-	},
-
-	applyGeoCountries: function(subscriptions) {
-		(Array.isArray(subscriptions) ? subscriptions : []).forEach(L.bind(function(sub) {
-			(Array.isArray(sub.nodes) ? sub.nodes : []).forEach(L.bind(function(node) {
-				var code = this.geoCountries[numericHost(node && node.address)];
-				if (code)
-					node.extras = Object.assign({}, node.extras || {}, { country_code: code });
-			}, this));
+			this.pageData = [ status, subscriptions, data[2] || { status: 'idle' }, awgs ];
+			this.mergePersistedPings(status, subscriptionList);
+			this.mergeBackgroundPings(data[2], subscriptionList);
+			if (!this.showHidden && this.filter !== 'all' && !this.subscriptions().some(L.bind(function(sub) { return sub.id === this.filter; }, this)))
+				this.filter = 'all';
+			return this.pageData;
 		}, this));
 	},
 
@@ -1225,6 +1063,8 @@ return view.extend({
 			latency_ms: latency,
 			checked_at: result.checked_at,
 			url: result.url,
+			egress_ip: trim(result.egress_ip),
+			country_code: trim(result.country_code).toUpperCase(),
 			url_test: true
 		};
 		this.writePings();
@@ -1478,7 +1318,7 @@ return view.extend({
 					remark: 'AWG ' + version,
 					protocol: 'amneziawg',
 					address: endpoint,
-					extras: { country_code: (this.geoCountries || {})[numericHost(endpoint)] || '' }
+					extras: {}
 			});
 		}
 		return subscriptions;
@@ -1492,6 +1332,8 @@ return view.extend({
 			healthy: probe.success === true,
 			latency_ms: probe.success === true ? positiveLatency(probe.latency_ms) : null,
 			checked_at: probe.checked_at,
+			egress_ip: trim(probe.egress_ip),
+			country_code: trim(probe.country_code).toUpperCase(),
 			url_test: true
 		};
 	},
@@ -1532,6 +1374,7 @@ return view.extend({
 			for (var n = 0; n < nodes.length; n++) {
 				var node = nodes[n];
 				var isAWG = node.kind === 'awg';
+				var observed = isAWG ? this.awgObservation(node.id) : (this.pings[sub.id + ':' + node.id] || {});
 				var hiddenByKeyword = this.matchingAutoHideKeyword(node);
 				var manuallyHidden = this.isManuallyHidden(sub.id, node.id);
 				var hidden = manuallyHidden || hiddenByKeyword !== '';
@@ -1540,12 +1383,11 @@ return view.extend({
 				var haystack = (nodeName(node) + ' ' + sourceName(sub) + ' ' + trim(node.protocol) + ' ' + trim(node.address)).toLowerCase();
 				if (this.query && haystack.indexOf(this.query) < 0)
 					continue;
-				if (this.country !== 'all' && nodeLocation(node).code !== this.country)
+				if (this.country !== 'all' && nodeLocation(node, observed).code !== this.country)
 					continue;
 				if (this.protocol !== 'all' && trim(node.protocol).toLowerCase() !== this.protocol)
 					continue;
-				var observed = isAWG ? this.awgObservation(node.id) : (this.pings[sub.id + ':' + node.id] || {});
-					var latency = positiveLatency(observed.latency_ms);
+				var latency = positiveLatency(observed.latency_ms);
 				rows.push({ sub: sub, node: node, observed: observed, latency: latency, hidden: hidden, manuallyHidden: manuallyHidden, hiddenByKeyword: hiddenByKeyword });
 			}
 		}
@@ -1567,7 +1409,9 @@ return view.extend({
 		for (var i = 0; i < subscriptions.length; i++) {
 			var nodes = subscriptions[i].nodes || [];
 			for (var n = 0; n < nodes.length; n++) {
-				var code = nodeLocation(nodes[n]).code;
+				var node = nodes[n];
+				var observed = node.kind === 'awg' ? this.awgObservation(node.id) : (this.pings[subscriptions[i].id + ':' + node.id] || {});
+				var code = nodeLocation(node, observed).code;
 				if (code) seen[code] = true;
 			}
 		}
@@ -1614,8 +1458,8 @@ return view.extend({
 		var activeNode = vpnActive && status.active_node ? status.active_node : null;
 		if (vpnActive && state.active_connection_kind === 'amneziawg' && activeSubscription)
 			activeNode = (activeSubscription.nodes || []).filter(function(node) { return node.id === (state.active_awg_profile_id || state.active_node_id); })[0] || activeNode;
-		var activeServer = activeNode ? (activeNode.kind === 'awg' ? nodeName(activeNode) : nodeLocation(activeNode).country) : (operationalMode === 'recovering' ? _('Switching…') : _('Not active'));
 		var observed = state.active_connection_kind === 'amneziawg' ? this.awgObservation(state.active_awg_profile_id || state.active_node_id) : (this.pings[state.active_subscription_id + ':' + state.active_node_id] || {});
+		var activeServer = activeNode ? nodeName(activeNode) : (operationalMode === 'recovering' ? _('Switching…') : _('Not active'));
 		var pingValue = vpnActive ? formatLatency(observed.latency_ms) : (operationalMode === 'recovering' ? _('Waiting…') : _('Not available'));
 		return E('div', { class: 'fl-status' }, [
 			E('div', { class: 'fl-status-cell fl-status-main fl-status-main-' + operationalMode }, [ E('span', { class: 'fl-dot ' + (vpnActive ? 'fl-dot-on' : (operationalMode === 'recovering' ? 'fl-dot-recovering' : '')) }), operationalStatusLabel(operationalMode) ]),
@@ -1757,8 +1601,8 @@ return view.extend({
 							: unavailable ? _('Unavailable')
 								: checked ? (slow ? _('Slow') : _('Ready'))
 									: _('Not checked');
-			var presentation = nodePresentation(row.node);
-			var emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(presentation.code);
+			var presentation = nodePresentation(row.node, row.observed);
+			var emoji = flagEmojiFromCode(presentation.code);
 			var marker = emoji
 				? E('div', { class: 'fl-server-mark fl-server-flag-emoji', 'aria-hidden': 'true' }, [ E('span', { class: 'fl-server-flag-glyph' }, [ emoji ]) ])
 				: E('div', { class: 'fl-server-mark' }, [ icon(active ? 'bolt' : 'server') ]);

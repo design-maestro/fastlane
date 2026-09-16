@@ -67,6 +67,8 @@ type URLTestResult struct {
 	URL            string    `json:"url"`
 	LatencyMS      float64   `json:"latency_ms"`
 	CheckedAt      time.Time `json:"checked_at"`
+	EgressIP       string    `json:"egress_ip,omitempty"`
+	CountryCode    string    `json:"country_code,omitempty"`
 }
 
 type Metrics struct {
@@ -275,6 +277,7 @@ func (r Runner) URLTest(ctx context.Context, req Request, rawURL string) (URLTes
 		}
 		return URLTestResult{}, err
 	}
+	egressIP, countryCode := ProbeEgressIdentity(ctx, client, req.ProbeTimeout)
 
 	return URLTestResult{
 		SubscriptionID: req.SubscriptionID,
@@ -283,6 +286,8 @@ func (r Runner) URLTest(ctx context.Context, req Request, rawURL string) (URLTes
 		URL:            rawURL,
 		LatencyMS:      roundFloat(latency.Seconds()*1000, 2),
 		CheckedAt:      r.now()(),
+		EgressIP:       egressIP,
+		CountryCode:    countryCode,
 	}, nil
 }
 
