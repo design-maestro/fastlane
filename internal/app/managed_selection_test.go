@@ -280,6 +280,62 @@ func TestMaintainManagedReservesChecksTwoCandidatesWithoutSwitching(t *testing.T
 	}
 }
 
+func TestMaintainManagedReservesOwnsSharedProbeSlotsUntilChecksFinish(t *testing.T) {
+	nodes := []domain.Node{
+		{ID: "active", Protocol: domain.ProtocolSocks, Address: "192.0.2.1", Port: 1080},
+		{ID: "reserve", Protocol: domain.ProtocolSocks, Address: "192.0.2.2", Port: 1080},
+	}
+	state := domain.DefaultRuntimeState()
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	state.ActiveTransport = domain.TransportModeProxy
+	state.Mode = domain.SelectionModeManual
+	state.ActiveSubscriptionID = "sub"
+	state.ActiveNodeID = "active"
+	baseStore := &memoryStore{settings: domain.DefaultSettings(), state: state, subs: []domain.Subscription{{ID: "sub", Nodes: nodes}}}
+	store := &serializedMemoryStore{memoryStore: baseStore}
+	managed := &managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: "fastlane-node-active"}
+	service := NewService(Dependencies{Store: store, Backend: managed})
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error {
+		close(entered)
+		<-release
+		return nil
+	}
+
+	reserveDone := make(chan error, 1)
+	go func() { reserveDone <- service.MaintainManagedReserves(context.Background()) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("reserve probe did not start")
+	}
+
+	otherWriterDone := make(chan error, 1)
+	go func() {
+		otherWriterDone <- runStoreWriteLocked(service, func() error { return nil })
+	}()
+	select {
+	case err := <-otherWriterDone:
+		t.Fatalf("another runtime operation entered shared probe slots early: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	if err := <-reserveDone; err != nil {
+		t.Fatalf("maintain reserves: %v", err)
+	}
+	select {
+	case err := <-otherWriterDone:
+		if err != nil {
+			t.Fatalf("waiting runtime operation: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shared probe slots were not released")
+	}
+}
+
 func TestMaintainManagedReservesChecksPreviousActiveNodeInDirectMode(t *testing.T) {
 	node := domain.Node{ID: "only-node", Protocol: domain.ProtocolSocks, Address: "192.0.2.1", Port: 1080}
 	state := domain.DefaultRuntimeState()

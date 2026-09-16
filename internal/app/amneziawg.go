@@ -357,6 +357,9 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 			started := time.Now()
 			err = s.managedOutboundProbe(ctx, managed, 0, tag)
 			latency = time.Since(started)
+			if err == nil && latency <= 0 {
+				latency = time.Nanosecond
+			}
 		} else {
 			observation, probeErr := s.probeManagedOutboundObservation(ctx, managed, 0, tag, true)
 			latency, egressIP, countryCode, err = observation.latency, observation.egressIP, observation.countryCode, probeErr

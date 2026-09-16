@@ -91,76 +91,79 @@ func (s *Service) MaintainManagedReserves(ctx context.Context) error {
 		err       error
 		latency   time.Duration
 	}
-	results := make(chan result, len(candidates))
-	jobs := make(chan managedReserveCandidate)
-	var wg sync.WaitGroup
-	workerCount := min(2, len(candidates))
-	for slot := 0; slot < workerCount; slot++ {
-		slot := slot
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for candidate := range jobs {
-				started := time.Now()
-				probe := s.probeManagedOutbound
-				if s.managedOutboundProbe != nil {
-					probe = func(probeCtx context.Context, probeBackend backend.ManagedBackend, slot int, tag string) error {
-						return s.managedOutboundProbe(probeCtx, probeBackend, slot, tag)
-					}
-				}
-				probeErr := probe(ctx, managed, slot, candidate.tag)
-				results <- result{candidate: candidate, err: probeErr, latency: time.Since(started)}
-			}
-		}()
-	}
-	go func() {
-		for _, candidate := range candidates {
-			jobs <- candidate
-		}
-		close(jobs)
-		wg.Wait()
-		close(results)
-	}()
-
-	state.CandidateBackoff = cloneCandidateBackoff(state.CandidateBackoff)
-	state.Health = cloneHealthMap(state.Health)
-	successful := make([]managedReserveCandidate, 0, len(candidates))
-	for item := range results {
-		previous := state.Health[item.candidate.node.ID]
-		previous.NodeID = item.candidate.node.ID
-		if item.err == nil {
-			delete(state.CandidateBackoff, item.candidate.tag)
-			state.Health[item.candidate.node.ID] = probe.UpdateHealth(previous, true, item.latency, now, "", 2)
-			successful = append(successful, item.candidate)
-			continue
-		}
-		entry := state.CandidateBackoff[item.candidate.tag]
-		entry.Tag = item.candidate.tag
-		entry.ConsecutiveFailures++
-		entry.RetryAfter = now.Add(managedCandidateBackoff(entry.ConsecutiveFailures))
-		state.CandidateBackoff[item.candidate.tag] = entry
-		state.Health[item.candidate.node.ID] = probe.UpdateHealth(previous, false, item.latency, now, item.err.Error(), 2)
-	}
-
-	nextManaged := selectManagedReserveStates(successful, state.Health, state.RuntimeOutbounds, now)
-	keptTags := make(map[string]struct{}, len(nextManaged))
-	for _, outbound := range nextManaged {
-		keptTags[outbound.Tag] = struct{}{}
-	}
-	kept := make([]domain.RuntimeOutboundState, 0, len(state.RuntimeOutbounds)+len(nextManaged))
-	obsolete := make(map[string]struct{})
-	for _, outbound := range state.RuntimeOutbounds {
-		if outbound.Role != "reserve" && outbound.Role != "candidate" {
-			kept = append(kept, outbound)
-			continue
-		}
-		if _, retain := keptTags[outbound.Tag]; !retain {
-			obsolete[outbound.Tag] = struct{}{}
-		}
-	}
-	state.RuntimeOutbounds = append(kept, nextManaged...)
-
+	// The probe balancers are shared by the daemon and one-shot CLI processes.
+	// Hold the inter-process store lock for the whole probe batch so a manual
+	// AWG check cannot have its selected target replaced or cleared midway.
 	return runStoreWriteLocked(s, func() error {
+		results := make(chan result, len(candidates))
+		jobs := make(chan managedReserveCandidate)
+		var wg sync.WaitGroup
+		workerCount := min(2, len(candidates))
+		for slot := 0; slot < workerCount; slot++ {
+			slot := slot
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for candidate := range jobs {
+					started := time.Now()
+					probeCandidate := s.probeManagedOutbound
+					if s.managedOutboundProbe != nil {
+						probeCandidate = func(probeCtx context.Context, probeBackend backend.ManagedBackend, slot int, tag string) error {
+							return s.managedOutboundProbe(probeCtx, probeBackend, slot, tag)
+						}
+					}
+					probeErr := probeCandidate(ctx, managed, slot, candidate.tag)
+					results <- result{candidate: candidate, err: probeErr, latency: time.Since(started)}
+				}
+			}()
+		}
+		go func() {
+			for _, candidate := range candidates {
+				jobs <- candidate
+			}
+			close(jobs)
+			wg.Wait()
+			close(results)
+		}()
+
+		state.CandidateBackoff = cloneCandidateBackoff(state.CandidateBackoff)
+		state.Health = cloneHealthMap(state.Health)
+		successful := make([]managedReserveCandidate, 0, len(candidates))
+		for item := range results {
+			previous := state.Health[item.candidate.node.ID]
+			previous.NodeID = item.candidate.node.ID
+			if item.err == nil {
+				delete(state.CandidateBackoff, item.candidate.tag)
+				state.Health[item.candidate.node.ID] = probe.UpdateHealth(previous, true, item.latency, now, "", 2)
+				successful = append(successful, item.candidate)
+				continue
+			}
+			entry := state.CandidateBackoff[item.candidate.tag]
+			entry.Tag = item.candidate.tag
+			entry.ConsecutiveFailures++
+			entry.RetryAfter = now.Add(managedCandidateBackoff(entry.ConsecutiveFailures))
+			state.CandidateBackoff[item.candidate.tag] = entry
+			state.Health[item.candidate.node.ID] = probe.UpdateHealth(previous, false, item.latency, now, item.err.Error(), 2)
+		}
+
+		nextManaged := selectManagedReserveStates(successful, state.Health, state.RuntimeOutbounds, now)
+		keptTags := make(map[string]struct{}, len(nextManaged))
+		for _, outbound := range nextManaged {
+			keptTags[outbound.Tag] = struct{}{}
+		}
+		kept := make([]domain.RuntimeOutboundState, 0, len(state.RuntimeOutbounds)+len(nextManaged))
+		obsolete := make(map[string]struct{})
+		for _, outbound := range state.RuntimeOutbounds {
+			if outbound.Role != "reserve" && outbound.Role != "candidate" {
+				kept = append(kept, outbound)
+				continue
+			}
+			if _, retain := keptTags[outbound.Tag]; !retain {
+				obsolete[outbound.Tag] = struct{}{}
+			}
+		}
+		state.RuntimeOutbounds = append(kept, nextManaged...)
+
 		current, currentErr := s.autoSelectionSnapshotCurrentLocked(snapshot)
 		if currentErr != nil {
 			return currentErr
