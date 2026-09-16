@@ -2,7 +2,7 @@
 const tr=window.fastlaneText;
 const $ = id => document.getElementById(id);
 let pendingImport = null, addMode = 'link';
-let snapshot, awg, probeResults={}, activeJob = false, sending = false, lastJob = null;
+let snapshot, awgs=[], probeResults={}, activeJob = false, sending = false, lastJob = null;
 const pageControllers={};
 const jobNames = {'health-check':tr('Проверяем серверы'),'refresh':tr('Обновляем подписки'),'connect-auto':tr('Выбираем сервер'),'connect-manual':tr('Подключаем сервер'),'disconnect':tr('Отключаем VPN'),'add-subscription':tr('Добавляем серверы'),'remove-subscription':tr('Удаляем источник'),'settings':tr('Сохраняем настройки'),'routing':tr('Применяем маршруты'),'awg-import':tr('Импортируем AWG'),'awg-check':tr('Проверяем AWG'),'awg-connect':tr('Подключаем AWG'),'awg-disconnect':tr('Отключаем AWG'),'awg-remove':tr('Удаляем AWG')};
 const messages = {auth_required:tr('Войдите с ключом доступа.'),auth_rate_limited:tr('Слишком много попыток входа. Повторите через минуту.'),job_already_running:tr('Дождитесь завершения текущей операции.'),operation_failed:tr('Операция не выполнена. Проверьте данные и состояние подключения; подробности доступны в журнале службы.'),invalid_request:tr('Проверьте заполненные поля.'),feature_unavailable:tr('Эта функция недоступна в установленной службе.')};
@@ -47,7 +47,9 @@ function detectCountryCode(node) {
   }
   return '';
 }
-function active(node) { if(node.kind==='awg') return !!awg?.active; const state = snapshot.status.state; return state.connected && state.active_subscription_id === node.subscription_id && state.active_node_id === node.id; }
+function awgByID(id){return awgs.find(profile=>profile.id===id);}
+function activeAWG(){const state=snapshot?.status?.state||{};return awgByID(state.active_awg_profile_id||state.active_node_id)||awgs.find(profile=>profile.active);}
+function active(node) { if(node.kind==='awg') return !!awgByID(node.id)?.active; const state = snapshot.status.state; return state.connected && state.active_subscription_id === node.subscription_id && state.active_node_id === node.id; }
 function latencyMS(health) {
   if (!health?.healthy) return null;
   const value=String(health.last_latency || ''), scales={h:3600000,m:60000,s:1000,ms:1,'µs':.001,us:.001,ns:.000001};
@@ -57,28 +59,32 @@ function latencyMS(health) {
 }
 function pingText(health) { const value=latencyMS(health); return value===null?tr('Нет замера'):value+tr(' мс'); }
 function pingClass(health) {const value=latencyMS(health);return value===null?'':value<=100?'fl-latency-good':value<=200?'fl-latency-mid':value<=1000?'fl-latency-slow':'fl-latency-critical';}
-function awgNode() {
-  const version=awg?.profile?.version==='legacy'?'Legacy':'2.0';
-  return awg && awg.state!=='absent' ? {id:'awg-profile',subscription_id:'local-awg',kind:'awg',name:awg.name || 'AmneziaWG',remark:tr('Экспериментально')+' · AWG '+version,protocol:'amneziawg',address:awg.profile?.endpoint || ''} : null;
+function awgNodes() {
+  return awgs.filter(profile=>profile&&profile.state!=='absent').map(profile=>{
+    const version=profile.profile?.version==='legacy'?'Legacy':'2.0';
+    return {id:profile.id,subscription_id:'server-list',kind:'awg',name:profile.name || 'AmneziaWG',remark:tr('Экспериментально')+' · AWG '+version,protocol:'amneziawg',address:profile.profile?.endpoint || ''};
+  });
 }
 function subscriptions() {
-  const result=[...(snapshot.subscriptions || [])],node=awgNode();
-  if(node)result.push({id:'local-awg',display_name:tr('Файл AWG'),node_count:1,nodes:[node],source_type:'file',last_updated_at:awg.last_probe?.checked_at});
-  return result;
+	const result=(snapshot.subscriptions || []).map(sub=>({...sub,nodes:[...(sub.nodes||[])]})),nodes=awgNodes();
+	let serverList=result.find(sub=>sub.id==='server-list');
+	if(nodes.length&&!serverList){serverList={id:'server-list',display_name:'Server List',node_count:0,nodes:[],source_type:'raw'};result.push(serverList);}
+	if(serverList){serverList.nodes.push(...nodes);serverList.node_count=serverList.nodes.length;}
+	return result;
 }
 function nodeHealth(node) {
-  if(node.kind==='awg')return awg?.last_probe?{healthy:awg.last_probe.success,last_latency:awg.last_probe.latency_ms+'ms',last_checked_at:awg.last_probe.checked_at}:null;
+	if(node.kind==='awg'){const profile=awgByID(node.id);return profile?.last_probe?{healthy:profile.last_probe.success,last_latency:profile.last_probe.latency_ms+'ms',last_checked_at:profile.last_probe.checked_at}:null;}
   const measured=probeResults[node.subscription_id+'/'+node.id],stored=snapshot.status.state.health?.[node.id];
   return measured&&(!stored||new Date(measured.checked_at)>new Date(stored.last_checked_at))?{healthy:measured.success,last_latency:measured.success?measured.latency_ms+'ms':'',last_checked_at:measured.checked_at}:stored;
 }
 function connectNode(node) {
   if(hidden(node)){notice(tr('Сервер скрыт правилом. Измените правила скрытия в настройках.'),true);return;}
-  if(node.kind==='awg')return operation('awg/connect');
+	if(node.kind==='awg')return operation('awg/profiles/'+encodeURIComponent(node.id)+'/connect');
   return operation('connect','POST',{mode:'manual',subscription_id:node.subscription_id,node_id:node.id});
 }
 function renderSources() {
   const sources=subscriptions(),select=$('source'),old=select.value;
-  const options=sources.map(sub=>({id:sub.id,label:sub.display_name || sub.id,meta:sub.id==='local-awg'?tr('Файл · экспериментально'):sub.last_error?tr('Ошибка обновления'):expired(sub)?tr('Подписка истекла'):tr('Обновлён: ')+date(sub.last_updated_at),count:sub.node_count}));
+  const options=sources.map(sub=>({id:sub.id,label:sub.display_name || sub.id,meta:sub.last_error?tr('Ошибка обновления'):expired(sub)?tr('Подписка истекла'):tr('Обновлён: ')+date(sub.last_updated_at),count:sub.node_count}));
   if(sources.length!==1)options.unshift({id:'',label:tr('Все серверы'),meta:tr('Общий пул'),count:sources.reduce((n,s)=>n+(expired(s)?0:s.node_count),0)});
   const hiddenCount=sources.flatMap(s=>s.nodes||[]).filter(hidden).length;
   if(hiddenCount)options.push({id:'hidden',label:tr('Скрытые'),meta:tr('Исключены из автовыбора'),count:hiddenCount});
@@ -97,7 +103,8 @@ function renderServers() {
   if(!snapshot)return;
   renderSources();
   const hiddenOnly=$('source').value==='hidden',selected=hiddenOnly?'':$('source').value,query=$('search').value.trim().toLocaleLowerCase(),protocol=$('protocol-filter').value;
-  $('remove-source').hidden=!selected;
+	const selectedSource=subscriptions().find(sub=>sub.id===selected);
+	$('remove-source').hidden=!selected||!(selectedSource?.nodes||[]).some(node=>node.kind!=='awg');
   const rows=subscriptions().filter(sub=>selected?sub.id===selected:!expired(sub)).flatMap(sub=>(sub.nodes || []).map(node=>({sub,node})));
   const country=$('country-filter').value, countryOptions=[...new Set(rows.map(r=>countryCode(r.node)).filter(Boolean))].sort();
   const signature=countryOptions.join();if($('country-filter').dataset.signature!==signature){$('country-filter').replaceChildren(new Option(tr('Все страны'),''),...countryOptions.map(code=>new Option(window.FastLaneCountries.name(code),code)));$('country-filter').value=countryOptions.includes(country)?country:'';$('country-filter').dataset.signature=signature;}
@@ -111,7 +118,7 @@ function renderServers() {
   table.className='fl-table '+(selected?'fl-table-single':'fl-table-all');table.querySelector('th:nth-child(2)').hidden=!!selected;
   const body=table.querySelector('tbody'),existing=new Map(Array.from(body.children,row=>[row.dataset.key,row]));
   visible.forEach(({sub,node},index)=>{
-    const key=sub.id+'/'+node.id,health=nodeHealth(node),isActive=active(node),isHidden=hidden(node),unavailable=expired(sub)||isHidden||(node.kind==='awg'&&['incompatible','invalid'].includes(awg.state));
+    const profile=node.kind==='awg'?awgByID(node.id):null,key=sub.id+'/'+node.id,health=nodeHealth(node),isActive=active(node),isHidden=hidden(node),unavailable=expired(sub)||isHidden||(node.kind==='awg'&&['incompatible','invalid'].includes(profile?.state));
     let row=existing.get(key);
     if(!row){
       row=element('tr');row.dataset.key=key;
@@ -125,10 +132,11 @@ function renderServers() {
       toggle.onclick=event=>{event.stopPropagation();const opening=menu.hidden;document.querySelectorAll('.fl-more-menu').forEach(e=>e.hidden=true);document.querySelectorAll('.fl-more-toggle').forEach(e=>e.setAttribute('aria-expanded','false'));menu.hidden=!opening;toggle.setAttribute('aria-expanded',String(opening));};
       const connect=element('button',tr('Подключить'),'fl-button');connect.dataset.operation='';connect.dataset.action='connect';connect.onclick=()=>{menu.hidden=true;connectNode(row.flNode);};menu.append(connect);
       if(node.kind==='awg'){
-        const check=element('button',tr('Проверить пинг (GET)'),'fl-button');check.dataset.operation='';check.dataset.action='check';check.onclick=()=>{menu.hidden=true;operation('awg/check');};
-        const remove=element('button',tr('Удалить профиль'),'fl-button fl-button-danger');remove.dataset.operation='';remove.onclick=()=>confirmAction(tr('Удалить профиль AWG? Если он активен, интернет пойдёт напрямую.'),()=>operation('awg','DELETE'));
-        const version=awg?.profile?.version==='legacy'?'Legacy':'2.0';
-        menu.append(check,remove,element('span','AWG '+version+' · '+tr('Экспериментально. Не участвует в автовыборе.'),'fl-more-note'),element('span','','fl-more-note awg-probe-detail'));
+        const check=element('button',tr('Проверить пинг (GET)'),'fl-button');check.dataset.operation='';check.dataset.action='check';check.onclick=()=>{menu.hidden=true;operation('awg/profiles/'+encodeURIComponent(row.flNode.id)+'/check');};
+        const hide=element('button',tr('Скрыть'),'fl-button fl-button-warning');hide.dataset.operation='';hide.dataset.action='hide';hide.onclick=()=>{menu.hidden=true;if(keywordHidden(row.flNode)){location.hash='settings';return;}operation('vpn/hidden','POST',{subscription_id:'server-list',node_id:row.flNode.id,hidden:!hidden(row.flNode)});};
+        const remove=element('button',tr('Удалить профиль'),'fl-button fl-button-danger');remove.dataset.operation='';remove.onclick=()=>confirmAction(tr('Удалить профиль AWG? Если он активен, интернет пойдёт напрямую.'),()=>operation('awg/profiles/'+encodeURIComponent(row.flNode.id),'DELETE'));
+        const version=profile?.profile?.version==='legacy'?'Legacy':'2.0';
+        menu.append(check,hide,remove,element('span','AWG '+version+' · '+tr('Экспериментально. Не участвует в автовыборе.'),'fl-more-note'),element('span','','fl-more-note awg-probe-detail'));
       }else{
         const check=element('button',tr('Проверить пинг (GET)'),'fl-button');check.dataset.operation='';check.dataset.action='check';check.onclick=()=>{menu.hidden=true;operation('vpn/check','POST',{subscription_id:row.flNode.subscription_id,node_id:row.flNode.id});};
         const hide=element('button',tr('Скрыть'),'fl-button fl-button-warning');hide.dataset.operation='';hide.dataset.action='hide';hide.onclick=()=>{menu.hidden=true;if(keywordHidden(row.flNode)){location.hash='settings';return;}operation('vpn/hidden','POST',{subscription_id:row.flNode.subscription_id,node_id:row.flNode.id,hidden:!hidden(row.flNode)});};
@@ -145,12 +153,12 @@ function renderServers() {
     row.querySelector('.fl-server-name').textContent=node.name || node.address;row.querySelector('.fl-server-address').textContent=node.kind==='awg'?tr('Экспериментально · ')+node.address:(node.remark!==node.name?node.remark:node.address);
     cells[1].textContent=sub.display_name || sub.id;cells[1].hidden=!!selected;cells[2].firstChild.textContent=node.kind==='awg'?'AmneziaWG':node.protocol.toUpperCase();
     cells[3].firstChild.textContent=pingText(health);cells[3].firstChild.className='fl-latency '+pingClass(health);
-    const stateLabel=expired(sub)?tr('Истекла'):isHidden?tr('Скрыт'):isActive?tr('Активен'):node.kind==='awg'&&awg.state==='incompatible'?tr('Несовместим'):node.kind==='awg'&&awg.state==='invalid'?tr('Ошибка профиля'):health?.healthy?(latencyMS(health)>1000?tr('Медленный'):tr('Готов')):health?.last_checked_at?tr('Недоступен'):tr('Не проверен');
+    const stateLabel=expired(sub)?tr('Истекла'):isHidden?tr('Скрыт'):isActive?tr('Активен'):node.kind==='awg'&&profile?.state==='incompatible'?tr('Несовместим'):node.kind==='awg'&&profile?.state==='invalid'?tr('Ошибка профиля'):health?.healthy?(latencyMS(health)>1000?tr('Медленный'):tr('Готов')):health?.last_checked_at?tr('Недоступен'):tr('Не проверен');
     cells[4].firstChild.textContent=stateLabel;cells[4].firstChild.className='fl-node-status '+(isActive?'fl-node-status-active':stateLabel===tr('Недоступен')?'bad':'');
     row.querySelector('[data-action=connect]').dataset.unavailable=String(unavailable||(isActive&&snapshot.status.state.mode==='manual'));
     row.querySelector('[data-action=connect]').textContent=isActive&&snapshot.status.state.mode==='manual'?tr('Закреплён'):tr('Подключить');
     if(node.kind!=='awg'){row.querySelector('[data-action=check]').dataset.unavailable=String(unavailable);const hide=row.querySelector('[data-action=hide]');hide.textContent=keywordHidden(node)?tr('Изменить правила скрытия'):isHidden?tr('Восстановить'):tr('Скрыть');hide.dataset.unavailable=String(false);}
-    if(node.kind==='awg'){row.querySelector('[data-action=check]').dataset.unavailable=String(unavailable);row.querySelector('.awg-probe-detail').textContent=tr('Интерфейс: ')+(awg.interface?.up?tr('поднят'):tr('не поднят'))+'. HTTPS: '+(awg.last_probe?(awg.last_probe.success?tr('прошёл'):tr('не прошёл'))+' · '+date(awg.last_probe.checked_at):tr('не проверен'));}
+    if(node.kind==='awg'){row.querySelector('[data-action=check]').dataset.unavailable=String(unavailable);const hide=row.querySelector('[data-action=hide]');hide.textContent=keywordHidden(node)?tr('Изменить правила скрытия'):isHidden?tr('Восстановить'):tr('Скрыть');row.querySelector('.awg-probe-detail').textContent=tr('Интерфейс: ')+(profile?.interface?.up?tr('поднят'):tr('не поднят'))+'. HTTPS: '+(profile?.last_probe?(profile.last_probe.success?tr('прошёл'):tr('не прошёл'))+' · '+date(profile.last_probe.checked_at):tr('не проверен'));}
     if(body.children[index]!==row){const focus=document.activeElement;body.insertBefore(row,body.children[index]||null);if(row.contains(focus))focus.focus({preventScroll:true});}
   });
   existing.forEach(row=>row.remove());setBusy();
@@ -158,17 +166,18 @@ function renderServers() {
 function fill(form, values) { for (const [name,value] of Object.entries(values)) { if (form.elements[name]) form.elements[name].value=value ?? ''; } }
 function render() {
   const status=snapshot.status, state=status.state, settings=status.settings, connected=state.connected && state.operational_mode!=='direct';
+	const awg=activeAWG();
   const recovering=state.operational_mode==='recovering';
   $('connection-title').textContent=recovering?tr('Восстанавливаем VPN'):connected?tr('VPN подключён'):state.mode==='disconnected'?tr('VPN отключён — интернет напрямую'):tr('VPN недоступен — интернет напрямую');
   $('connection-title').parentElement.className='fl-status-cell fl-status-main fl-status-main-'+(recovering?'recovering':connected?'vpn':'direct');
   $('connection-dot').className='fl-dot '+(connected?'fl-dot-on':recovering?'fl-dot-recovering':'');
   $('connection-detail').textContent=connected?(state.active_node_name || status.active_node?.name || (state.active_connection_kind==='amneziawg'?awg?.name:tr('Нет в подписке'))):'—';
-  $('connection-source').textContent=connected?(state.active_connection_kind==='amneziawg'?tr('Файл AWG'):status.active_subscription?.display_name || '—'):'—';
+	$('connection-source').textContent=connected?(state.active_connection_kind==='amneziawg'?'Server List':status.active_subscription?.display_name || '—'):'—';
   $('selection-mode').textContent=state.mode==='auto'?tr('Авто'):state.mode==='manual'?tr('Вручную'):tr('Отключено');
   $('auto').setAttribute('aria-pressed',String(state.mode==='auto'));$('manual').setAttribute('aria-pressed',String(state.mode==='manual'));
   $('disconnect').dataset.unavailable=String(state.mode==='disconnected');
-  $('connection-ping').textContent=connected?pingText(state.active_connection_kind==='amneziawg'?nodeHealth({kind:'awg'}):state.health?.[state.active_node_id]):'—';
-  $('connection-ping').className='fl-status-cell-value '+pingClass(state.active_connection_kind==='amneziawg'&&awg?nodeHealth({kind:'awg'}):state.health?.[state.active_node_id]);
+	$('connection-ping').textContent=connected?pingText(state.active_connection_kind==='amneziawg'?nodeHealth({kind:'awg',id:awg?.id}):state.health?.[state.active_node_id]):'—';
+	$('connection-ping').className='fl-status-cell-value '+pingClass(state.active_connection_kind==='amneziawg'&&awg?nodeHealth({kind:'awg',id:awg.id}):state.health?.[state.active_node_id]);
   const job=snapshot.job; activeJob=job.running;
   $('cancel-check').hidden=!job.running||!['health-check','connect-auto'].includes(job.kind);
   $('job').textContent=job.running?(jobNames[job.kind] || tr('Выполняем операцию…'))+tr('. Можно закрыть вкладку.'):'';
@@ -191,7 +200,7 @@ function render() {
 async function reload() {
   try {
     const current=await api('state');
-    try{awg=await api('awg');}catch(error){notice(tr('Не удалось обновить состояние AWG: ')+error.message,true);awg=null;}
+	try{awgs=await api('awg/profiles');}catch(error){notice(tr('Не удалось обновить состояние AWG: ')+error.message,true);awgs=[];}
     try{probeResults=await api('vpn/probes')||{};}catch{probeResults={};}
     snapshot=current;$('application').hidden=false;$('login').hidden=true;$('logout').hidden=false;render();
   } catch(error) {if(snapshot){notice(tr('Нет связи с роутером. Показано последнее полученное состояние.'),true);document.querySelectorAll('[data-operation]').forEach(b=>b.disabled=true);}else if($('login').hidden)notice(error.message,true);}
@@ -203,8 +212,8 @@ $('login-form').addEventListener('submit',async event=>{event.preventDefault();c
 $('logout').addEventListener('click',async()=>{try{await api('session','DELETE');showLogin();notice(tr('Вы вышли из панели.'));}catch(error){notice(error.message,true);}});
 $('auto').addEventListener('click',()=>operation('connect','POST',{mode:'auto',subscription_id:'all'}));
 $('disconnect').addEventListener('click',()=>confirmAction(tr('Отключить VPN? Трафик будет идти напрямую.'),()=>operation('disconnect')));
-$('refresh').addEventListener('click',()=>{const source=$('source').value;if(source==='local-awg'){notice(tr('AWG добавлен файлом: для обновления импортируйте новый файл.'));return;}return source&&source!=='hidden'?operation('vpn/refresh','POST',{subscription_id:source}):operation('jobs/refresh');});
-$('check').addEventListener('click',()=>{const source=$('source').value;return source==='local-awg'?operation('awg/check'):operation('jobs/health-check','POST',{subscription_id:source==='hidden'?'all':source||'all'});});
+$('refresh').addEventListener('click',()=>{const source=$('source').value;return source&&source!=='hidden'?operation('vpn/refresh','POST',{subscription_id:source}):operation('jobs/refresh');});
+$('check').addEventListener('click',()=>{const source=$('source').value;return operation('jobs/health-check','POST',{subscription_id:source==='hidden'?'all':source||'all'});});
 $('cancel-check').onclick=async()=>{try{await api('jobs/cancel-check','POST',{sequence:snapshot.job.sequence});await reload();}catch(error){notice(error.message,true);}};
 ['search','source','country-filter','protocol-filter','sort'].forEach(id=>$(id).addEventListener(id==='search'?'input':'change',renderServers));
 $('manual').onclick=()=>{location.hash='vpn';$('server-list').querySelector('tr[tabindex="0"]')?.focus();notice(tr('Выберите сервер в списке для ручного подключения.'));};
@@ -225,17 +234,16 @@ $('add-form').addEventListener('submit',async event=>{
     const raw=file?await file.text():form.elements.source.value.trim();if(!raw)throw Error(tr('Укажите ссылку или конфигурацию.'));
     const isAWG=!!file&&(/\.conf$/i.test(file.name)||(/^\s*\[Interface\]\s*$/im.test(raw)&&/^\s*\[Peer\]\s*$/im.test(raw)));
     if(isAWG&&file.size>1024*1024)throw Error(tr('Профиль AWG должен быть меньше 1 МБ.'));
-    if(isAWG&&awg?.active)throw Error(tr('Сначала отключите активный AWG, затем замените профиль.'));
     const send=async()=>{
       pendingImport=isAWG?'awg-import':'add-subscription';
       const payload=isAWG?{name:form.elements.name.value.trim()||file.name.replace(/\.conf$/i,''),config:raw}:{name:form.elements.name.value,file_name:file?.name || ''};
       if(!isAWG){if(!file&&/^https?:\/\//i.test(raw))payload.url=raw;else payload.raw=raw;}
       if(!await operation(isAWG?'awg':'subscriptions','POST',payload)){pendingImport=null;$('add-error').textContent=$('notice').textContent || tr('Не удалось отправить файл.');}
     };
-    if(isAWG&&awgNode())confirmAction(tr('Уже есть профиль AWG. Заменить его новым файлом?'),send);else await send();
+	await send();
   }catch(error){$('add-error').textContent=error.message;}
 });
-$('remove-source').onclick=()=>{const id=$('source').value;if(id)confirmAction(id==='local-awg'?tr('Удалить профиль AWG? Активный туннель будет отключён.'):tr('Удалить этот источник и все его серверы?'),()=>operation(id==='local-awg'?'awg':'subscriptions/'+encodeURIComponent(id),'DELETE'));};
+$('remove-source').onclick=()=>{const id=$('source').value;if(id)confirmAction(tr('Удалить этот источник и все его серверы?'),()=>operation('subscriptions/'+encodeURIComponent(id),'DELETE'));};
 document.addEventListener('click',event=>{if(!event.target.closest('.fl-more')){document.querySelectorAll('.fl-more-menu').forEach(e=>e.hidden=true);document.querySelectorAll('.fl-more-toggle').forEach(e=>e.setAttribute('aria-expanded','false'));}});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.querySelectorAll('.fl-more-menu').forEach(e=>e.hidden=true);document.querySelectorAll('.fl-more-toggle').forEach(e=>e.setAttribute('aria-expanded','false'));}});
 for(const [id,icon] of [['add-toggle','plus'],['refresh','refresh'],['check','bolt'],['remove-source','trash']])$(id).prepend(window.fastlaneIcon(icon));

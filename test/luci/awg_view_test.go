@@ -9,14 +9,14 @@ func TestFastLaneVPNViewUsesAWGCLIContract(t *testing.T) {
 	t.Parallel()
 	source := readVPNViewSource(t)
 	for _, want := range []string{
-		"this.execJSON([ '--json', 'awg', 'status' ])",
+		"this.execJSON([ '--json', 'awg', 'list' ])",
 		"fs.exec('/usr/libexec/fastlane-awg-import-prepare', [])",
 		"fs.write(importPath, content)",
 		"[ 'awg', 'import', '--file', importPath ]",
-		"[ 'awg', 'connect' ]",
-		"[ 'awg', 'check' ]",
+		"[ 'awg', 'connect', '--id', profileID ]",
+		"[ 'awg', 'check', '--id', profileID ]",
 		"[ 'awg', 'disconnect' ]",
-		"[ 'awg', 'remove' ]",
+		"[ 'awg', 'remove', '--id', profileID ]",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("VPN view missing AmneziaWG CLI contract marker %q", want)
@@ -32,7 +32,7 @@ func TestFastLaneVPNViewImportsAWGConfThroughCommonFilePicker(t *testing.T) {
 		"Choose configuration files",
 		"/\\.conf$/i.test(file.name || '')",
 		"self.importAWGFileContent(file.name, content)",
-		"You can import only one AmneziaWG profile at a time.",
+		"selected.forEach(function(file, index)",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("VPN view missing common AWG file import marker %q", want)
@@ -80,12 +80,12 @@ func TestFastLaneVPNViewKeepsAWGInCommonServerList(t *testing.T) {
 	t.Parallel()
 	source := readVPNViewSource(t)
 	for _, want := range []string{
-		"id: 'amneziawg'",
-		"source_type: 'file'",
+		"id: 'server-list'",
+		"source_type: 'raw'",
 		"kind: 'awg'",
-		"display_name: _('AWG file')",
+		"display_name: 'Server List'",
 		"Experimental. It does not participate in automatic selection.",
-		"selected && selected.id === 'amneziawg'",
+		"this.isManuallyHidden(sub.id, node.id)",
 		"E('section', { class: 'fl-server-panel'",
 	} {
 		if !strings.Contains(source, want) {

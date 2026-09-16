@@ -2,24 +2,24 @@
 
 ## Scope
 
-This prototype adds one manually managed AmneziaWG Legacy or 2.0 profile to Fast Lane. It is intentionally separate from Xray subscriptions and does not participate in automatic speed-based server selection.
+This prototype adds a manually managed collection of AmneziaWG Legacy and 2.0 profiles to Fast Lane. Profiles are shown in the existing `Server List`; they remain separate from Xray subscriptions and do not participate in automatic speed-based server selection.
 
 The prototype was exercised on an isolated OpenWrt 24.10.5 x86_64 QEMU stand with Xray v26.7.28 and a kernel AmneziaWG interface managed by netifd. It has not been installed on the user's NanoPi and the QEMU measurements below must not be treated as NanoPi performance figures.
 
 ## Implemented
 
-- Import one native `.conf` containing exactly one interface and one peer.
+- Import up to ten native `.conf` files per UI batch, each containing exactly one interface and one peer. Re-importing the same effective profile is idempotent.
 - Accept Legacy profiles with `S1`/`S2` and AWG 2.0 profiles with `S1`-`S4`; reject partially specified `S3`/`S4` and unsupported AWG 3 parameters.
 - Normalize bare interface IPv4/IPv6 addresses to `/32` and `/128`, matching exports produced by the Amnezia client.
 - Reject `PreUp`, `PostUp`, `PreDown`, and `PostDown`. Imported DNS, table, and route ownership are not applied.
-- Keep the private key in a `0600` file and omit it and the raw profile from status, diagnostics, command arguments, and logs.
-- Verify the running kernel ABI before using the kernel module. Fast Lane never force-installs a module.
+- Keep every private profile in its own `0600` file under a `0700` directory and omit keys and raw profiles from status, diagnostics, command arguments, and logs.
+- Verify the running kernel ABI before using the kernel module. If no compatible module exists, use the pinned, statically built `amneziawg-go` runtime only when the installed netifd protocol supports it and Linux TUN is available. Fast Lane never force-installs a module.
 - Create a netifd-managed `fastlane_awg` interface and a dedicated route table. The VPN endpoint remains reachable through WAN.
 - Add an Xray `freedom` outbound pinned to the AWG interface and route mark. Xray continues to own GeoIP, GeoSite, and direct/proxy decisions.
 - Check the candidate through its own Xray probe inbound before switching the user route.
 - Switch manually between direct/VLESS and AWG through the running Xray API.
 - On AWG failure, use a healthy VLESS replacement when available; otherwise select the direct outbound. Return from direct mode only after two successful AWG checks separated by five seconds.
-- Expose import, check, connect, disconnect, and delete actions in CLI and LuCI, with separate interface and internet-check states.
+- Expose import, check, connect, disconnect, hide/restore, and per-profile delete actions in CLI and LuCI, with separate interface and internet-check states.
 
 ## Stand results
 
@@ -44,9 +44,8 @@ The same full scenario also passed in Legacy mode with only `S1`/`S2` and a bare
 
 ## Remaining limitations
 
-- One AWG profile and one peer only.
+- One peer per imported profile; one AWG interface can be prepared/active at a time.
 - Manual AWG selection only; AWG does not yet join the reserve ranking or speed optimizer.
-- No public release and no automatic module/package installation.
-- Kernel package availability and ABI compatibility must be confirmed separately for the target NanoPi firmware.
+- The userspace runtime is packaged with Fast Lane, but TUN/netifd compatibility must still be confirmed on the target NanoPi before AWG is enabled there.
 - Existing TCP/UDP sessions may break when the failed tunnel disappears; only new traffic is moved to the replacement route.
-- A target-device trial is still required to measure NanoPi CPU, memory, throughput, thermals, and real recovery time before release.
+- A target-device trial is still required to confirm the supplied profiles and measure NanoPi CPU, memory, throughput, thermals, and real recovery time.

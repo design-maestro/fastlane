@@ -54,6 +54,10 @@ fastlane_binary_path() {
 	scope_path "/usr/bin/fastlane"
 }
 
+fastlane_awg_runtime_path() {
+	scope_path "/usr/bin/amneziawg-go"
+}
+
 fastlane_service_path() {
 	scope_path "/etc/init.d/fastlane"
 }
@@ -75,6 +79,10 @@ xray_config_path() {
 
 fastlane_cron_helper_path() {
 	scope_path "/usr/libexec/fastlane-cron"
+}
+
+fastlane_awg_runtime_source_path() {
+	scope_path "/usr/libexec/fastlane-amneziawg-go"
 }
 
 fastlane_self_update_helper_path() {
@@ -280,6 +288,8 @@ fi
 
 fastlane_root="$(fastlane_root_path)"
 fastlane_binary="$(fastlane_binary_path)"
+fastlane_awg_runtime="$(fastlane_awg_runtime_path)"
+fastlane_awg_runtime_source="$(fastlane_awg_runtime_source_path)"
 fastlane_service="$(fastlane_service_path)"
 xray_binary="$(xray_binary_path)"
 xray_service="$(xray_service_path)"
@@ -325,6 +335,8 @@ remove_manifest_packages "${install_manifest}"
 restore_manifest_packages "${install_manifest}"
 
 remove_path "${fastlane_binary}"
+remove_path "${fastlane_awg_runtime}"
+remove_path "${fastlane_awg_runtime_source}"
 remove_path "${fastlane_service}"
 remove_path "${fastlane_root}"
 

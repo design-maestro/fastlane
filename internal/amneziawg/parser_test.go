@@ -496,3 +496,24 @@ func replaceValue(input, key, value string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+func TestStableIDUsesValidatedProfileSemantics(t *testing.T) {
+	first, err := Parse([]byte(validProfile("")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Parse([]byte("# imported copy\n" + replaceValue(validProfile(""), "DNS", "8.8.8.8")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.StableID() != second.StableID() {
+		t.Fatalf("equivalent profiles got different IDs: %s != %s", first.StableID(), second.StableID())
+	}
+	changed, err := Parse([]byte(strings.Replace(validProfile(""), "Endpoint = vpn.example.com:51820", "Endpoint = backup.example.com:51820", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.StableID() == changed.StableID() {
+		t.Fatal("different runtime profiles got the same stable ID")
+	}
+}

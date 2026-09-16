@@ -27,6 +27,7 @@ type Compatibility struct {
 	Compatible    bool   `json:"compatible"`
 	Kernel        string `json:"kernel,omitempty"`
 	Module        string `json:"module,omitempty"`
+	Runtime       string `json:"runtime,omitempty"`
 	Tools         string `json:"tools,omitempty"`
 	Netifd        bool   `json:"netifd"`
 	FailureReason string `json:"failure_reason,omitempty"`
@@ -92,12 +93,41 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 		return result, errors.New(result.FailureReason)
 	}
 	result.Tools = strings.TrimSpace(string(tools))
+	userspaceFailure := ""
+	userspaceAvailable := func() bool {
+		version, userspaceErr := c.run(ctx, nil, "amneziawg-go", "--version")
+		if userspaceErr != nil {
+			userspaceFailure = "amneziawg-go is not installed"
+			return false
+		}
+		protoScript, readErr := os.ReadFile(protoPath)
+		if readErr != nil || !bytes.Contains(protoScript, []byte("amneziawg-go")) {
+			userspaceFailure = "installed AmneziaWG netifd protocol does not support amneziawg-go"
+			return false
+		}
+		if info, statErr := os.Stat(c.rooted("dev/net/tun")); statErr != nil || info.IsDir() {
+			userspaceFailure = "Linux TUN device is not available"
+			return false
+		}
+		result.Runtime = strings.TrimSpace(string(version))
+		result.Compatible = true
+		return true
+	}
+	fallbackFailure := func(primary string) string {
+		if userspaceFailure != "" {
+			return primary + "; userspace fallback unavailable: " + userspaceFailure
+		}
+		return primary
+	}
 	verifiedByPackageABI := false
 	vermagic, err := c.run(ctx, nil, "modinfo", "-F", "vermagic", "amneziawg")
 	if err != nil {
 		modulePath := c.rooted(filepath.Join("lib/modules", result.Kernel, "amneziawg.ko"))
 		if info, statErr := os.Stat(modulePath); statErr != nil || info.IsDir() {
-			result.FailureReason = "AmneziaWG kernel module is not installed for the running kernel"
+			if userspaceAvailable() {
+				return result, nil
+			}
+			result.FailureReason = fallbackFailure("AmneziaWG kernel module is not installed for the running kernel")
 			return result, errors.New(result.FailureReason)
 		}
 		moduleStatus, moduleErr := c.run(ctx, nil, "opkg", "status", "kmod-amneziawg")
@@ -107,7 +137,10 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 		compactDepends := strings.NewReplacer(" ", "", "\t", "").Replace(moduleDepends)
 		compactVersion := strings.NewReplacer(" ", "", "\t", "").Replace(kernelVersion)
 		if moduleErr != nil || kernelErr != nil || compactVersion == "" || !strings.Contains(compactDepends, "kernel(="+compactVersion+")") {
-			result.FailureReason = fmt.Sprintf("cannot confirm AmneziaWG module compatibility with the installed kernel ABI (dependency %q, kernel %q)", moduleDepends, kernelVersion)
+			if userspaceAvailable() {
+				return result, nil
+			}
+			result.FailureReason = fallbackFailure(fmt.Sprintf("cannot confirm AmneziaWG module compatibility with the installed kernel ABI (dependency %q, kernel %q)", moduleDepends, kernelVersion))
 			return result, errors.New(result.FailureReason)
 		}
 		result.Module = "kernel ABI " + kernelVersion
@@ -115,7 +148,10 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 	} else {
 		result.Module = strings.TrimSpace(string(vermagic))
 		if result.Module == "" || !strings.HasPrefix(result.Module, result.Kernel+" ") && result.Module != result.Kernel {
-			result.FailureReason = fmt.Sprintf("AmneziaWG module was built for a different kernel (running %s)", result.Kernel)
+			if userspaceAvailable() {
+				return result, nil
+			}
+			result.FailureReason = fallbackFailure(fmt.Sprintf("AmneziaWG module was built for a different kernel (running %s)", result.Kernel))
 			return result, errors.New(result.FailureReason)
 		}
 	}
@@ -124,12 +160,17 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 	// compatibility proof and successful installation proves dependencies.
 	if !verifiedByPackageABI {
 		if _, err := c.run(ctx, nil, "modprobe", "-n", "amneziawg"); err == nil {
+			result.Runtime = "kernel"
 			result.Compatible = true
 			return result, nil
 		}
-		result.FailureReason = "AmneziaWG kernel module dependencies are incompatible"
+		if userspaceAvailable() {
+			return result, nil
+		}
+		result.FailureReason = fallbackFailure("AmneziaWG kernel module dependencies are incompatible")
 		return result, errors.New(result.FailureReason)
 	}
+	result.Runtime = "kernel"
 	result.Compatible = true
 	return result, nil
 }

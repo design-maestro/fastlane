@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,19 +14,70 @@ import (
 	"github.com/design-maestro/fastlane/internal/probe"
 )
 
-type awgProfileMemoryStore struct{ raw []byte }
-
-func (s *awgProfileMemoryStore) SaveAWGProfile(raw []byte) error {
-	s.raw = append([]byte(nil), raw...)
-	return nil
+type awgProfileMemoryStore struct {
+	raw      []byte
+	rawByID  map[string][]byte
+	metadata []amneziawg.ProfileMetadata
+	legacy   []byte
 }
-func (s *awgProfileMemoryStore) LoadAWGProfile() ([]byte, error) {
+
+func (s *awgProfileMemoryStore) SaveAWGProfile(metadata amneziawg.ProfileMetadata, raw []byte) (bool, error) {
+	for _, existing := range s.metadata {
+		if existing.ID == metadata.ID {
+			return false, nil
+		}
+	}
+	s.raw = append([]byte(nil), raw...)
+	if s.rawByID == nil {
+		s.rawByID = make(map[string][]byte)
+	}
+	s.rawByID[metadata.ID] = append([]byte(nil), raw...)
+	s.metadata = append(s.metadata, metadata)
+	return true, nil
+}
+func (s *awgProfileMemoryStore) ListAWGProfiles() ([]amneziawg.ProfileMetadata, error) {
+	if len(s.metadata) == 0 && len(s.raw) > 0 {
+		profile, err := amneziawg.Parse(s.raw)
+		if err != nil {
+			return nil, err
+		}
+		s.metadata = []amneziawg.ProfileMetadata{{ID: profile.StableID(), Name: profile.Peer.Endpoint}}
+		if s.rawByID == nil {
+			s.rawByID = map[string][]byte{profile.StableID(): append([]byte(nil), s.raw...)}
+		}
+	}
+	return append([]amneziawg.ProfileMetadata(nil), s.metadata...), nil
+}
+func (s *awgProfileMemoryStore) LoadAWGProfile(id string) ([]byte, error) {
+	if raw := s.rawByID[id]; len(raw) > 0 {
+		return append([]byte(nil), raw...), nil
+	}
 	if len(s.raw) == 0 {
 		return nil, errors.New("profile missing")
 	}
 	return append([]byte(nil), s.raw...), nil
 }
-func (s *awgProfileMemoryStore) RemoveAWGProfile() error { s.raw = nil; return nil }
+func (s *awgProfileMemoryStore) RemoveAWGProfile(id string) error {
+	delete(s.rawByID, id)
+	filtered := s.metadata[:0]
+	for _, profile := range s.metadata {
+		if profile.ID != id {
+			filtered = append(filtered, profile)
+		}
+	}
+	s.metadata = filtered
+	if len(s.metadata) == 0 {
+		s.raw = nil
+	}
+	return nil
+}
+func (s *awgProfileMemoryStore) LoadLegacyAWGProfile() ([]byte, error) {
+	if len(s.legacy) == 0 {
+		return nil, os.ErrNotExist
+	}
+	return append([]byte(nil), s.legacy...), nil
+}
+func (s *awgProfileMemoryStore) RemoveLegacyAWGProfile() error { s.legacy = nil; return nil }
 
 type awgControllerFake struct {
 	prepared     int
@@ -337,6 +389,102 @@ func TestRestoreUnavailableAWGFailsOpenWithoutStoppingXray(t *testing.T) {
 	}
 	if stateStore.state.CurrentOperation != nil {
 		t.Fatalf("switch intent was not resolved: %+v", stateStore.state.CurrentOperation)
+	}
+}
+
+func TestAWGImportsStackAndDuplicateIsIdempotent(t *testing.T) {
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: domain.DefaultRuntimeState()}
+	profileStore := &awgProfileMemoryStore{}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: profileStore})
+
+	first, err := service.ImportAWGProfile("Primary", []byte(validAWGProfile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := service.ImportAWGProfile("Renamed duplicate", []byte("# comment\n"+validAWGProfile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRaw := strings.Replace(validAWGProfile, "198.51.100.1:51820", "198.51.100.2:51820", 1)
+	second, err := service.ImportAWGProfile("Backup", []byte(secondRaw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := service.ListAWGStatuses(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != duplicate.ID || first.ID == second.ID || len(statuses) != 2 {
+		t.Fatalf("unexpected collection: first=%s duplicate=%s second=%s statuses=%+v", first.ID, duplicate.ID, second.ID, statuses)
+	}
+	if _, err := service.GetAWGStatus(context.Background()); err == nil || !strings.Contains(err.Error(), "specify --id") {
+		t.Fatalf("multiple-profile legacy default must require an ID, got %v", err)
+	}
+	stateStore.state.ActiveConnectionKind = "amneziawg"
+	stateStore.state.ActiveAWGProfileID = second.ID
+	active, err := service.GetAWGStatus(context.Background())
+	if err != nil || active.ID != second.ID {
+		t.Fatalf("legacy default did not select active profile: %+v, %v", active, err)
+	}
+}
+
+func TestAWGLegacySingleFileMigratesWithRuntimeIdentity(t *testing.T) {
+	state := domain.DefaultRuntimeState()
+	state.ActiveConnectionKind = "amneziawg"
+	state.ActiveSubscriptionID = "amneziawg"
+	state.ActiveNodeID = legacyAWGNodeID
+	state.AWGProfileName = "Legacy stand"
+	state.AWGLastProbe = &domain.AWGProbeState{Success: true, CheckedAt: time.Now().UTC(), LatencyMS: 30}
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: state}
+	profileStore := &awgProfileMemoryStore{legacy: []byte(validAWGProfile)}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: profileStore})
+
+	statuses, err := service.ListAWGStatuses(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 1 || statuses[0].Name != "Legacy stand" || len(profileStore.legacy) != 0 {
+		t.Fatalf("legacy migration result: statuses=%+v legacy=%d", statuses, len(profileStore.legacy))
+	}
+	if stateStore.state.ActiveAWGProfileID != statuses[0].ID || stateStore.state.ActiveNodeID != statuses[0].ID || stateStore.state.ActiveSubscriptionID != "server-list" {
+		t.Fatalf("legacy runtime identity was not migrated: %+v", stateStore.state)
+	}
+	if probe, ok := stateStore.state.AWGProfileProbes[statuses[0].ID]; !ok || !probe.Success {
+		t.Fatalf("legacy probe was not migrated: %+v", stateStore.state.AWGProfileProbes)
+	}
+}
+
+func TestAWGRemoveActiveProfileDisconnectsAndPurgesHiddenKey(t *testing.T) {
+	profile, err := amneziawg.Parse([]byte(validAWGProfile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := profile.StableID()
+	state := domain.DefaultRuntimeState()
+	state.ActiveConnectionKind = "amneziawg"
+	state.ActiveAWGProfileID = id
+	state.PreparedAWGProfileID = id
+	state.ActiveSubscriptionID = "server-list"
+	state.ActiveNodeID = id
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	state.Mode = domain.SelectionModeManual
+	state.SelectedOutboundTag = "fastlane-node-awg-test"
+	settings := domain.DefaultSettings()
+	settings.AutoExcludedNodes = []string{domain.AutoExcludedNodeKey("server-list", id)}
+	stateStore := &memoryStore{settings: settings, state: state}
+	profileStore := &awgProfileMemoryStore{raw: []byte(validAWGProfile), rawByID: map[string][]byte{id: []byte(validAWGProfile)}, metadata: []amneziawg.ProfileMetadata{{ID: id, Name: "Primary"}}}
+	managed := &awgManagedBackend{managedRecordingBackend: &managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: state.SelectedOutboundTag}}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: profileStore, AWGController: &awgControllerFake{}, Backend: managed})
+
+	if err := service.RemoveAWGProfile(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if stateStore.state.Connected || stateStore.state.ActiveAWGProfileID != "" || stateStore.state.OperationalMode != domain.OperationalModeDirect {
+		t.Fatalf("active profile removal did not disconnect: %+v", stateStore.state)
+	}
+	if len(stateStore.settings.AutoExcludedNodes) != 0 || len(profileStore.metadata) != 0 {
+		t.Fatalf("profile metadata was not purged: settings=%+v profiles=%+v", stateStore.settings.AutoExcludedNodes, profileStore.metadata)
 	}
 }
 

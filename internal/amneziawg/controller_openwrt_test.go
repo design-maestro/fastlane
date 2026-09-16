@@ -55,6 +55,8 @@ func successfulControllerRunner() *controllerRunner {
 			return []byte("5.15.150 SMP mod_unload\n"), nil
 		case strings.HasPrefix(joined, "modprobe -n "):
 			return nil, nil
+		case joined == "amneziawg-go --version":
+			return nil, errors.New("not installed")
 		case strings.HasPrefix(joined, "ubus call "):
 			return []byte(`{"up":true,"l3_device":"fastlane_awg","ipv4-address":[{"address":"10.8.0.2"}]}`), nil
 		case strings.HasPrefix(joined, "awg show "):
@@ -146,6 +148,8 @@ func TestOpenWrtControllerRejectsKernelVermagicMismatch(t *testing.T) {
 			return []byte("v2\n"), nil
 		case strings.HasPrefix(joined, "modinfo "):
 			return []byte("5.15.150 SMP\n"), nil
+		case joined == "amneziawg-go --version":
+			return nil, errors.New("not installed")
 		default:
 			return nil, nil
 		}
@@ -157,6 +161,68 @@ func TestOpenWrtControllerRejectsKernelVermagicMismatch(t *testing.T) {
 	}
 	if strings.Contains(callsText(runner.calls), "modprobe -f") {
 		t.Fatal("controller must never force-load a module")
+	}
+}
+
+func TestOpenWrtControllerAcceptsUserspaceRuntimeWithoutKernelModule(t *testing.T) {
+	runner := successfulControllerRunner()
+	runner.run = func(call controllerCall) ([]byte, error) {
+		joined := call.name + " " + strings.Join(call.args, " ")
+		switch {
+		case joined == "uname -r":
+			return []byte("6.6.134+\n"), nil
+		case joined == "awg --version":
+			return []byte("amneziawg-tools v1.0.20260618-2\n"), nil
+		case strings.HasPrefix(joined, "modinfo "):
+			return nil, errors.New("module not found")
+		case joined == "amneziawg-go --version":
+			return []byte("amneziawg-go v3.1.20260828\n"), nil
+		default:
+			return nil, errors.New("unexpected command: " + joined)
+		}
+	}
+	controller := newControllerForTest(t, runner)
+	protoPath := filepath.Join(controller.SysRoot, "lib/netifd/proto/amneziawg.sh")
+	if err := os.WriteFile(protoPath, []byte("#!/bin/sh\namneziawg-go --version\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tunPath := filepath.Join(controller.SysRoot, "dev/net/tun")
+	if err := os.MkdirAll(filepath.Dir(tunPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tunPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	status, err := controller.Preflight(context.Background())
+	if err != nil || !status.Compatible || status.Runtime != "amneziawg-go v3.1.20260828" {
+		t.Fatalf("status=%+v err=%v", status, err)
+	}
+}
+
+func TestOpenWrtControllerRejectsUserspaceWithoutTUN(t *testing.T) {
+	runner := &controllerRunner{run: func(call controllerCall) ([]byte, error) {
+		joined := call.name + " " + strings.Join(call.args, " ")
+		switch {
+		case joined == "uname -r":
+			return []byte("6.6.134+\n"), nil
+		case joined == "awg --version":
+			return []byte("amneziawg-tools v2\n"), nil
+		case strings.HasPrefix(joined, "modinfo "):
+			return nil, errors.New("module not found")
+		case joined == "amneziawg-go --version":
+			return []byte("amneziawg-go v3\n"), nil
+		default:
+			return nil, errors.New("unexpected command: " + joined)
+		}
+	}}
+	controller := newControllerForTest(t, runner)
+	protoPath := filepath.Join(controller.SysRoot, "lib/netifd/proto/amneziawg.sh")
+	if err := os.WriteFile(protoPath, []byte("#!/bin/sh\namneziawg-go --version\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	status, err := controller.Preflight(context.Background())
+	if err == nil || status.Compatible || !strings.Contains(status.FailureReason, "TUN") {
+		t.Fatalf("status=%+v err=%v", status, err)
 	}
 }
 

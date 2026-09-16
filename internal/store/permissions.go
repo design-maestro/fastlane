@@ -21,10 +21,23 @@ func (s *FileStore) HardenSecretPermissions(xrayConfigPath string) error {
 	if err := chmodDirIfExists(s.paths.Root, PrivateDirPerm); err != nil {
 		errs = append(errs, fmt.Errorf("chmod fastlane root: %w", err))
 	}
+	if err := chmodDirIfExists(s.paths.AWGProfilesDir, PrivateDirPerm); err != nil {
+		errs = append(errs, fmt.Errorf("chmod AmneziaWG profile directory: %w", err))
+	}
 
 	for _, path := range s.secretFilePaths(xrayConfigPath) {
 		if err := chmodFileIfExists(path, SecretFilePerm); err != nil {
 			errs = append(errs, fmt.Errorf("chmod %s: %w", path, err))
+		}
+	}
+	profileFiles, err := filepath.Glob(filepath.Join(s.paths.AWGProfilesDir, "*.conf"))
+	if err != nil {
+		errs = append(errs, fmt.Errorf("list AmneziaWG profiles: %w", err))
+	} else {
+		for _, path := range profileFiles {
+			if err := chmodFileIfExists(path, SecretFilePerm); err != nil {
+				errs = append(errs, fmt.Errorf("chmod %s: %w", path, err))
+			}
 		}
 	}
 
@@ -48,6 +61,7 @@ func (s *FileStore) secretFilePaths(xrayConfigPath string) []string {
 		s.paths.SettingsPath,
 		s.paths.StatePath,
 		s.paths.AWGProfilePath,
+		s.paths.AWGProfilesPath,
 		s.paths.LockPath,
 		filepath.Join(s.paths.Root, "speedtest.lock"),
 	}

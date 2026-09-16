@@ -241,7 +241,7 @@ func TestFastLaneVPNStacksFixedSubscriptionActions(t *testing.T) {
 		".fl-source-actions{flex-direction:column}",
 		".fl-source-actions .fl-button+.fl-button{border-top:1px solid var(--fl-line)}",
 		"E('button', { class: 'fl-button fl-source-add'",
-		"selected ? E('button', { class: 'fl-button fl-button-danger'",
+		"selectedRemovable ? E('button', { class: 'fl-button fl-button-danger'",
 		"if (this.showHidden) return null;",
 	} {
 		if !strings.Contains(source, want) {
@@ -249,7 +249,7 @@ func TestFastLaneVPNStacksFixedSubscriptionActions(t *testing.T) {
 		}
 	}
 	addIndex := strings.Index(source, "E('button', { class: 'fl-button fl-source-add'")
-	removeIndex := strings.Index(source, "selected ? E('button', { class: 'fl-button fl-button-danger'")
+	removeIndex := strings.Index(source, "selectedRemovable ? E('button', { class: 'fl-button fl-button-danger'")
 	if addIndex < 0 || removeIndex < 0 || addIndex > removeIndex {
 		t.Fatal("add subscription action must render above the conditional remove action")
 	}

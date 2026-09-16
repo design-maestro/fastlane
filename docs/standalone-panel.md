@@ -11,11 +11,10 @@ truth; `TestPanelDesignMatchesLuCI` checks for export drift.
 
 - VPN status, actual route, auto/manual connection and disconnect.
 - Subscription/file import, source removal, filtering and HTTPS health checks.
-- One experimental AWG profile in the common server table: import via
-  **Add servers → File → .conf**, check/connect/remove from its row menu,
-  disconnect via the common status bar. The stored profile remains separate from
-  subscriptions; it does not enter automatic ranking. Existing AWG replacement
-  requires confirmation; failed validation retains the old profile.
+- Experimental AWG profiles in the common `Server List`: import one or several
+  files via **Add servers → File → .conf**, then check/connect/hide/remove each
+  profile from its row menu and disconnect through the common status bar. Stored
+  secrets remain separate from subscriptions and do not enter automatic ranking.
 - Original Routing screen: country selection and GeoIP/GeoSite, the route flow,
   named direct-exclusion groups, group editing/toggles/removal and HAPP preview.
 - Original Settings controls: duration segments, keyword chips, URL checks,

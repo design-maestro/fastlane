@@ -6,7 +6,7 @@ func TestDefaultRuntimeStateUsesDirectOperationalMode(t *testing.T) {
 	t.Parallel()
 
 	state := DefaultRuntimeState()
-	if state.SchemaVersion != 4 {
+	if state.SchemaVersion != 5 {
 		t.Fatalf("unexpected schema version: %d", state.SchemaVersion)
 	}
 	if state.OperationalMode != OperationalModeDirect {

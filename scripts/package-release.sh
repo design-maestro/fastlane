@@ -30,12 +30,16 @@ build_release_asset() {
 	if [ -n "${gomips}" ]; then
 		OUTPUT_DIR="${output_dir}" GOARCH="${goarch}" GOMIPS="${gomips}" \
 			"${ROOT_DIR}/scripts/build-openwrt.sh"
+		OUTPUT_DIR="${output_dir}" GOARCH="${goarch}" GOMIPS="${gomips}" \
+			"${ROOT_DIR}/scripts/build-amneziawg-go.sh"
 	else
 		OUTPUT_DIR="${output_dir}" GOARCH="${goarch}" \
 			"${ROOT_DIR}/scripts/build-openwrt.sh"
+		OUTPUT_DIR="${output_dir}" GOARCH="${goarch}" \
+			"${ROOT_DIR}/scripts/build-amneziawg-go.sh"
 	fi
 
-	VERSION="${RELEASE_VERSION}" ARCH="${package_arch}" BINARY_PATH="${output_dir}/fastlane" \
+	VERSION="${RELEASE_VERSION}" ARCH="${package_arch}" BINARY_PATH="${output_dir}/fastlane" AWG_BINARY_PATH="${output_dir}/amneziawg-go" \
 		"${ROOT_DIR}/scripts/package-openwrt.sh"
 }
 

@@ -25,6 +25,7 @@ const (
 	udpTProxyTable    = "100"
 	udpTProxyPriority = "1000"
 	probeBypassMark   = "0x100"
+	awgBypassMark     = "0x200"
 
 	minConntrackMax = 16384
 	maxConntrackMax = 131072
@@ -259,6 +260,7 @@ func BuildNFTablesRules(settings domain.FirewallSettings) (string, error) {
 	if hasProxyOutput {
 		builder.WriteString("\n  chain output {\n    type nat hook output priority -100; policy accept;\n")
 		fmt.Fprintf(&builder, "    meta mark %s return\n", probeBypassMark)
+		fmt.Fprintf(&builder, "    meta mark %s return\n", awgBypassMark)
 		if hasBypassOutput {
 			builder.WriteString("    ip daddr @direct_target_v4 return\n")
 		}

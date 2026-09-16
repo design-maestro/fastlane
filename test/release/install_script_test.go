@@ -286,6 +286,7 @@ func TestInstallScriptUsesApprovedLocalAssetsAndPreservesSettings(t *testing.T) 
 		"usr/share/licenses/fastlane/NOTICE":                 "notice\n",
 		"usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md": "third party\n",
 		"usr/share/licenses/fastlane/UPSTREAM-MIT.txt":       "upstream MIT\n",
+		"usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt":   "AWG MIT\n",
 	} {
 		data, readErr := os.ReadFile(filepath.Join(root, relativePath))
 		if readErr != nil || string(data) != want {
@@ -1016,6 +1017,7 @@ func writeTestTarball(t *testing.T, path string, serviceScripts ...string) {
 	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/NOTICE", 0o644, "notice\n")
 	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md", 0o644, "third party\n")
 	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/UPSTREAM-MIT.txt", 0o644, "upstream MIT\n")
+	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt", 0o644, "AWG MIT\n")
 	addTarFile(t, tw, "./www/luci-static/resources/view/fastlane/overview.js", 0o644, "'use strict';\n")
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)

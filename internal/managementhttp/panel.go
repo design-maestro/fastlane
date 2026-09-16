@@ -57,11 +57,16 @@ type panelService interface {
 	SetSetting(string, string) (domain.Settings, error)
 	UpdateDNS(context.Context, domain.DNSSettings) (domain.Settings, error)
 	GetAWGStatus(context.Context) (app.AWGStatus, error)
+	GetAWGStatusByID(context.Context, string) (app.AWGStatus, error)
+	ListAWGStatuses(context.Context) ([]app.AWGStatus, error)
 	ImportAWGProfile(string, []byte) (app.AWGStatus, error)
 	CheckAWG(context.Context) (app.AWGStatus, error)
+	CheckAWGProfile(context.Context, string) (app.AWGStatus, error)
 	ConnectAWG(context.Context) error
+	ConnectAWGProfile(context.Context, string) error
 	DisconnectAWG(context.Context) error
 	RemoveAWG(context.Context) error
+	RemoveAWGProfile(context.Context, string) error
 	ConfigureFirewallBypass(context.Context, []string, []string, bool, int) (domain.FirewallSettings, error)
 	ConfigureFirewallSplit(context.Context, []string, []string, []string, bool, int) (domain.FirewallSettings, error)
 	DisableFirewall(context.Context) (domain.FirewallSettings, error)
@@ -146,6 +151,15 @@ func (h *Handler) panelAPI(w http.ResponseWriter, r *http.Request) bool {
 		}
 		return true
 	}
+	if r.URL.Path == "/api/v1/awg/profiles" && r.Method == http.MethodGet {
+		statuses, err := s.ListAWGStatuses(r.Context())
+		if err != nil {
+			h.internalError(w, "AWG profiles", err)
+		} else {
+			h.writeJSON(w, 200, statuses)
+		}
+		return true
+	}
 	if r.URL.Path == "/api/v1/awg" && r.Method == http.MethodPost {
 		var input struct {
 			Name   string `json:"name"`
@@ -174,6 +188,40 @@ func (h *Handler) panelAPI(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if r.URL.Path == "/api/v1/awg" && r.Method == http.MethodDelete {
 		h.startJob(w, "awg-remove", s.RemoveAWG)
+		return true
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/awg/profiles/") {
+		remainder := strings.TrimPrefix(r.URL.Path, "/api/v1/awg/profiles/")
+		parts := strings.Split(remainder, "/")
+		id := strings.TrimSpace(parts[0])
+		if id == "" || len(parts) > 2 {
+			h.writeError(w, 400, "invalid_request")
+			return true
+		}
+		if len(parts) == 1 && r.Method == http.MethodGet {
+			status, err := s.GetAWGStatusByID(r.Context(), id)
+			if err != nil {
+				h.internalError(w, "AWG profile", err)
+			} else {
+				h.writeJSON(w, 200, status)
+			}
+			return true
+		}
+		if len(parts) == 1 && r.Method == http.MethodDelete {
+			h.startJob(w, "awg-remove", func(ctx context.Context) error { return s.RemoveAWGProfile(ctx, id) })
+			return true
+		}
+		if len(parts) == 2 && r.Method == http.MethodPost {
+			switch parts[1] {
+			case "connect":
+				h.startJob(w, "awg-connect", func(ctx context.Context) error { return s.ConnectAWGProfile(ctx, id) })
+				return true
+			case "check":
+				h.startJob(w, "awg-check", func(ctx context.Context) error { _, err := s.CheckAWGProfile(ctx, id); return err })
+				return true
+			}
+		}
+		h.writeError(w, 404, "not_found")
 		return true
 	}
 	if r.Method == http.MethodPost {
