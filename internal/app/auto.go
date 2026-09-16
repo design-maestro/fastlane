@@ -29,6 +29,18 @@ type autoSelectionDecision struct {
 
 // RunAutoHealthCheck probes the active auto-mode subscription and reconnects when needed.
 func (s *Service) RunAutoHealthCheck(ctx context.Context) error {
+	initial, err := s.store.LoadState()
+	if err != nil {
+		return err
+	}
+	if initial.ZapretTest.Active || initial.Mode != domain.SelectionModeAuto || initial.ActiveSubscriptionID == "" {
+		return nil
+	}
+	initialScope := initial.ActiveSubscriptionID
+	if initial.AutoScope == autoScopeAll {
+		initialScope = autoScopeAll
+	}
+	s.probeAWGProfilesForAuto(ctx, initialScope)
 	snapshot, err := s.captureAutoSelectionSnapshot()
 	if err != nil {
 		return err
@@ -590,7 +602,7 @@ func (s *Service) evaluateAutoSelectionAll(ctx context.Context, subscriptions []
 		return autoSelectionDecision{CurrentNodeID: currentNodeID, Health: health, Reason: "all nodes are excluded from auto mode"}, domain.Subscription{}, fallbackSub, nil
 	}
 	if runProbes {
-		s.probeSubscription(ctx, domain.Subscription{ID: autoScopeAll, Nodes: candidates}, health, failureThreshold)
+		s.probeSubscription(ctx, domain.Subscription{ID: autoScopeAll, Nodes: xrayProbeNodes(candidates)}, health, failureThreshold)
 	}
 
 	if runProbes && state.Connected && activeTransport == domain.TransportModeProxy && currentNodeID != "" {
@@ -700,7 +712,7 @@ func (s *Service) evaluateAutoSelection(ctx context.Context, sub domain.Subscrip
 
 	if runProbes {
 		probeSub := sub
-		probeSub.Nodes = candidateNodes
+		probeSub.Nodes = xrayProbeNodes(candidateNodes)
 		s.probeSubscription(ctx, probeSub, health, failureThreshold)
 	}
 	if runProbes && state.Connected && activeTransport == domain.TransportModeProxy && currentNodeID != "" {
@@ -763,6 +775,16 @@ func (s *Service) evaluateAutoSelection(ctx context.Context, sub domain.Subscrip
 	return decision, nil
 }
 
+func xrayProbeNodes(nodes []domain.Node) []domain.Node {
+	filtered := make([]domain.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Protocol != domain.ProtocolAmneziaWG {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered
+}
+
 func autoSelectableNodes(sub domain.Subscription, settings domain.Settings) []domain.Node {
 	if sub.IsExpired(time.Now().UTC()) {
 		return nil
@@ -795,8 +817,14 @@ func autoNodeExcluded(sub domain.Subscription, nodeID string, settings domain.Se
 
 func (s *Service) commitAutoSelection(ctx context.Context, sub domain.Subscription, currentState domain.RuntimeState, decision autoSelectionDecision) (domain.Node, error) {
 	previousTransport := effectiveActiveTransport(currentState)
-	if err := s.applyNodeSelection(ctx, sub, decision.SelectedNode, domain.SelectionModeAuto, selectionOptionsForState(currentState)); err != nil {
-		return domain.Node{}, err
+	if decision.SelectedNode.Protocol == domain.ProtocolAmneziaWG {
+		if err := s.connectAWGWithModeLocked(ctx, decision.SelectedNode.ID, domain.SelectionModeAuto, currentState.AutoScope); err != nil {
+			return domain.Node{}, markRetryableCandidateError(err)
+		}
+	} else {
+		if err := s.applyNodeSelection(ctx, sub, decision.SelectedNode, domain.SelectionModeAuto, selectionOptionsForState(currentState)); err != nil {
+			return domain.Node{}, err
+		}
 	}
 
 	state, err := s.store.LoadState()

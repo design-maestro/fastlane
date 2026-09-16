@@ -1519,7 +1519,7 @@ return view.extend({
 		var operationalMode = resolveOperationalMode(state, status.active_transport);
 		var vpnActive = operationalMode === 'vpn';
 		var hasAvailableNodes = this.subscriptions().filter(function(sub) { return !isSubscriptionExpired(sub); }).some(L.bind(function(sub) {
-			return (sub.nodes || []).some(L.bind(function(node) { return node.kind !== 'awg' && !this.isHidden(sub.id, node.id, node); }, this));
+			return (sub.nodes || []).some(L.bind(function(node) { return !this.isHidden(sub.id, node.id, node); }, this));
 		}, this));
 		var mode = connected ? (state.mode === 'auto' ? 'auto' : 'manual') : 'disconnected';
 		var activeSubscription = status.active_subscription;
@@ -1580,7 +1580,7 @@ return view.extend({
 			E('div', { class: 'fl-awg-head' }, [
 				E('div', {}, [
 					E('div', { class: 'fl-awg-title-row' }, [ E('h2', { class: 'fl-awg-title' }, [ _('AmneziaWG') ]), E('span', { class: 'fl-awg-badge' }, [ _('AWG 2.0 prototype') ]) ]),
-					E('p', { class: 'fl-awg-description' }, [ _('One manual profile. It does not participate in automatic server selection.') ])
+					E('p', { class: 'fl-awg-description' }, [ _('Imported profiles participate in shared GET checks and automatic selection.') ])
 				]),
 				E('div', { class: 'fl-awg-state fl-awg-state-' + presentation.tone, role: 'status', 'aria-live': 'polite' }, [
 					this.awgBusy || preparing ? E('span', { class: 'fl-inline-loader' }) : E('span', { class: 'fl-dot ' + (state === 'connected' ? 'fl-dot-on' : (state === 'direct' || state === 'preparing' ? 'fl-dot-recovering' : '')) }),
@@ -1687,7 +1687,7 @@ return view.extend({
 				row.hidden ? '' : E('button', { class: 'fl-button', disabled: testing ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGCheck', row.node.id) }, [ testing ? _('Checking…') : _('Check ping (GET)') ]),
 				row.hidden ? '' : E('button', { class: 'fl-button fl-button-warning', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, true) }, [ _('Hide') ]),
 				E('button', { class: 'fl-button fl-button-danger', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGRemove', row.node.id) }, [ _('Delete') ]),
-				E('div', { class: 'fl-more-note' }, [ 'AWG ' + awgVersion + ' · ' + _('Experimental. It does not participate in automatic selection.') ])
+				E('div', { class: 'fl-more-note' }, [ 'AWG ' + awgVersion + ' · ' + _('Experimental. Participates in shared GET checks and automatic selection.') ])
 			] : [
 				row.hiddenByKeyword ? E('div', { class: 'fl-more-note' }, [ _('Hidden by rule') + ': “' + row.hiddenByKeyword + '”' ]) : '',
 				row.hiddenByKeyword ? E('a', { class: 'fl-button', href: L.url('admin/services/fastlane/settings') }, [ _('Edit hide rules') ]) : (row.manuallyHidden ? E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, false) }, [ _('Restore') ]) : E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id) }, [ active && state.mode === 'manual' ? _('Pinned') : _('Connect') ])),
@@ -1731,7 +1731,7 @@ return view.extend({
 		var selectedExpired = !!selected && isSubscriptionExpired(selected);
 		var selectedRemovable = !!selected && (selected.nodes || []).some(function(node) { return node.kind !== 'awg'; });
 		var selectableSubscriptions = subscriptions.filter(function(sub) {
-			return !isSubscriptionExpired(sub) && (sub.nodes || []).some(function(node) { return node.kind !== 'awg'; });
+			return !isSubscriptionExpired(sub) && (sub.nodes || []).length > 0;
 		});
 		var countries = this.filterCountries();
 		var protocols = this.filterProtocols();

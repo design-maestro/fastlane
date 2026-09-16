@@ -212,6 +212,96 @@ func TestAWGRepeatedCheckReusesPreparedInterface(t *testing.T) {
 	}
 }
 
+func TestConnectAutoIncludesAWGProfilesInSharedRanking(t *testing.T) {
+	normal := domain.Node{ID: "normal", SubscriptionID: awgSubscriptionID, Name: "Normal", Protocol: domain.ProtocolSocks, Address: "192.0.2.10", Port: 1080}
+	settings := domain.DefaultSettings()
+	settings.AutoMode = true
+	settings.Mode = domain.SelectionModeAuto
+	stateStore := &memoryStore{
+		settings: settings,
+		state:    domain.DefaultRuntimeState(),
+		subs: []domain.Subscription{{
+			ID: awgSubscriptionID, ProviderName: "Server List", DisplayName: "Server List", Nodes: []domain.Node{normal},
+		}},
+	}
+	profileStore := &awgProfileMemoryStore{raw: []byte(validAWGProfile)}
+	controller := &awgControllerFake{}
+	managedBase := &managedRecordingBackend{recordingBackend: &recordingBackend{status: backend.RuntimeStatus{Running: true}}, selected: "fastlane-direct"}
+	managed := &awgManagedBackend{managedRecordingBackend: managedBase}
+	checker := &countingProbeChecker{results: map[string]probe.Result{
+		normal.ID: {Healthy: true, Latency: 500 * time.Millisecond, Checked: time.Now().UTC()},
+	}, counts: make(map[string]int)}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: profileStore, AWGController: controller, Backend: managed, Checker: checker})
+	service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error {
+		time.Sleep(2 * time.Millisecond)
+		return nil
+	}
+
+	selected, err := service.ConnectAuto(context.Background(), awgSubscriptionID)
+	if err != nil {
+		t.Fatalf("ConnectAuto: %v", err)
+	}
+	if selected.Protocol != domain.ProtocolAmneziaWG {
+		t.Fatalf("selected = %+v; want AmneziaWG", selected)
+	}
+	if stateStore.state.ActiveConnectionKind != "amneziawg" || stateStore.state.Mode != domain.SelectionModeAuto || !stateStore.settings.AutoMode {
+		t.Fatalf("automatic AWG state = %+v settings=%+v", stateStore.state, stateStore.settings)
+	}
+	if checker.counts[normal.ID] != 1 || checker.counts[selected.ID] != 0 {
+		t.Fatalf("shared probes used wrong engines: counts=%v", checker.counts)
+	}
+	if health := stateStore.state.Health[selected.ID]; !health.Healthy || health.SuccessCount == 0 {
+		t.Fatalf("AWG health was not added to shared history: %+v", health)
+	}
+}
+
+func TestAutoProbeChecksEveryImportedAWGProfile(t *testing.T) {
+	firstRaw := []byte(validAWGProfile)
+	secondRaw := []byte(strings.Replace(validAWGProfile, "198.51.100.1:51820", "198.51.100.2:51820", 1))
+	first, err := amneziawg.Parse(firstRaw)
+	if err != nil {
+		t.Fatalf("parse first profile: %v", err)
+	}
+	second, err := amneziawg.Parse(secondRaw)
+	if err != nil {
+		t.Fatalf("parse second profile: %v", err)
+	}
+	profileStore := &awgProfileMemoryStore{
+		metadata: []amneziawg.ProfileMetadata{
+			{ID: first.StableID(), Name: "Primary AWG"},
+			{ID: second.StableID(), Name: "Backup AWG"},
+		},
+		rawByID: map[string][]byte{
+			first.StableID():  firstRaw,
+			second.StableID(): secondRaw,
+		},
+	}
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: domain.DefaultRuntimeState()}
+	controller := &awgControllerFake{}
+	managed := &awgManagedBackend{managedRecordingBackend: &managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: "fastlane-direct"}}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: profileStore, AWGController: controller, Backend: managed})
+	service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error { return nil }
+
+	service.probeAWGProfilesForAuto(context.Background(), autoScopeAll)
+
+	if controller.prepared != 2 || controller.connected != 2 {
+		t.Fatalf("controller prepare/connect = %d/%d, want 2/2", controller.prepared, controller.connected)
+	}
+	for _, id := range []string{first.StableID(), second.StableID()} {
+		health := stateStore.state.Health[id]
+		if !health.Healthy || health.SuccessCount != 1 || health.LastLatency.Duration() <= 0 {
+			t.Fatalf("health[%s] = %+v", id, health)
+		}
+	}
+	projected, err := service.subscriptionsWithAWGProfiles(nil)
+	if err != nil {
+		t.Fatalf("project AWG profiles: %v", err)
+	}
+	if len(projected) != 1 || len(projected[0].Nodes) != 2 {
+		t.Fatalf("projected subscriptions = %+v", projected)
+	}
+}
+
 func TestAWGDisconnectPreservesActiveVLESSState(t *testing.T) {
 	state := domain.DefaultRuntimeState()
 	state.ActiveConnectionKind = "xray"

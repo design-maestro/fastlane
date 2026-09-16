@@ -70,6 +70,10 @@ func (s *Service) captureAutoSelectionSnapshotLocked() (autoSelectionSnapshot, e
 	if err != nil {
 		return autoSelectionSnapshot{}, fmt.Errorf("load subscriptions: %w", err)
 	}
+	subscriptions, err = s.subscriptionsWithAWGProfiles(subscriptions)
+	if err != nil {
+		return autoSelectionSnapshot{}, err
+	}
 	settings, err := s.store.LoadSettings()
 	if err != nil {
 		return autoSelectionSnapshot{}, fmt.Errorf("load settings: %w", err)

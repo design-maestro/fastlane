@@ -1079,6 +1079,7 @@ func (s *Service) connectManual(ctx context.Context, subscriptionID, nodeID stri
 
 // ConnectAuto probes the selected subscription and applies the best available node.
 func (s *Service) ConnectAuto(ctx context.Context, subscriptionID string) (domain.Node, error) {
+	s.probeAWGProfilesForAuto(ctx, strings.TrimSpace(subscriptionID))
 	snapshot, err := s.captureAutoSelectionSnapshot()
 	if err != nil {
 		return domain.Node{}, err
@@ -1399,6 +1400,9 @@ func (s *Service) Status() (StatusSnapshot, error) {
 		return StatusSnapshot{}, fmt.Errorf("load state: %w", err)
 	}
 	if subscriptions, loadErr := s.store.LoadSubscriptions(); loadErr == nil {
+		if projected, projectErr := s.subscriptionsWithAWGProfiles(subscriptions); projectErr == nil {
+			subscriptions = projected
+		}
 		state.Health = healthForSubscriptions(state.Health, subscriptions)
 	}
 
@@ -4418,12 +4422,21 @@ func updateRuntimeOutbound(outbounds []domain.RuntimeOutboundState, next domain.
 }
 
 func (s *Service) probeManagedOutbound(ctx context.Context, managed backend.ManagedBackend, slot int, tag string) error {
+	_, err := s.probeManagedOutboundLatency(ctx, managed, slot, tag, false)
+	return err
+}
+
+// probeManagedOutboundLatency measures the HTTPS request itself after the
+// probe route is selected. AWG uses a warm-up round so API setup and the first
+// cold TLS connection do not masquerade as network latency in the shared
+// selector.
+func (s *Service) probeManagedOutboundLatency(ctx context.Context, managed backend.ManagedBackend, slot int, tag string, warmup bool) (time.Duration, error) {
 	port, err := managed.ProbeHTTPPort(slot)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := managed.SetProbeOutbound(ctx, slot, tag); err != nil {
-		return fmt.Errorf("select probe outbound: %w", err)
+		return 0, fmt.Errorf("select probe outbound: %w", err)
 	}
 	defer func() {
 		if err := managed.ClearProbeOutbound(context.Background(), slot); err != nil {
@@ -4433,42 +4446,55 @@ func (s *Service) probeManagedOutbound(ctx context.Context, managed backend.Mana
 	proxyURL := &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(port))}
 	transport, ok := cloneSubscriptionTransportWithProxy(s.httpClient.Transport, proxyURL)
 	if !ok {
-		return fmt.Errorf("HTTP transport cannot be cloned for managed probe")
+		return 0, fmt.Errorf("HTTP transport cannot be cloned for managed probe")
 	}
-	probeCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	results := make(chan error, len(backendEgressProbeURLs))
-	for _, endpoint := range backendEgressProbeURLs {
-		endpoint := endpoint
-		go func() {
-			requestCtx, requestCancel := context.WithTimeout(probeCtx, 5*time.Second)
-			defer requestCancel()
-			req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
-			if err == nil {
-				client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
-				resp, requestErr := client.Do(req)
-				err = requestErr
-				if resp != nil {
-					_, _ = io.Copy(io.Discard, resp.Body)
-					_ = resp.Body.Close()
-					if err == nil && resp.StatusCode != http.StatusNoContent {
-						err = fmt.Errorf("%s returned HTTP %d instead of 204", endpoint, resp.StatusCode)
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	runRound := func() (time.Duration, error) {
+		probeCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		type outcome struct {
+			latency time.Duration
+			err     error
+		}
+		results := make(chan outcome, len(backendEgressProbeURLs))
+		for _, endpoint := range backendEgressProbeURLs {
+			endpoint := endpoint
+			go func() {
+				requestCtx, requestCancel := context.WithTimeout(probeCtx, 5*time.Second)
+				defer requestCancel()
+				started := time.Now()
+				req, requestErr := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
+				if requestErr == nil {
+					resp, doErr := client.Do(req)
+					requestErr = doErr
+					if resp != nil {
+						_, _ = io.Copy(io.Discard, resp.Body)
+						_ = resp.Body.Close()
+						if requestErr == nil && resp.StatusCode != http.StatusNoContent {
+							requestErr = fmt.Errorf("%s returned HTTP %d instead of 204", endpoint, resp.StatusCode)
+						}
 					}
 				}
+				results <- outcome{latency: time.Since(started), err: requestErr}
+			}()
+		}
+		var failures []string
+		for range backendEgressProbeURLs {
+			result := <-results
+			if result.err == nil {
+				cancel()
+				return result.latency, nil
 			}
-			results <- err
-		}()
+			failures = append(failures, result.err.Error())
+		}
+		return 0, fmt.Errorf("both HTTPS checks failed: %s", strings.Join(failures, "; "))
 	}
-	var failures []string
-	for range backendEgressProbeURLs {
-		if err := <-results; err == nil {
-			cancel()
-			return nil
-		} else {
-			failures = append(failures, err.Error())
+	if warmup {
+		if _, err := runRound(); err != nil {
+			return 0, err
 		}
 	}
-	return fmt.Errorf("both HTTPS checks failed: %s", strings.Join(failures, "; "))
+	return runRound()
 }
 
 func selectionOptionsForState(state domain.RuntimeState) applyNodeSelectionOptions {

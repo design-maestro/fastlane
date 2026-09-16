@@ -27,6 +27,10 @@ const (
 	ProtocolHysteria Protocol = "hysteria"
 	// ProtocolHysteria2 represents a Hysteria v2 node.
 	ProtocolHysteria2 Protocol = "hysteria2"
+	// ProtocolAmneziaWG represents a Fast Lane-managed AmneziaWG profile.
+	// It is never serialized into an Xray outbound; the application service
+	// intercepts it and switches the external tunnel through the managed API.
+	ProtocolAmneziaWG Protocol = "amneziawg"
 )
 
 // Node is the normalized representation of a provider endpoint.
