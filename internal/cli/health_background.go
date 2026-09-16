@@ -313,6 +313,19 @@ func healthCheckNodeCount(opts *rootOptions, scope string) int {
 			}
 		}
 	}
+	if scope == "" || scope == "all" || scope == "server-list" {
+		if profiles, listErr := opts.service.ListAWGStatuses(context.Background()); listErr == nil {
+			for _, profile := range profiles {
+				node := domain.Node{ID: profile.ID, SubscriptionID: "server-list", Name: profile.Name, Protocol: domain.ProtocolAmneziaWG}
+				if profile.Profile != nil {
+					node.Address = profile.Profile.Endpoint
+				}
+				if !domain.IsNodeExcludedFromAuto(settings, "server-list", node) {
+					total++
+				}
+			}
+		}
+	}
 	return total
 }
 
