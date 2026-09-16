@@ -65,10 +65,17 @@ making a missing country-specific tag a requirement.
 1. Capture subscriptions, settings, and persisted runtime state.
 2. Exclude expired subscriptions and nodes explicitly excluded from auto mode.
 3. Check candidates with bounded parallel HTTPS GET requests.
-4. Publish each finished result and select the best healthy candidate.
-5. Respect failure thresholds, latency improvement, switch cooldown, and anti-flap policy.
+4. Publish each finished result and select the best healthy candidate using a
+   stability-first score: rolling latency, jitter, failure history, recent
+   instability, and the fresh GET latency.
+5. Respect failure thresholds, stability-adjusted improvement, switch cooldown,
+   and anti-flap policy.
 6. Validate and activate the selected Xray configuration.
 7. Persist the actual subscription, node, latency, health map, mode, and failure reason.
+
+The same stability-first score orders normal automatic selection, background
+optimization, retained reserves, and emergency failover after an active server
+failure. No failover path falls back to raw latency-only ordering.
 
 The daemon verifies the active route every three seconds independently from
 subscription refreshes and full server scans. A missing runtime, subscription,

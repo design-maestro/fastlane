@@ -239,7 +239,7 @@ func TestSelectBestNodePrefersFreshLatencyOverHistory(t *testing.T) {
 	}
 }
 
-func TestSelectBestNodeDoesNotKeepDegradedLatencyBecauseOfReliabilityPenalties(t *testing.T) {
+func TestSelectBestNodePrefersStableHistoryOverFastFlakyProbe(t *testing.T) {
 	t.Parallel()
 
 	nodes := []domain.Node{
@@ -271,8 +271,8 @@ func TestSelectBestNodeDoesNotKeepDegradedLatencyBecauseOfReliabilityPenalties(t
 	if err != nil {
 		t.Fatalf("select best node: %v", err)
 	}
-	if best.ID != "recently-unstable-fast" {
-		t.Fatalf("expected a healthy node below the latency ceiling, got %s", best.ID)
+	if best.ID != "stable-but-degraded" {
+		t.Fatalf("expected stable history to outrank a fast flaky probe, got %s", best.ID)
 	}
 }
 

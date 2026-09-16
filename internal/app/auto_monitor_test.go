@@ -327,7 +327,7 @@ func TestConnectAutoAllSelectsBestNodeAcrossSubscriptions(t *testing.T) {
 	}
 }
 
-func TestConnectAutoAllEscapesDegradedCurrentNodeDespiteCandidatePenalty(t *testing.T) {
+func TestConnectAutoAllKeepsStableCurrentOverFastFlakyCandidate(t *testing.T) {
 	t.Parallel()
 
 	current := domain.Node{ID: "japan", SubscriptionID: "atlanta", Name: "Japan", Protocol: domain.ProtocolVLESS, Address: "japan.example.com", Port: 443}
@@ -377,10 +377,10 @@ func TestConnectAutoAllEscapesDegradedCurrentNodeDespiteCandidatePenalty(t *test
 	if err != nil {
 		t.Fatalf("connect auto all: %v", err)
 	}
-	if selected.ID != candidate.ID {
-		t.Fatalf("expected global auto mode to leave the 347ms node for the 39ms node, got %s", selected.ID)
+	if selected.ID != current.ID {
+		t.Fatalf("expected global auto mode to keep the stable incumbent, got %s", selected.ID)
 	}
-	if store.state.ActiveSubscriptionID != "vpnus" || store.state.ActiveNodeID != candidate.ID {
+	if store.state.ActiveSubscriptionID != "atlanta" || store.state.ActiveNodeID != current.ID {
 		t.Fatalf("unexpected selected state: %+v", store.state)
 	}
 }
