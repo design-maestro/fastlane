@@ -1197,8 +1197,8 @@ msgstr "Отключаю AmneziaWG…"
 msgid "Endpoint"
 msgstr "Точка подключения"
 
-msgid "AWG 2.0 prototype"
-msgstr "Прототип AWG 2.0"
+msgid "AWG 2.0"
+msgstr "AWG 2.0"
 
 msgid "Experimental. It does not participate in automatic selection."
 msgstr "Экспериментально. Не участвует в автовыборе."
@@ -1256,6 +1256,21 @@ msgstr "Один ручной профиль. Он не участвует в а
 
 msgid "Imported profiles participate in shared GET checks and automatic selection."
 msgstr "Импортированные профили участвуют в общей GET-проверке и автовыборе."
+
+msgid "Participates in shared GET checks and automatic selection."
+msgstr "Участвует в общей GET-проверке и автовыборе."
+
+msgid "Import an AmneziaWG configuration."
+msgstr "Импортируйте конфигурацию AmneziaWG."
+
+msgid "Traffic is using the AmneziaWG tunnel."
+msgstr "Трафик идёт через туннель AmneziaWG."
+
+msgid "Use Clash/Mihomo YAML, a provider file, or an AmneziaWG Legacy/2.0 .conf profile."
+msgstr "Используйте Clash/Mihomo YAML, provider-файл или профиль AmneziaWG Legacy/2.0 в формате .conf."
+
+msgid "AmneziaWG profile"
+msgstr "Профиль AmneziaWG"
 
 msgid "Paste an AmneziaWG configuration."
 msgstr "Вставьте конфигурацию AmneziaWG."

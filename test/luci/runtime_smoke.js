@@ -233,6 +233,7 @@ function defaultResolver(commandPath, args) {
 	if (joined === '--json status') return { code: 0, stdout: JSON.stringify(statusFixture), stderr: '' };
 	if (joined === '--json list subscriptions') return { code: 0, stdout: JSON.stringify(subscriptionsFixture), stderr: '' };
 	if (joined === '--json inspect health-check-status') return { code: 0, stdout: JSON.stringify({ status: 'idle' }), stderr: '' };
+	if (joined.startsWith('--json inspect geoip-lookup ')) return { code: 0, stdout: JSON.stringify({ '85.234.103.60': 'CH', '85.234.103.29': 'CH' }), stderr: '' };
 	if (joined === '--json inspect health-check-cancel') return { code: 0, stdout: JSON.stringify({ status: 'cancelling' }), stderr: '' };
 	if (joined.startsWith('--json inspect health-check --subscription ')) return { code: 0, stdout: JSON.stringify({ status: 'queued', scope: args.at(-1) }), stderr: '' };
 	if (joined === '--json settings get') return { code: 0, stdout: JSON.stringify(settingsFixture), stderr: '' };
@@ -637,6 +638,35 @@ async function smoke(section, name, run) {
 		assert.equal(window.pageYOffset, 640);
 		assert.ok(scrollCalls.length >= 2);
 		assert.deepEqual(scrollCalls.at(-1), { x: 0, y: 640 });
+		await page.handleConnect('durev', 'nl', { preventDefault() {}, stopPropagation() {} });
+		assert.equal(window.pageYOffset, 640);
+		page.pageData[3] = [{ id: 'awg-one', state: 'imported', profile: { endpoint: '85.234.103.60:36599' } }];
+		await page.handleAWGConnect('awg-one', { preventDefault() {} });
+		assert.equal(window.pageYOffset, 640);
+	});
+
+	await smoke('VPN', 'resolves country flags locally for every numeric server address', async () => {
+		const page = loadPage('vpn');
+		resolver = async (commandPath, args) => {
+			if (args.join(' ') === '--json list subscriptions') return {
+				code: 0,
+				stdout: JSON.stringify([{ id: 'server-list', provider_name: 'Server List', nodes: [{ id: 'custom', name: 'Custom server', protocol: 'vless', address: '85.234.103.29', port: 443 }] }]),
+				stderr: ''
+			};
+			if (args.join(' ') === '--json awg list') return {
+				code: 0,
+				stdout: JSON.stringify([{ id: 'awg-one', state: 'imported', name: 'AWG one', profile: { endpoint: '85.234.103.60:36599', version: '2.0' } }]),
+				stderr: ''
+			};
+			return defaultResolver(commandPath, args);
+		};
+		await page.load();
+		commandSeen([ '--json', 'inspect', 'geoip-lookup', '--ip', '85.234.103.29', '--ip', '85.234.103.60' ]);
+		const rows = page.subscriptions().find((sub) => sub.id === 'server-list').nodes;
+		assert.ok(rows.every((node) => node.extras.country_code === 'CH'));
+		assert.match(treeText(page.renderTable()), /🇨🇭/);
+		await page.fetchData();
+		assert.equal(commandCount('--json inspect geoip-lookup'), 1);
 	});
 
 	await smoke('VPN', 'rolls back optimistic hide when persistence fails', async () => {

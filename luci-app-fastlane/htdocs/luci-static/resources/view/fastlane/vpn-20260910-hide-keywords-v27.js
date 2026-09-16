@@ -9,6 +9,7 @@
 
 var binary = '/usr/bin/fastlane';
 var pingKey = 'fastlane.vpn.get.results.v1';
+var geoCountryKey = 'fastlane.vpn.geo-countries.v1';
 var vpnPollInterval = 5;
 
 function trim(value) {
@@ -150,11 +151,11 @@ function awgState(status) {
 
 function awgStatePresentation(status) {
 	var state = awgState(status);
-	if (state === 'absent') return { label: _('No profile imported'), help: _('Import one AmneziaWG configuration to use this experimental tunnel.'), tone: 'muted' };
+	if (state === 'absent') return { label: _('No profile imported'), help: _('Import an AmneziaWG configuration.'), tone: 'muted' };
 	if (state === 'invalid') return { label: _('Profile is invalid'), help: _('Replace the profile with a valid AmneziaWG configuration.'), tone: 'error' };
 	if (state === 'error') return { label: _('AmneziaWG error'), help: _('The tunnel could not be prepared. Replace the profile or delete it.'), tone: 'error' };
 	if (state === 'preparing') return { label: _('Preparing tunnel…'), help: _('Fast Lane is applying the AmneziaWG profile.'), tone: 'working' };
-	if (state === 'connected') return { label: _('Connected'), help: _('Traffic is using the experimental AmneziaWG tunnel.'), tone: 'connected' };
+	if (state === 'connected') return { label: _('Connected'), help: _('Traffic is using the AmneziaWG tunnel.'), tone: 'connected' };
 	if (state === 'probe_failed') return { label: _('Connection check failed'), help: _('The tunnel is up, but the internet check did not succeed.'), tone: 'error' };
 	return { label: _('Direct'), help: _('The profile is ready. Internet traffic is currently direct.'), tone: 'muted' };
 }
@@ -285,8 +286,8 @@ function countryCodeFromLabel(value) {
 
 function nodeCountryCode(node) {
 	var extra = trim(node && node.extras && (node.extras.country_code || node.extras.country)).toUpperCase();
-	if (countryAliases().exact[extra.toLowerCase()])
-		return countryAliases().exact[extra.toLowerCase()];
+	if (/^[A-Z]{2}$/.test(extra))
+		return extra;
 	return countryCodeFromFlag(nodeRawName(node)) || countryCodeFromLabel(nodeName(node)) || nodeFlag(node);
 }
 
@@ -306,6 +307,17 @@ function nodePresentation(node) {
 		title: location.country,
 		description: location.city || trim(node && node.address) + ':' + String(node && node.port || '')
 	};
+}
+
+function numericHost(value) {
+	value = trim(value);
+	var bracketed = value.match(/^\[([^\]]+)\](?::\d+)?$/);
+	if (bracketed)
+		return bracketed[1];
+	var ipv4WithPort = value.match(/^((?:\d{1,3}\.){3}\d{1,3})(?::\d+)?$/);
+	if (ipv4WithPort)
+		return ipv4WithPort[1].split('.').every(function(part) { return Number(part) >= 0 && Number(part) <= 255; }) ? ipv4WithPort[1] : '';
+	return value.indexOf(':') >= 0 && /^[0-9a-f:.]+$/i.test(value) ? value : '';
 }
 
 function nodeFlag(node) {
@@ -433,6 +445,7 @@ return view.extend({
 		this.dismissedErrors = this.dismissedErrors || {};
 		this.expandedErrors = this.expandedErrors || {};
 		this.pings = this.readPings();
+		this.geoCountries = this.readGeoCountries();
 		this.testingNodes = this.testingNodes || {};
 		this.activeMenuKey = '';
 		this.activeMenuElement = null;
@@ -473,13 +486,74 @@ return view.extend({
 			} else if (this.toastErrors) {
 				delete this.toastErrors.subscriptions;
 			}
-			this.pageData = [ status, subscriptions, data[2] || { status: 'idle' }, data[3] || {} ];
 			var subscriptionList = Array.isArray(subscriptions) ? subscriptions : [];
-			this.mergePersistedPings(status, subscriptionList);
-			this.mergeBackgroundPings(data[2], subscriptionList);
-			if (!this.showHidden && this.filter !== 'all' && !this.subscriptions().some(L.bind(function(sub) { return sub.id === this.filter; }, this)))
-				this.filter = 'all';
-			return this.pageData;
+			var awgList = Array.isArray(data[3]) ? data[3] : [];
+			return this.refreshGeoCountries(subscriptionList, awgList).then(L.bind(function() {
+				this.applyGeoCountries(subscriptionList);
+				this.pageData = [ status, subscriptions, data[2] || { status: 'idle' }, data[3] || {} ];
+				this.mergePersistedPings(status, subscriptionList);
+				this.mergeBackgroundPings(data[2], subscriptionList);
+				if (!this.showHidden && this.filter !== 'all' && !this.subscriptions().some(L.bind(function(sub) { return sub.id === this.filter; }, this)))
+					this.filter = 'all';
+				return this.pageData;
+			}, this));
+		}, this));
+	},
+
+	readGeoCountries: function() {
+		try {
+			var value = JSON.parse(window.sessionStorage.getItem(geoCountryKey) || '{}');
+			return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+		}
+		catch (err) { return {}; }
+	},
+
+	writeGeoCountries: function() {
+		try { window.sessionStorage.setItem(geoCountryKey, JSON.stringify(this.geoCountries || {})); }
+		catch (err) {}
+	},
+
+	collectGeoIPs: function(subscriptions, awgs) {
+		var seen = {};
+		var result = [];
+		(Array.isArray(subscriptions) ? subscriptions : []).forEach(function(sub) {
+			(Array.isArray(sub.nodes) ? sub.nodes : []).forEach(function(node) {
+				var ip = numericHost(node && node.address);
+				if (ip && !seen[ip]) { seen[ip] = true; result.push(ip); }
+			});
+		});
+		(Array.isArray(awgs) ? awgs : []).forEach(function(awg) {
+			var ip = numericHost(awg && awg.profile && awg.profile.endpoint);
+			if (ip && !seen[ip]) { seen[ip] = true; result.push(ip); }
+		});
+		return result;
+	},
+
+	refreshGeoCountries: function(subscriptions, awgs) {
+		this.geoCountries = this.geoCountries || {};
+		var missing = this.collectGeoIPs(subscriptions, awgs).filter(L.bind(function(ip) {
+			return !Object.prototype.hasOwnProperty.call(this.geoCountries, ip);
+		}, this));
+		if (!missing.length)
+			return Promise.resolve();
+		var args = [ '--json', 'inspect', 'geoip-lookup' ];
+		missing.forEach(function(ip) { args.push('--ip', ip); });
+		return this.execJSON(args).then(L.bind(function(result) {
+			missing.forEach(L.bind(function(ip) { this.geoCountries[ip] = trim(result && result[ip]).toUpperCase(); }, this));
+			this.writeGeoCountries();
+		}, this)).catch(L.bind(function() {
+			missing.forEach(L.bind(function(ip) { this.geoCountries[ip] = ''; }, this));
+			this.writeGeoCountries();
+		}, this));
+	},
+
+	applyGeoCountries: function(subscriptions) {
+		(Array.isArray(subscriptions) ? subscriptions : []).forEach(L.bind(function(sub) {
+			(Array.isArray(sub.nodes) ? sub.nodes : []).forEach(L.bind(function(node) {
+				var code = this.geoCountries[numericHost(node && node.address)];
+				if (code)
+					node.extras = Object.assign({}, node.extras || {}, { country_code: code });
+			}, this));
 		}, this));
 	},
 
@@ -523,20 +597,21 @@ return view.extend({
 	},
 
 	runAWGAction: function(profileID, label, args, success) {
+		var scrollPosition = this.captureScrollPosition();
 		this.awgBusy = label;
 		this.awgBusyProfileID = profileID || '';
-		this.update();
+		this.updatePreservingScroll(scrollPosition);
 		return this.exec(args).then(L.bind(function(result) {
 			this.awgBusy = '';
 			this.awgBusyProfileID = '';
 			if (success)
 				fastlaneShell.showToast(success, 'success');
-			return this.refreshView().then(function() { return result; });
+			return this.refreshView(scrollPosition).then(function() { return result; });
 		}, this)).catch(L.bind(function() {
 			this.awgBusy = '';
 			this.awgBusyProfileID = '';
 			fastlaneShell.showToast(_('Could not complete the AmneziaWG action.'), 'error');
-			return this.refreshView();
+			return this.refreshView(scrollPosition);
 		}, this));
 	},
 
@@ -1118,8 +1193,9 @@ return view.extend({
 
 	handleConnect: function(subID, nodeID, ev) {
 		if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+		var scrollPosition = this.captureScrollPosition();
 		this.activeMenuKey = '';
-		return this.runAction(_('Connecting the selected server…'), this.exec([ 'connect', '--subscription', subID, '--node', nodeID ]), _('Server pinned manually.'));
+		return this.runAction(_('Connecting the selected server…'), this.exec([ 'connect', '--subscription', subID, '--node', nodeID ]), _('Server pinned manually.'), scrollPosition);
 	},
 
 	handleRowKey: function(subID, nodeID, ev) {
@@ -1204,7 +1280,7 @@ return view.extend({
 		var filePane = E('div', { class: 'fl-add-pane', hidden: 'hidden' }, [
 			E('label', { class: 'fl-file-picker' }, [ files, E('span', {}, [ E('strong', {}, [ _('Choose configuration files') ]), _('You can add several files at once') ]) ]),
 			fileList,
-			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('Use Clash/Mihomo YAML, a provider file, or one AmneziaWG Legacy/2.0 .conf profile. AmneziaWG is imported as the experimental tunnel.') ])
+			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('Use Clash/Mihomo YAML, a provider file, or an AmneziaWG Legacy/2.0 .conf profile.') ])
 		]);
 		var mode = 'subscription';
 		var subscriptionButton = E('button', { class: 'fl-add-mode-button fl-add-mode-button-active', type: 'button' }, [ _('Subscription') ]);
@@ -1391,9 +1467,10 @@ return view.extend({
 					id: awg.id,
 					kind: 'awg',
 					name: trim(awg.name) || 'AmneziaWG',
-					remark: _('Experimental') + ' · AWG ' + version,
+					remark: 'AWG ' + version,
 					protocol: 'amneziawg',
-					address: endpoint
+					address: endpoint,
+					extras: { country_code: (this.geoCountries || {})[numericHost(endpoint)] || '' }
 			});
 		}
 		return subscriptions;
@@ -1576,10 +1653,10 @@ return view.extend({
 			[ _('Interface'), trim(profile.interface_name) || '—' ],
 			[ _('Address'), trim(profile.address) || '—' ]
 		] : [];
-		return E('section', { class: 'fl-awg-card', 'aria-label': _('Experimental AmneziaWG profile') }, [
+		return E('section', { class: 'fl-awg-card', 'aria-label': _('AmneziaWG profile') }, [
 			E('div', { class: 'fl-awg-head' }, [
 				E('div', {}, [
-					E('div', { class: 'fl-awg-title-row' }, [ E('h2', { class: 'fl-awg-title' }, [ _('AmneziaWG') ]), E('span', { class: 'fl-awg-badge' }, [ _('AWG 2.0 prototype') ]) ]),
+					E('div', { class: 'fl-awg-title-row' }, [ E('h2', { class: 'fl-awg-title' }, [ _('AmneziaWG') ]), E('span', { class: 'fl-awg-badge' }, [ _('AWG 2.0') ]) ]),
 					E('p', { class: 'fl-awg-description' }, [ _('Imported profiles participate in shared GET checks and automatic selection.') ])
 				]),
 				E('div', { class: 'fl-awg-state fl-awg-state-' + presentation.tone, role: 'status', 'aria-live': 'polite' }, [
@@ -1672,11 +1749,7 @@ return view.extend({
 							: unavailable ? _('Unavailable')
 								: checked ? (slow ? _('Slow') : _('Ready'))
 									: _('Not checked');
-			var presentation = isAWG ? {
-				code: '',
-				title: nodeName(row.node),
-				description: _('Experimental') + ' · ' + trim(row.node.address)
-			} : nodePresentation(row.node);
+			var presentation = nodePresentation(row.node);
 			var emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(presentation.code);
 			var marker = emoji
 				? E('div', { class: 'fl-server-mark fl-server-flag-emoji', 'aria-hidden': 'true' }, [ E('span', { class: 'fl-server-flag-glyph' }, [ emoji ]) ])
@@ -1687,7 +1760,7 @@ return view.extend({
 				row.hidden ? '' : E('button', { class: 'fl-button', disabled: testing ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGCheck', row.node.id) }, [ testing ? _('Checking…') : _('Check ping (GET)') ]),
 				row.hidden ? '' : E('button', { class: 'fl-button fl-button-warning', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, true) }, [ _('Hide') ]),
 				E('button', { class: 'fl-button fl-button-danger', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGRemove', row.node.id) }, [ _('Delete') ]),
-				E('div', { class: 'fl-more-note' }, [ 'AWG ' + awgVersion + ' · ' + _('Experimental. Participates in shared GET checks and automatic selection.') ])
+				E('div', { class: 'fl-more-note' }, [ 'AWG ' + awgVersion + ' · ' + _('Participates in shared GET checks and automatic selection.') ])
 			] : [
 				row.hiddenByKeyword ? E('div', { class: 'fl-more-note' }, [ _('Hidden by rule') + ': “' + row.hiddenByKeyword + '”' ]) : '',
 				row.hiddenByKeyword ? E('a', { class: 'fl-button', href: L.url('admin/services/fastlane/settings') }, [ _('Edit hide rules') ]) : (row.manuallyHidden ? E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, false) }, [ _('Restore') ]) : E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id) }, [ active && state.mode === 'manual' ? _('Pinned') : _('Connect') ])),

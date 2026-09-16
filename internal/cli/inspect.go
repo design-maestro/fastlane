@@ -3,11 +3,14 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/netip"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/design-maestro/fastlane/internal/geoiplookup"
 	"github.com/design-maestro/fastlane/pkg/api"
 )
 
@@ -27,9 +30,42 @@ func newInspectCmd(opts *rootOptions) *cobra.Command {
 		newInspectHealthCheckCmd(opts),
 		newInspectHealthCheckCancelCmd(opts),
 		newInspectHealthCheckStatusCmd(opts),
+		newInspectGeoIPLookupCmd(opts),
 		newInspectSpeedCmd(opts),
 	)
 
+	return cmd
+}
+
+func newInspectGeoIPLookupCmd(opts *rootOptions) *cobra.Command {
+	var values []string
+	cmd := &cobra.Command{
+		Use:          "geoip-lookup",
+		Short:        "Resolve server IPs through the local Xray GeoIP database",
+		Hidden:       true,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			addresses := make([]netip.Addr, 0, len(values))
+			for _, value := range values {
+				address, err := netip.ParseAddr(strings.TrimSpace(value))
+				if err != nil {
+					return fmt.Errorf("invalid IP address %q", value)
+				}
+				addresses = append(addresses, address)
+			}
+			path := strings.TrimSpace(os.Getenv("FASTLANE_GEOIP_PATH"))
+			if path == "" {
+				path = "/usr/share/xray/geoip.dat"
+			}
+			countries, err := geoiplookup.LookupFile(path, addresses)
+			if err != nil {
+				return fmt.Errorf("lookup local GeoIP database: %w", err)
+			}
+			return printOutput(cmd, opts.jsonOutput, countries, fmt.Sprintf("resolved %d IP addresses", len(countries)))
+		},
+	}
+	cmd.Flags().StringArrayVar(&values, "ip", nil, "IP address to resolve (repeatable)")
+	_ = cmd.MarkFlagRequired("ip")
 	return cmd
 }
 

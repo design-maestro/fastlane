@@ -84,7 +84,7 @@ func TestFastLaneVPNViewKeepsAWGInCommonServerList(t *testing.T) {
 		"source_type: 'raw'",
 		"kind: 'awg'",
 		"display_name: 'Server List'",
-		"Experimental. Participates in shared GET checks and automatic selection.",
+		"Participates in shared GET checks and automatic selection.",
 		"this.isManuallyHidden(sub.id, node.id)",
 		"E('section', { class: 'fl-server-panel'",
 	} {

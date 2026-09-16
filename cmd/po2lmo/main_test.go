@@ -74,7 +74,7 @@ func TestEncodeMessagesIncludesPluralFormulaHeader(t *testing.T) {
 	}
 }
 
-func TestRepositoryCatalogContainsAWGPrototypeTranslation(t *testing.T) {
+func TestRepositoryCatalogContainsAWGTranslation(t *testing.T) {
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate test source")
@@ -93,7 +93,7 @@ func TestRepositoryCatalogContainsAWGPrototypeTranslation(t *testing.T) {
 	var translated bool
 	hashes := make(map[uint32]string)
 	for _, msg := range messages {
-		if msg.id == "AWG 2.0 prototype" && msg.values[0] == "Прототип AWG 2.0" {
+		if msg.id == "AWG 2.0" && msg.values[0] == "AWG 2.0" {
 			translated = true
 		}
 		key := msg.id
@@ -107,6 +107,6 @@ func TestRepositoryCatalogContainsAWGPrototypeTranslation(t *testing.T) {
 		hashes[hash] = key
 	}
 	if !translated {
-		t.Fatal("repository catalog is missing AWG prototype translation")
+		t.Fatal("repository catalog is missing AWG 2.0 translation")
 	}
 }
