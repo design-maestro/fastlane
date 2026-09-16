@@ -379,7 +379,9 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 		if settings, loadSettingsErr := s.store.LoadSettings(); loadSettingsErr == nil {
 			failureThreshold = switchPolicyFromSettings(settings).FailureThreshold
 		}
-		state.Health[id] = probe.UpdateHealth(state.Health[id], err == nil, latency, checkedAt, probeState.Error, failureThreshold)
+		previousHealth := state.Health[id]
+		previousHealth.NodeID = id
+		state.Health[id] = probe.UpdateHealth(previousHealth, err == nil, latency, checkedAt, probeState.Error, failureThreshold)
 		reportAutoHealthProgress(ctx, state.Health[id])
 		if saveErr := s.saveState(state); saveErr != nil && err == nil {
 			err = saveErr
