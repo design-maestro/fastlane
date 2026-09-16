@@ -3,7 +3,9 @@
 package amneziawg
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/netip"
@@ -96,6 +98,46 @@ type Profile struct {
 	Interface         Interface `json:"interface"`
 	Peer              Peer      `json:"peer"`
 	IgnoredParameters []string  `json:"ignored_parameters,omitempty"`
+}
+
+// ProfileMetadata is the secret-free persisted index entry for one imported
+// profile. The raw configuration is stored separately with owner-only
+// permissions.
+type ProfileMetadata struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// StableID returns a deterministic identifier for the validated runtime
+// profile. Comments, ignored DNS/routing values and source formatting do not
+// affect it, so importing the same effective profile is idempotent. The hash
+// contains no reversible key material.
+func (p Profile) StableID() string {
+	payload, _ := json.Marshal(struct {
+		Version           string
+		PrivateKey        [32]byte
+		Addresses         []netip.Prefix
+		MTU               uint16
+		Obfuscation       Obfuscation
+		PublicKey         PublicKey
+		Endpoint          string
+		Keepalive         uint16
+		PresharedKey      [32]byte
+		PresharedKeyIsSet bool
+	}{
+		Version:           p.Version,
+		PrivateKey:        p.Interface.PrivateKey.value,
+		Addresses:         p.Interface.Addresses,
+		MTU:               p.Interface.MTU,
+		Obfuscation:       p.Interface.Obfuscation,
+		PublicKey:         p.Peer.PublicKey,
+		Endpoint:          p.Peer.Endpoint,
+		Keepalive:         p.Peer.PersistentKeepalive,
+		PresharedKey:      p.Peer.PresharedKey.value,
+		PresharedKeyIsSet: p.Peer.PresharedKey.set,
+	})
+	sum := sha256.Sum256(payload)
+	return "awg-" + hex.EncodeToString(sum[:])
 }
 
 // RedactedStatus is safe for status output and structured logs. It never

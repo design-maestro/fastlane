@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,12 +15,14 @@ import (
 )
 
 const (
-	awgSubscriptionID = "amneziawg"
-	awgNodeID         = "profile"
+	awgSubscriptionID = "server-list"
+	legacyAWGNodeID   = "profile"
+	awgNodeID         = legacyAWGNodeID
 )
 
 // AWGStatus is a secret-free projection for CLI and LuCI.
 type AWGStatus struct {
+	ID            string                    `json:"id"`
 	State         string                    `json:"state"`
 	Name          string                    `json:"name,omitempty"`
 	Protocol      string                    `json:"protocol"`
@@ -42,48 +45,83 @@ func (s *Service) ImportAWGProfile(name string, raw []byte) (AWGStatus, error) {
 		if err != nil {
 			return AWGStatus{}, err
 		}
-		state, err := s.store.LoadState()
-		if err != nil {
-			return AWGStatus{}, fmt.Errorf("load state: %w", err)
+		if err := s.migrateLegacyAWGProfileLocked(); err != nil {
+			return AWGStatus{}, err
 		}
-		if state.ActiveConnectionKind == "amneziawg" && state.Connected {
-			return AWGStatus{}, fmt.Errorf("disconnect the active AmneziaWG profile before replacing it")
-		}
-		// A prepared interface belongs to the previously persisted profile. Tear
-		// it down before replacing the secret so subsequent checks can safely
-		// treat an already-up interface as matching the stored profile.
-		if s.awgController != nil {
-			if err := s.awgController.Remove(context.Background()); err != nil {
-				return AWGStatus{}, fmt.Errorf("remove previously prepared AmneziaWG interface: %w", err)
-			}
-		}
-		if err := s.awgStore.SaveAWGProfile(raw); err != nil {
-			return AWGStatus{}, fmt.Errorf("save AmneziaWG profile: %w", err)
-		}
+		id := profile.StableID()
 		name = strings.TrimSpace(name)
 		if name == "" {
 			name = profile.Peer.Endpoint
 		}
-		state.AWGProfileName = name
-		state.AWGLastProbe = nil
-		if err := s.saveState(state); err != nil {
-			return AWGStatus{}, fmt.Errorf("save AmneziaWG profile metadata: %w", err)
+		if _, err := s.awgStore.SaveAWGProfile(amneziawg.ProfileMetadata{ID: id, Name: name}, raw); err != nil {
+			return AWGStatus{}, fmt.Errorf("save AmneziaWG profile: %w", err)
 		}
-		return s.awgStatus(context.Background())
+		return s.awgStatusLocked(context.Background(), id)
 	})
 }
 
 func (s *Service) GetAWGStatus(ctx context.Context) (AWGStatus, error) {
-	return s.awgStatus(ctx)
+	return runStoreWriteLockedResult(s, func() (AWGStatus, error) {
+		if err := s.migrateLegacyAWGProfileLocked(); err != nil {
+			return AWGStatus{}, err
+		}
+		id, err := s.resolveAWGProfileIDLocked("")
+		if errors.Is(err, os.ErrNotExist) {
+			return AWGStatus{State: "absent", Protocol: "AmneziaWG"}, nil
+		}
+		if err != nil {
+			return AWGStatus{}, err
+		}
+		return s.awgStatusLocked(ctx, id)
+	})
 }
 
-func (s *Service) awgStatus(ctx context.Context) (AWGStatus, error) {
-	result := AWGStatus{State: "absent", Protocol: "AmneziaWG"}
+func (s *Service) GetAWGStatusByID(ctx context.Context, id string) (AWGStatus, error) {
+	return runStoreWriteLockedResult(s, func() (AWGStatus, error) {
+		if err := s.migrateLegacyAWGProfileLocked(); err != nil {
+			return AWGStatus{}, err
+		}
+		resolved, err := s.resolveAWGProfileIDLocked(id)
+		if err != nil {
+			return AWGStatus{}, err
+		}
+		return s.awgStatusLocked(ctx, resolved)
+	})
+}
+
+func (s *Service) ListAWGStatuses(ctx context.Context) ([]AWGStatus, error) {
+	return runStoreWriteLockedResult(s, func() ([]AWGStatus, error) {
+		if err := s.migrateLegacyAWGProfileLocked(); err != nil {
+			return nil, err
+		}
+		profiles, err := s.awgStore.ListAWGProfiles()
+		if err != nil {
+			return nil, err
+		}
+		statuses := make([]AWGStatus, 0, len(profiles))
+		for _, metadata := range profiles {
+			status, statusErr := s.awgStatusLocked(ctx, metadata.ID)
+			if statusErr != nil {
+				return nil, statusErr
+			}
+			statuses = append(statuses, status)
+		}
+		sort.SliceStable(statuses, func(i, j int) bool { return strings.ToLower(statuses[i].Name) < strings.ToLower(statuses[j].Name) })
+		return statuses, nil
+	})
+}
+
+func (s *Service) awgStatusLocked(ctx context.Context, id string) (AWGStatus, error) {
+	result := AWGStatus{ID: id, State: "absent", Protocol: "AmneziaWG"}
 	if s.awgStore == nil {
 		result.Message = "AmneziaWG profile storage is not configured"
 		return result, nil
 	}
-	raw, err := s.awgStore.LoadAWGProfile()
+	metadata, err := s.awgProfileMetadataLocked(id)
+	if err != nil {
+		return result, err
+	}
+	raw, err := s.awgStore.LoadAWGProfile(id)
 	if errors.Is(err, os.ErrNotExist) {
 		return result, nil
 	}
@@ -107,11 +145,16 @@ func (s *Service) awgStatus(ctx context.Context) (AWGStatus, error) {
 	if stateErr != nil {
 		return result, fmt.Errorf("load state: %w", stateErr)
 	}
-	result.Name = firstNonEmpty(strings.TrimSpace(state.AWGProfileName), profile.Peer.Endpoint)
-	result.LastProbe = state.AWGLastProbe
-	result.Active = state.ActiveConnectionKind == "amneziawg" && state.Connected && state.OperationalMode == domain.OperationalModeVPN
+	result.Name = firstNonEmpty(strings.TrimSpace(metadata.Name), profile.Peer.Endpoint)
+	if probe, ok := state.AWGProfileProbes[id]; ok {
+		probeCopy := probe
+		result.LastProbe = &probeCopy
+	} else if state.ActiveAWGProfileID == id {
+		result.LastProbe = state.AWGLastProbe
+	}
+	result.Active = state.ActiveConnectionKind == "amneziawg" && state.ActiveAWGProfileID == id && state.Connected && state.OperationalMode == domain.OperationalModeVPN
 	result.State = "imported"
-	if state.ActiveConnectionKind == "amneziawg" && state.OperationalMode == domain.OperationalModeDirect {
+	if state.ActiveConnectionKind == "amneziawg" && state.ActiveAWGProfileID == id && state.OperationalMode == domain.OperationalModeDirect {
 		result.State = "direct"
 		result.Message = "VPN unavailable; internet is direct"
 	}
@@ -126,7 +169,7 @@ func (s *Service) awgStatus(ctx context.Context) (AWGStatus, error) {
 		result.Message = compatErr.Error()
 		return result, nil
 	}
-	if iface, ifaceErr := s.awgController.Status(ctx); ifaceErr == nil {
+	if iface, ifaceErr := s.awgController.Status(ctx); state.PreparedAWGProfileID == id && ifaceErr == nil {
 		result.Interface = iface
 		if iface.Up {
 			result.State = "prepared"
@@ -144,9 +187,20 @@ func (s *Service) awgStatus(ctx context.Context) (AWGStatus, error) {
 }
 
 func (s *Service) CheckAWG(ctx context.Context) (AWGStatus, error) {
+	return s.CheckAWGProfile(ctx, "")
+}
+
+func (s *Service) CheckAWGProfile(ctx context.Context, id string) (AWGStatus, error) {
 	return runStoreWriteLockedResult(s, func() (AWGStatus, error) {
-		_, _, err := s.checkAWGLocked(ctx, true)
-		status, statusErr := s.awgStatus(ctx)
+		if err := s.migrateLegacyAWGProfileLocked(); err != nil {
+			return AWGStatus{}, err
+		}
+		resolved, err := s.resolveAWGProfileIDLocked(id)
+		if err != nil {
+			return AWGStatus{}, err
+		}
+		_, _, err = s.checkAWGLocked(ctx, resolved, true)
+		status, statusErr := s.awgStatusLocked(ctx, resolved)
 		if err != nil {
 			return status, err
 		}
@@ -154,18 +208,35 @@ func (s *Service) CheckAWG(ctx context.Context) (AWGStatus, error) {
 	})
 }
 
-func (s *Service) checkAWGLocked(ctx context.Context, prepare bool) (string, amneziawg.InterfaceStatus, error) {
-	profile, err := s.loadAWGProfile()
+func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (string, amneziawg.InterfaceStatus, error) {
+	profile, err := s.loadAWGProfile(id)
 	if err != nil {
 		return "", amneziawg.InterfaceStatus{}, err
 	}
 	if s.awgController == nil {
 		return "", amneziawg.InterfaceStatus{}, fmt.Errorf("AmneziaWG controller is not configured")
 	}
+	stateBefore, err := s.store.LoadState()
+	if err != nil {
+		return "", amneziawg.InterfaceStatus{}, fmt.Errorf("load state: %w", err)
+	}
+	if stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID != "" && stateBefore.ActiveAWGProfileID != id {
+		return "", amneziawg.InterfaceStatus{}, fmt.Errorf("disconnect the active AmneziaWG profile before checking another profile")
+	}
 	if prepare {
 		prepared, statusErr := s.awgController.Status(ctx)
+		if stateBefore.PreparedAWGProfileID != id {
+			if err := s.awgController.Remove(ctx); err != nil {
+				return "", amneziawg.InterfaceStatus{}, fmt.Errorf("remove prepared AmneziaWG profile: %w", err)
+			}
+			statusErr = errors.New("different profile was prepared")
+		}
 		if statusErr != nil || !prepared.Up || prepared.Device == "" || prepared.Address == "" {
 			if err := s.awgController.Prepare(ctx, profile); err != nil {
+				return "", amneziawg.InterfaceStatus{}, err
+			}
+			stateBefore.PreparedAWGProfileID = id
+			if err := s.saveState(stateBefore); err != nil {
 				return "", amneziawg.InterfaceStatus{}, err
 			}
 		}
@@ -199,6 +270,10 @@ func (s *Service) checkAWGLocked(ctx context.Context, prepare bool) (string, amn
 	}
 	state, stateErr := s.store.LoadState()
 	if stateErr == nil {
+		if state.AWGProfileProbes == nil {
+			state.AWGProfileProbes = make(map[string]domain.AWGProbeState)
+		}
+		state.AWGProfileProbes[id] = *probeState
 		state.AWGLastProbe = probeState
 		if saveErr := s.saveState(state); saveErr != nil && err == nil {
 			err = saveErr
@@ -208,13 +283,33 @@ func (s *Service) checkAWGLocked(ctx context.Context, prepare bool) (string, amn
 }
 
 func (s *Service) ConnectAWG(ctx context.Context) error {
-	return runStoreWriteLocked(s, func() error { return s.connectAWGLocked(ctx) })
+	return s.ConnectAWGProfile(ctx, "")
 }
 
-func (s *Service) connectAWGLocked(ctx context.Context) error {
+func (s *Service) ConnectAWGProfile(ctx context.Context, id string) error {
+	return runStoreWriteLocked(s, func() error {
+		if err := s.migrateLegacyAWGProfileLocked(); err != nil {
+			return err
+		}
+		resolved, err := s.resolveAWGProfileIDLocked(id)
+		if err != nil {
+			return err
+		}
+		return s.connectAWGLocked(ctx, resolved)
+	})
+}
+
+func (s *Service) connectAWGLocked(ctx context.Context, id string) error {
 	var tag string
 	stateBefore, stateErr := s.store.LoadState()
-	if stateErr == nil && awgProbeIsFresh(stateBefore.AWGLastProbe, s.currentTime().UTC(), time.Minute) && s.awgController != nil {
+	if stateErr == nil && stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID != "" && stateBefore.ActiveAWGProfileID != id {
+		if err := s.disconnectAWGLocked(ctx); err != nil {
+			return fmt.Errorf("disconnect active AmneziaWG profile: %w", err)
+		}
+		stateBefore, stateErr = s.store.LoadState()
+	}
+	probe, hasProbe := stateBefore.AWGProfileProbes[id]
+	if stateErr == nil && hasProbe && stateBefore.PreparedAWGProfileID == id && awgProbeIsFresh(&probe, s.currentTime().UTC(), time.Minute) && s.awgController != nil {
 		if iface, statusErr := s.awgController.Status(ctx); statusErr == nil && iface.Up && iface.Device != "" && iface.Address != "" {
 			if managed, runtimeErr := s.ensureAWGManagedRuntime(ctx); runtimeErr == nil {
 				tag, _ = managed.PrepareInterfaceOutbound(ctx, iface.Device, iface.Address, amneziawg.RouteMark)
@@ -223,7 +318,7 @@ func (s *Service) connectAWGLocked(ctx context.Context) error {
 	}
 	if tag == "" {
 		var err error
-		tag, _, err = s.checkAWGLocked(ctx, true)
+		tag, _, err = s.checkAWGLocked(ctx, id, true)
 		if err != nil {
 			return fmt.Errorf("verify AmneziaWG route: %w", err)
 		}
@@ -261,7 +356,7 @@ func (s *Service) connectAWGLocked(ctx context.Context) error {
 		_ = s.saveState(state)
 		return fmt.Errorf("load settings: %w", err)
 	}
-	if reason, egressErr := s.ensureBackendEgress(ctx, settings, awgSubscriptionID, awgNodeID, domain.SelectionModeManual); egressErr != nil {
+	if reason, egressErr := s.ensureBackendEgress(ctx, settings, awgSubscriptionID, id, domain.SelectionModeManual); egressErr != nil {
 		_ = managed.SelectOutbound(ctx, previousTag)
 		state.CurrentOperation = nil
 		_ = s.saveState(state)
@@ -269,9 +364,15 @@ func (s *Service) connectAWGLocked(ctx context.Context) error {
 	}
 	state = intent
 	state.ActiveConnectionKind = "amneziawg"
+	state.ActiveAWGProfileID = id
 	state.ActiveSubscriptionID = awgSubscriptionID
-	state.ActiveNodeID = awgNodeID
-	state.ActiveNodeName = firstNonEmpty(strings.TrimSpace(state.AWGProfileName), "AmneziaWG")
+	state.ActiveNodeID = id
+	if metadata, metadataErr := s.awgProfileMetadataLocked(id); metadataErr == nil {
+		state.ActiveNodeName = firstNonEmpty(strings.TrimSpace(metadata.Name), "AmneziaWG")
+		state.AWGProfileName = state.ActiveNodeName
+	} else {
+		state.ActiveNodeName = "AmneziaWG"
+	}
 	state.Mode = domain.SelectionModeManual
 	state.AutoScope = ""
 	state.Connected = true
@@ -280,7 +381,7 @@ func (s *Service) connectAWGLocked(ctx context.Context) error {
 	state.SelectedOutboundTag = tag
 	state.RuntimeConfigVersion = tag
 	state.CurrentOperation = nil
-	state.RuntimeOutbounds = updateRuntimeOutbound(state.RuntimeOutbounds, domain.RuntimeOutboundState{Tag: tag, SubscriptionID: awgSubscriptionID, NodeID: awgNodeID, Role: "active", VerifiedAt: now})
+	state.RuntimeOutbounds = updateRuntimeOutbound(state.RuntimeOutbounds, domain.RuntimeOutboundState{Tag: tag, SubscriptionID: awgSubscriptionID, NodeID: id, Role: "active", VerifiedAt: now})
 	if previousTag != "fastlane-direct" && previousTag != tag {
 		state.RuntimeOutbounds = updateRuntimeOutbound(state.RuntimeOutbounds, domain.RuntimeOutboundState{Tag: previousTag, Role: "draining", RetireAfter: now.Add(5 * time.Minute), RemoveBy: now.Add(30 * time.Minute)})
 	}
@@ -353,7 +454,7 @@ func (s *Service) ensureAWGManagedRuntimeWithReload(ctx context.Context, forceRe
 	if err := s.backend.ApplyConfig(ctx, req); err != nil {
 		return nil, fmt.Errorf("install Xray managed runtime: %w", err)
 	}
-	if reason, err := s.ensureBackendRunning(ctx, awgSubscriptionID, awgNodeID, domain.SelectionModeManual); err != nil {
+	if reason, err := s.ensureBackendRunning(ctx, awgSubscriptionID, legacyAWGNodeID, domain.SelectionModeManual); err != nil {
 		return nil, fmt.Errorf("%s: %w", reason, err)
 	}
 	if s.dns != nil {
@@ -380,58 +481,73 @@ func (s *Service) ensureAWGManagedRuntimeWithReload(ctx context.Context, forceRe
 }
 
 func (s *Service) DisconnectAWG(ctx context.Context) error {
-	return runStoreWriteLocked(s, func() error {
-		state, err := s.store.LoadState()
-		if err != nil {
+	return runStoreWriteLocked(s, func() error { return s.disconnectAWGLocked(ctx) })
+}
+
+func (s *Service) disconnectAWGLocked(ctx context.Context) error {
+	state, err := s.store.LoadState()
+	if err != nil {
+		return err
+	}
+	active := state.ActiveConnectionKind == "amneziawg"
+	if managed, ok := s.backend.(backend.ManagedBackend); ok && active {
+		if err := managed.SelectDirect(ctx); err != nil {
+			return fmt.Errorf("select direct route: %w", err)
+		}
+	}
+	if s.awgController != nil {
+		if err := s.awgController.Disconnect(ctx); err != nil {
 			return err
 		}
-		active := state.ActiveConnectionKind == "amneziawg"
-		if managed, ok := s.backend.(backend.ManagedBackend); ok && active {
-			if err := managed.SelectDirect(ctx); err != nil {
-				return fmt.Errorf("select direct route: %w", err)
-			}
-		}
-		if s.awgController != nil {
-			if err := s.awgController.Disconnect(ctx); err != nil {
-				return err
-			}
-		}
-		if !active {
-			return nil
-		}
-		state.ActiveConnectionKind = ""
-		state.ActiveSubscriptionID = ""
-		state.ActiveNodeID = ""
-		state.ActiveNodeName = ""
-		state.Mode = domain.SelectionModeDisconnected
-		state.Connected = false
-		state.OperationalMode = domain.OperationalModeDirect
-		state.ActiveTransport = domain.TransportModeDirect
-		state.SelectedOutboundTag = "fastlane-direct"
-		state.CurrentOperation = nil
-		state.LastSwitchAt = s.currentTime().UTC()
-		state.LastSwitchReason = "AmneziaWG disconnected"
-		if err := s.saveState(state); err != nil {
-			return err
-		}
-		settings, err := s.store.LoadSettings()
-		if err != nil {
-			return fmt.Errorf("load settings: %w", err)
-		}
-		settings.AutoMode = false
-		settings.Mode = domain.SelectionModeDisconnected
-		return s.store.SaveSettings(settings)
-	})
+	}
+	if !active {
+		return nil
+	}
+	state.ActiveConnectionKind = ""
+	state.ActiveAWGProfileID = ""
+	state.ActiveSubscriptionID = ""
+	state.ActiveNodeID = ""
+	state.ActiveNodeName = ""
+	state.Mode = domain.SelectionModeDisconnected
+	state.Connected = false
+	state.OperationalMode = domain.OperationalModeDirect
+	state.ActiveTransport = domain.TransportModeDirect
+	state.SelectedOutboundTag = "fastlane-direct"
+	state.CurrentOperation = nil
+	state.LastSwitchAt = s.currentTime().UTC()
+	state.LastSwitchReason = "AmneziaWG disconnected"
+	if err := s.saveState(state); err != nil {
+		return err
+	}
+	settings, err := s.store.LoadSettings()
+	if err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+	settings.AutoMode = false
+	settings.Mode = domain.SelectionModeDisconnected
+	return s.store.SaveSettings(settings)
 }
 
 func (s *Service) RemoveAWG(ctx context.Context) error {
+	return s.RemoveAWGProfile(ctx, "")
+}
+
+func (s *Service) RemoveAWGProfile(ctx context.Context, id string) error {
 	return runStoreWriteLocked(s, func() error {
+		if err := s.migrateLegacyAWGProfileLocked(); err != nil {
+			return err
+		}
+		resolved, err := s.resolveAWGProfileIDLocked(id)
+		if err != nil {
+			return err
+		}
 		state, err := s.store.LoadState()
 		if err != nil {
 			return err
 		}
 		tag := ""
-		if state.ActiveConnectionKind == "amneziawg" {
+		active := state.ActiveConnectionKind == "amneziawg" && state.ActiveAWGProfileID == resolved
+		if active {
 			tag = state.SelectedOutboundTag
 			if managed, ok := s.backend.(backend.ManagedBackend); ok {
 				if err := managed.SelectDirect(ctx); err != nil {
@@ -439,7 +555,7 @@ func (s *Service) RemoveAWG(ctx context.Context) error {
 				}
 			}
 		}
-		if s.awgController != nil {
+		if s.awgController != nil && (active || state.PreparedAWGProfileID == resolved) {
 			if err := s.awgController.Remove(ctx); err != nil {
 				return err
 			}
@@ -450,14 +566,19 @@ func (s *Service) RemoveAWG(ctx context.Context) error {
 			}
 		}
 		if s.awgStore != nil {
-			if err := s.awgStore.RemoveAWGProfile(); err != nil {
+			if err := s.awgStore.RemoveAWGProfile(resolved); err != nil {
 				return err
 			}
 		}
-		state.AWGProfileName = ""
-		state.AWGLastProbe = nil
-		if state.ActiveConnectionKind == "amneziawg" {
+		delete(state.AWGProfileProbes, resolved)
+		if state.PreparedAWGProfileID == resolved {
+			state.PreparedAWGProfileID = ""
+		}
+		if active {
+			state.AWGProfileName = ""
+			state.AWGLastProbe = nil
 			state.ActiveConnectionKind = ""
+			state.ActiveAWGProfileID = ""
 			state.ActiveSubscriptionID = ""
 			state.ActiveNodeID = ""
 			state.ActiveNodeName = ""
@@ -470,26 +591,131 @@ func (s *Service) RemoveAWG(ctx context.Context) error {
 		if err := s.saveState(state); err != nil {
 			return err
 		}
-		if tag == "" {
-			return nil
-		}
 		settings, err := s.store.LoadSettings()
 		if err != nil {
 			return fmt.Errorf("load settings: %w", err)
 		}
-		settings.AutoMode = false
-		settings.Mode = domain.SelectionModeDisconnected
+		exclusion := domain.AutoExcludedNodeKey("server-list", resolved)
+		filtered := settings.AutoExcludedNodes[:0]
+		for _, value := range settings.AutoExcludedNodes {
+			if value != exclusion {
+				filtered = append(filtered, value)
+			}
+		}
+		settings.AutoExcludedNodes = domain.NormalizeAutoExcludedNodes(filtered)
+		if active {
+			settings.AutoMode = false
+			settings.Mode = domain.SelectionModeDisconnected
+		}
 		return s.store.SaveSettings(settings)
 	})
 }
 
-func (s *Service) loadAWGProfile() (amneziawg.Profile, error) {
+func (s *Service) loadAWGProfile(id string) (amneziawg.Profile, error) {
 	if s.awgStore == nil {
 		return amneziawg.Profile{}, fmt.Errorf("AmneziaWG profile storage is not configured")
 	}
-	raw, err := s.awgStore.LoadAWGProfile()
+	raw, err := s.awgStore.LoadAWGProfile(id)
 	if err != nil {
 		return amneziawg.Profile{}, fmt.Errorf("load AmneziaWG profile: %w", err)
 	}
 	return amneziawg.Parse(raw)
+}
+
+func (s *Service) awgProfileMetadataLocked(id string) (amneziawg.ProfileMetadata, error) {
+	profiles, err := s.awgStore.ListAWGProfiles()
+	if err != nil {
+		return amneziawg.ProfileMetadata{}, err
+	}
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile, nil
+		}
+	}
+	return amneziawg.ProfileMetadata{}, fmt.Errorf("AmneziaWG profile %q not found", id)
+}
+
+func (s *Service) resolveAWGProfileIDLocked(value string) (string, error) {
+	profiles, err := s.awgStore.ListAWGProfiles()
+	if err != nil {
+		return "", err
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		state, stateErr := s.store.LoadState()
+		if stateErr == nil && state.ActiveConnectionKind == "amneziawg" && state.ActiveAWGProfileID != "" {
+			value = state.ActiveAWGProfileID
+		} else if len(profiles) == 1 {
+			return profiles[0].ID, nil
+		} else if len(profiles) == 0 {
+			return "", os.ErrNotExist
+		} else {
+			return "", fmt.Errorf("multiple AmneziaWG profiles are imported; specify --id")
+		}
+	}
+	match := ""
+	for _, profile := range profiles {
+		if profile.ID == value {
+			return profile.ID, nil
+		}
+		if strings.HasPrefix(profile.ID, value) {
+			if match != "" {
+				return "", fmt.Errorf("AmneziaWG profile ID prefix %q is ambiguous", value)
+			}
+			match = profile.ID
+		}
+	}
+	if match != "" {
+		return match, nil
+	}
+	return "", fmt.Errorf("AmneziaWG profile %q not found", value)
+}
+
+func (s *Service) migrateLegacyAWGProfileLocked() error {
+	if s.awgStore == nil {
+		return nil
+	}
+	raw, err := s.awgStore.LoadLegacyAWGProfile()
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load legacy AmneziaWG profile: %w", err)
+	}
+	profile, err := amneziawg.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse legacy AmneziaWG profile: %w", err)
+	}
+	state, err := s.store.LoadState()
+	if err != nil {
+		return fmt.Errorf("load state for AmneziaWG migration: %w", err)
+	}
+	id := profile.StableID()
+	name := firstNonEmpty(strings.TrimSpace(state.AWGProfileName), profile.Peer.Endpoint)
+	if _, err := s.awgStore.SaveAWGProfile(amneziawg.ProfileMetadata{ID: id, Name: name}, raw); err != nil {
+		return fmt.Errorf("migrate legacy AmneziaWG profile: %w", err)
+	}
+	if state.AWGProfileProbes == nil {
+		state.AWGProfileProbes = make(map[string]domain.AWGProbeState)
+	}
+	if state.AWGLastProbe != nil {
+		state.AWGProfileProbes[id] = *state.AWGLastProbe
+	}
+	if state.ActiveConnectionKind == "amneziawg" {
+		state.ActiveAWGProfileID = id
+		state.ActiveSubscriptionID = awgSubscriptionID
+		if state.ActiveNodeID == "" || state.ActiveNodeID == legacyAWGNodeID {
+			state.ActiveNodeID = id
+		}
+	}
+	if state.PreparedAWGProfileID == "" {
+		state.PreparedAWGProfileID = id
+	}
+	if err := s.saveState(state); err != nil {
+		return fmt.Errorf("save migrated AmneziaWG state: %w", err)
+	}
+	if err := s.awgStore.RemoveLegacyAWGProfile(); err != nil {
+		return fmt.Errorf("remove legacy AmneziaWG profile: %w", err)
+	}
+	return nil
 }

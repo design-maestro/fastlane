@@ -910,25 +910,25 @@ async function smoke(section, name, run) {
 		assert.ok(toasts.some((toast) => toast.type === 'success' && /Files added: 1/.test(toast.message)));
 	});
 
-	await smoke('VPN', 'shows an imported AWG profile only in the common server list', async () => {
+	await smoke('VPN', 'shows imported AWG profiles in the existing Server List', async () => {
 		const page = makeVPN();
-		page.pageData[3] = {
+		page.pageData[3] = [{
+			id: 'awg-legacy',
 			state: 'imported', name: 'Backup AWG', protocol: 'AmneziaWG Legacy', active: false,
 			profile: { version: 'legacy', endpoint: 'vpn.example:51820', addresses: ['10.8.0.2/32'] },
 			last_probe: { success: true, latency_ms: 54, checked_at: '2026-09-16T06:00:00Z' }, interface: {}
-		};
-		const awgSource = page.subscriptions().find((sub) => sub.id === 'amneziawg');
-		assert.equal(awgSource.display_name, 'AWG file');
-		assert.equal(awgSource.nodes[0].kind, 'awg');
-		assert.match(treeText(page.renderTabs()), /AWG file/);
+		}];
+		const awgSource = page.subscriptions().find((sub) => sub.id === 'server-list');
+		assert.equal(awgSource.display_name, 'Server List');
+		assert.ok(awgSource.nodes.some((node) => node.id === 'awg-legacy' && node.kind === 'awg'));
+		assert.match(treeText(page.renderTabs()), /Server List/);
 		assert.match(treeText(page.renderTable()), /Backup AWG.*AmneziaWG.*54 ms.*AWG Legacy/s);
 		assert.doesNotMatch(treeText(page.renderContent()), /One manual profile/);
-		page.filter = 'amneziawg';
-		await page.handleURLTests();
-		commandSeen(['awg', 'check']);
+		await page.handleAWGCheck('awg-legacy');
+		commandSeen(['awg', 'check', '--id', 'awg-legacy']);
 	});
 
-	await smoke('VPN', 'rejects multiple AWG profiles before importing anything', async () => {
+	await smoke('VPN', 'imports multiple AWG profiles as a collection', async () => {
 		const page = makeVPN();
 		const fileInput = E('input'), error = E('div'), submit = E('button');
 		fileInput.files = [
@@ -936,9 +936,9 @@ async function smoke(section, name, run) {
 			{ name: 'second.CONF', size: 10, content: 'second' }
 		];
 		await page.handleFileAddSubmit(fileInput, error, submit);
-		assert.match(error.textContent, /only one AmneziaWG profile/i);
-		assert.equal(commands.length, 0);
-		assert.equal(fileWrites.length, 0);
+		commandSeen(['awg', 'import', '--file', '/var/run/fastlane/awg-import.conf', '--name', 'first']);
+		commandSeen(['awg', 'import', '--file', '/var/run/fastlane/awg-import.conf', '--name', 'second']);
+		assert.equal(fileWrites.length, 2);
 	});
 
 	await smoke('VPN', 'restores the add form after a backend error', async () => {

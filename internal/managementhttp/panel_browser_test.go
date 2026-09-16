@@ -52,21 +52,25 @@ func TestStandalonePanelBrowser(t *testing.T) {
 	if err := os.WriteFile(profilePath, []byte(panelAWGFixture()), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := chromedp.Run(ctx, chromedp.Click("#add-toggle"), chromedp.Click("#add-file-tab"), chromedp.SetUploadFiles(`#add-form input[type=file]`, []string{profilePath}), chromedp.Click("#add-submit"), chromedp.WaitNotPresent("#add-dialog[open]"), chromedp.WaitVisible(`tr[data-key="local-awg/awg-profile"]`), chromedp.Evaluate(`document.querySelectorAll('#server-list tbody tr').length===2 && !document.querySelector('.awg') && document.querySelector('tr[data-key="local-awg/awg-profile"]').textContent.includes('AWG test')`, &valid)); err != nil || !valid {
+	if err := chromedp.Run(ctx, chromedp.Click("#add-toggle"), chromedp.Click("#add-file-tab"), chromedp.SetUploadFiles(`#add-form input[type=file]`, []string{profilePath}), chromedp.Click("#add-submit"), chromedp.WaitNotPresent("#add-dialog[open]"), chromedp.WaitVisible(`tr[data-key^="server-list/awg-"]`), chromedp.Evaluate(`document.querySelectorAll('#server-list tbody tr').length===2 && !document.querySelector('.awg') && document.querySelector('tr[data-key^="server-list/awg-"]').textContent.includes('AWG test')`, &valid)); err != nil || !valid {
 		t.Fatalf("AWG unified import: %v", err)
 	}
 	badPath := filepath.Join(t.TempDir(), "Bad.conf")
-	beforeReplacement, err := fs.LoadAWGProfile()
+	profiles, err := fs.ListAWGProfiles()
+	if err != nil || len(profiles) != 1 {
+		t.Fatalf("profiles after import = %+v, %v", profiles, err)
+	}
+	beforeReplacement, err := fs.LoadAWGProfile(profiles[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(badPath, []byte("[Interface]\nPostUp = forbidden\n[Peer]\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := chromedp.Run(ctx, chromedp.Click("#add-toggle"), chromedp.Click("#add-file-tab"), chromedp.SetUploadFiles(`#add-form input[type=file]`, []string{badPath}), chromedp.Click("#add-submit"), chromedp.WaitVisible("#confirm"), chromedp.Click(`#confirm button[value=confirm]`), chromedp.Sleep(3500*time.Millisecond), chromedp.Evaluate(`document.querySelector('#add-error').textContent.includes('команды') && document.querySelector('#add-dialog').open`, &valid)); err != nil || !valid {
+	if err := chromedp.Run(ctx, chromedp.Click("#add-toggle"), chromedp.Click("#add-file-tab"), chromedp.SetUploadFiles(`#add-form input[type=file]`, []string{badPath}), chromedp.Click("#add-submit"), chromedp.Sleep(3500*time.Millisecond), chromedp.Evaluate(`document.querySelector('#add-error').textContent.includes('команды') && document.querySelector('#add-dialog').open`, &valid)); err != nil || !valid {
 		t.Fatalf("unsafe AWG import did not leave actionable error: %v", err)
 	}
-	stored, err := fs.LoadAWGProfile()
+	stored, err := fs.LoadAWGProfile(profiles[0].ID)
 	if err != nil || string(stored) != string(beforeReplacement) {
 		t.Fatal("failed replacement overwrote existing AWG profile")
 	}

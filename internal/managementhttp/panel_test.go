@@ -130,7 +130,8 @@ func TestPanelJobsApplyThroughRealService(t *testing.T) {
 	if h.jobs.snapshot().Error != "unsafe_awg_directive" {
 		t.Fatal("AWG validation did not return a safe, actionable error code")
 	}
-	if _, err := fs.LoadAWGProfile(); err == nil {
-		t.Fatal("unsafe AWG persisted")
+	profiles, err := fs.ListAWGProfiles()
+	if err != nil || len(profiles) != 0 {
+		t.Fatalf("unsafe AWG persisted: %+v, %v", profiles, err)
 	}
 }

@@ -403,6 +403,9 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 		ActiveConnectionKind       *string                                  `json:"active_connection_kind"`
 		AWGProfileName             *string                                  `json:"awg_profile_name"`
 		AWGLastProbe               *domain.AWGProbeState                    `json:"awg_last_probe"`
+		ActiveAWGProfileID         *string                                  `json:"active_awg_profile_id"`
+		PreparedAWGProfileID       *string                                  `json:"prepared_awg_profile_id"`
+		AWGProfileProbes           *map[string]domain.AWGProbeState         `json:"awg_profile_probes"`
 	}
 
 	var raw rawState
@@ -508,6 +511,15 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 		probe := *raw.AWGLastProbe
 		state.AWGLastProbe = &probe
 	}
+	if raw.ActiveAWGProfileID != nil {
+		state.ActiveAWGProfileID = *raw.ActiveAWGProfileID
+	}
+	if raw.PreparedAWGProfileID != nil {
+		state.PreparedAWGProfileID = *raw.PreparedAWGProfileID
+	}
+	if raw.AWGProfileProbes != nil {
+		state.AWGProfileProbes = *raw.AWGProfileProbes
+	}
 	if raw.ZapretTest != nil {
 		if raw.ZapretTest.Active != nil {
 			state.ZapretTest.Active = *raw.ZapretTest.Active
@@ -536,6 +548,9 @@ func decodeState(data []byte, path string) (domain.RuntimeState, error) {
 	}
 	if state.Health == nil {
 		state.Health = make(map[string]domain.NodeHealth)
+	}
+	if state.AWGProfileProbes == nil {
+		state.AWGProfileProbes = make(map[string]domain.AWGProbeState)
 	}
 	if raw.ActiveTransport == nil {
 		if state.Connected {

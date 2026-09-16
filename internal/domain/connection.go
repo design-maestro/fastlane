@@ -108,18 +108,22 @@ type RuntimeState struct {
 	ActiveConnectionKind       string                           `json:"active_connection_kind,omitempty"`
 	AWGProfileName             string                           `json:"awg_profile_name,omitempty"`
 	AWGLastProbe               *AWGProbeState                   `json:"awg_last_probe,omitempty"`
+	ActiveAWGProfileID         string                           `json:"active_awg_profile_id,omitempty"`
+	PreparedAWGProfileID       string                           `json:"prepared_awg_profile_id,omitempty"`
+	AWGProfileProbes           map[string]AWGProbeState         `json:"awg_profile_probes,omitempty"`
 }
 
 // DefaultRuntimeState returns an empty persisted state.
 func DefaultRuntimeState() RuntimeState {
 	return RuntimeState{
-		SchemaVersion:    4,
+		SchemaVersion:    5,
 		OperationalMode:  OperationalModeDirect,
 		Mode:             SelectionModeDisconnected,
 		ActiveTransport:  TransportModeDirect,
 		LastRefreshAt:    make(map[string]time.Time),
 		Health:           make(map[string]NodeHealth),
 		CandidateBackoff: make(map[string]CandidateBackoffState),
+		AWGProfileProbes: make(map[string]AWGProbeState),
 	}
 }
 

@@ -7,13 +7,16 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/design-maestro/fastlane/internal/app"
 )
 
 const maxAWGProfileBytes = 1024 * 1024
 
 func newAWGCmd(opts *rootOptions) *cobra.Command {
-	cmd := &cobra.Command{Use: "awg", Short: "Manage one experimental AmneziaWG Legacy or 2.0 profile"}
+	cmd := &cobra.Command{Use: "awg", Short: "Manage manual AmneziaWG Legacy or 2.0 profiles"}
 	cmd.AddCommand(
+		newAWGListCmd(opts),
 		newAWGStatusCmd(opts),
 		newAWGImportCmd(opts),
 		newAWGConnectCmd(opts),
@@ -25,12 +28,41 @@ func newAWGCmd(opts *rootOptions) *cobra.Command {
 }
 
 func newAWGStatusCmd(opts *rootOptions) *cobra.Command {
-	return &cobra.Command{Use: "status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		status, err := opts.service.GetAWGStatus(cmd.Context())
+	var id string
+	cmd := &cobra.Command{Use: "status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		var status app.AWGStatus
+		var err error
+		if strings.TrimSpace(id) == "" {
+			status, err = opts.service.GetAWGStatus(cmd.Context())
+		} else {
+			status, err = opts.service.GetAWGStatusByID(cmd.Context(), id)
+		}
 		if err != nil {
 			return err
 		}
 		return printOutput(cmd, opts.jsonOutput, status, fmt.Sprintf("AmneziaWG: %s", status.State))
+	}}
+	cmd.Flags().StringVar(&id, "id", "", "Profile ID or unique prefix; defaults to active or sole profile")
+	return cmd
+}
+
+func newAWGListCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		statuses, err := opts.service.ListAWGStatuses(cmd.Context())
+		if err != nil {
+			return err
+		}
+		if opts.jsonOutput {
+			return printOutput(cmd, true, statuses, "")
+		}
+		if len(statuses) == 0 {
+			return printOutput(cmd, false, nil, "No AmneziaWG profiles imported")
+		}
+		var lines []string
+		for _, status := range statuses {
+			lines = append(lines, fmt.Sprintf("%s  %s  %s  state=%s", status.ID, status.Name, status.Protocol, status.State))
+		}
+		return printOutput(cmd, false, nil, strings.Join(lines, "\n"))
 	}}
 }
 
@@ -74,26 +106,32 @@ func newAWGImportCmd(opts *rootOptions) *cobra.Command {
 }
 
 func newAWGConnectCmd(opts *rootOptions) *cobra.Command {
-	return &cobra.Command{Use: "connect", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		if err := opts.service.ConnectAWG(cmd.Context()); err != nil {
+	var id string
+	cmd := &cobra.Command{Use: "connect", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		if err := opts.service.ConnectAWGProfile(cmd.Context(), id); err != nil {
 			return err
 		}
-		status, err := opts.service.GetAWGStatus(cmd.Context())
+		status, err := opts.service.GetAWGStatusByID(cmd.Context(), id)
 		if err != nil {
 			return err
 		}
 		return printOutput(cmd, opts.jsonOutput, status, "AmneziaWG connected")
 	}}
+	cmd.Flags().StringVar(&id, "id", "", "Profile ID or unique prefix; defaults to active or sole profile")
+	return cmd
 }
 
 func newAWGCheckCmd(opts *rootOptions) *cobra.Command {
-	return &cobra.Command{Use: "check", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		status, err := opts.service.CheckAWG(cmd.Context())
+	var id string
+	cmd := &cobra.Command{Use: "check", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		status, err := opts.service.CheckAWGProfile(cmd.Context(), id)
 		if err != nil {
 			return err
 		}
 		return printOutput(cmd, opts.jsonOutput, status, "AmneziaWG check passed")
 	}}
+	cmd.Flags().StringVar(&id, "id", "", "Profile ID or unique prefix; defaults to active or sole profile")
+	return cmd
 }
 
 func newAWGDisconnectCmd(opts *rootOptions) *cobra.Command {
@@ -106,10 +144,13 @@ func newAWGDisconnectCmd(opts *rootOptions) *cobra.Command {
 }
 
 func newAWGRemoveCmd(opts *rootOptions) *cobra.Command {
-	return &cobra.Command{Use: "remove", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		if err := opts.service.RemoveAWG(cmd.Context()); err != nil {
+	var id string
+	cmd := &cobra.Command{Use: "remove", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		if err := opts.service.RemoveAWGProfile(cmd.Context(), id); err != nil {
 			return err
 		}
 		return printOutput(cmd, opts.jsonOutput, map[string]string{"state": "absent"}, "AmneziaWG profile removed")
 	}}
+	cmd.Flags().StringVar(&id, "id", "", "Profile ID or unique prefix; defaults to active or sole profile")
+	return cmd
 }

@@ -58,9 +58,12 @@ type Store interface {
 // AWGProfileStore keeps the native profile separate from subscriptions and
 // runtime status because it contains private key material.
 type AWGProfileStore interface {
-	SaveAWGProfile([]byte) error
-	LoadAWGProfile() ([]byte, error)
-	RemoveAWGProfile() error
+	SaveAWGProfile(amneziawg.ProfileMetadata, []byte) (bool, error)
+	ListAWGProfiles() ([]amneziawg.ProfileMetadata, error)
+	LoadAWGProfile(string) ([]byte, error)
+	RemoveAWGProfile(string) error
+	LoadLegacyAWGProfile() ([]byte, error)
+	RemoveLegacyAWGProfile() error
 }
 
 // Firewaller applies OpenWrt transparent proxy rules.
@@ -5347,12 +5350,19 @@ func (s *Service) reapplyCurrentConnectionWithOptions(ctx context.Context, force
 	}
 	state.ActiveTransport = effectiveActiveTransport(state)
 	if state.ActiveConnectionKind == "amneziawg" && state.Connected {
+		if err := s.migrateLegacyAWGProfileLocked(); err != nil {
+			return err
+		}
+		state, err = s.store.LoadState()
+		if err != nil {
+			return fmt.Errorf("load migrated AmneziaWG state: %w", err)
+		}
 		if forceStaticReload {
 			if _, err := s.ensureAWGManagedRuntimeWithReload(ctx, true); err != nil {
 				return err
 			}
 		}
-		return s.connectAWGLocked(ctx)
+		return s.connectAWGLocked(ctx, state.ActiveAWGProfileID)
 	}
 
 	if !state.Connected || state.ActiveSubscriptionID == "" {
