@@ -867,8 +867,8 @@ msgstr "Обновлено"
 msgid "Updating subscriptions…"
 msgstr "Загружаю свежие подписки…"
 
-msgid "Use Clash/Mihomo YAML, a provider file, or one AmneziaWG 2.0 .conf profile. AmneziaWG is imported as the experimental tunnel."
-msgstr "Подойдёт Clash/Mihomo YAML, provider-файл или один профиль AmneziaWG 2.0 в формате .conf. AmneziaWG будет импортирован как экспериментальный туннель."
+msgid "Use Clash/Mihomo YAML, a provider file, or one AmneziaWG Legacy/2.0 .conf profile. AmneziaWG is imported as the experimental tunnel."
+msgstr "Подойдёт Clash/Mihomo YAML, provider-файл или один профиль AmneziaWG Legacy/2.0 в формате .conf. AmneziaWG будет импортирован как экспериментальный туннель."
 
 msgid "VPN configuration"
 msgstr "Конфигурация VPN"
@@ -1200,8 +1200,8 @@ msgstr "Точка подключения"
 msgid "AWG 2.0 prototype"
 msgstr "Прототип AWG 2.0"
 
-msgid "AWG 2.0 · experimental. It does not participate in automatic selection."
-msgstr "AWG 2.0 · экспериментально. Не участвует в автовыборе."
+msgid "Experimental. It does not participate in automatic selection."
+msgstr "Экспериментально. Не участвует в автовыборе."
 
 msgid "AWG file"
 msgstr "Файл AWG"
@@ -1209,14 +1209,11 @@ msgstr "Файл AWG"
 msgid "Experimental AmneziaWG profile"
 msgstr "Экспериментальный профиль AmneziaWG"
 
-msgid "This is an AmneziaWG Legacy profile. Export an AWG 2.0 profile with S1–S4."
-msgstr "Это профиль AmneziaWG Legacy. Экспортируйте профиль AWG 2.0 с параметрами S1–S4."
-
 msgid "PreUp, PostUp, PreDown and PostDown commands are not allowed. Fast Lane manages routes itself."
 msgstr "Команды PreUp, PostUp, PreDown и PostDown запрещены. Fast Lane управляет маршрутами самостоятельно."
 
-msgid "This profile contains parameters that the AWG 2.0 prototype does not support."
-msgstr "В профиле есть параметры, которые прототип AWG 2.0 пока не поддерживает."
+msgid "This profile contains unsupported AmneziaWG parameters."
+msgstr "В профиле есть неподдерживаемые параметры AmneziaWG."
 
 msgid "Fast Lane is applying the AmneziaWG profile."
 msgstr "Fast Lane применяет профиль AmneziaWG."

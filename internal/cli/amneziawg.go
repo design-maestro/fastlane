@@ -12,7 +12,7 @@ import (
 const maxAWGProfileBytes = 1024 * 1024
 
 func newAWGCmd(opts *rootOptions) *cobra.Command {
-	cmd := &cobra.Command{Use: "awg", Short: "Manage one experimental AmneziaWG 2.0 profile"}
+	cmd := &cobra.Command{Use: "awg", Short: "Manage one experimental AmneziaWG Legacy or 2.0 profile"}
 	cmd.AddCommand(
 		newAWGStatusCmd(opts),
 		newAWGImportCmd(opts),
@@ -38,7 +38,7 @@ func newAWGImportCmd(opts *rootOptions) *cobra.Command {
 	var path string
 	var fromStdin bool
 	var name string
-	cmd := &cobra.Command{Use: "import", Short: "Import one native AWG 2.0 .conf", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "import", Short: "Import one native AWG Legacy or 2.0 .conf", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		if (strings.TrimSpace(path) == "") == !fromStdin {
 			return fmt.Errorf("use exactly one of --file or --stdin")
 		}

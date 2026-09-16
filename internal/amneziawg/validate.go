@@ -14,11 +14,24 @@ func buildProfile(raw rawProfile) (Profile, error) {
 	interfaceValues := raw.sections["interface"]
 	peerValues := raw.sections["peer"]
 
-	if _, s3 := interfaceValues["s3"]; !s3 {
-		return Profile{}, fmt.Errorf("%w: profile lacks S3 and is older than AWG 2.0", ErrUnsupportedVersion)
+	_, hasS3 := interfaceValues["s3"]
+	_, hasS4 := interfaceValues["s4"]
+	if hasS3 != hasS4 {
+		return Profile{}, fmt.Errorf("invalid AmneziaWG profile: S3 and S4 must either both be present or both be absent")
 	}
-	if _, s4 := interfaceValues["s4"]; !s4 {
-		return Profile{}, fmt.Errorf("%w: profile lacks S4 and is older than AWG 2.0", ErrUnsupportedVersion)
+	version := VersionLegacy
+	if hasS3 {
+		version = Version20
+	}
+	if raw.declaredVersion != "" && raw.declaredVersion != version {
+		return Profile{}, fmt.Errorf("invalid AmneziaWG profile: declared version %s does not match its obfuscation parameters", raw.declaredVersion)
+	}
+	if version == VersionLegacy {
+		for i := 1; i <= 5; i++ {
+			if strings.TrimSpace(interfaceValues[fmt.Sprintf("i%d", i)]) != "" {
+				return Profile{}, fmt.Errorf("invalid AmneziaWG Legacy profile: I%d requires AWG 2.0", i)
+			}
+		}
 	}
 
 	privateRaw, err := required(interfaceValues, "privatekey", "[Interface].PrivateKey")
@@ -46,7 +59,7 @@ func buildProfile(raw rawProfile) (Profile, error) {
 		mtu = uint16(parsed)
 	}
 
-	obfuscation, err := parseObfuscation(interfaceValues)
+	obfuscation, err := parseObfuscation(interfaceValues, version)
 	if err != nil {
 		return Profile{}, err
 	}
@@ -88,7 +101,7 @@ func buildProfile(raw rawProfile) (Profile, error) {
 	}
 	sort.Strings(ignored)
 	profile := Profile{
-		Version: Version20,
+		Version: version,
 		Interface: Interface{
 			PrivateKey:  privateKey,
 			Addresses:   addresses,
@@ -109,8 +122,8 @@ func Validate(profile Profile) error { return profile.Validate() }
 
 // Validate checks a profile's domain invariants without exposing key material.
 func (p Profile) Validate() error {
-	if p.Version != Version20 {
-		return fmt.Errorf("%w %q; only 2.0 is supported", ErrUnsupportedVersion, p.Version)
+	if p.Version != VersionLegacy && p.Version != Version20 {
+		return fmt.Errorf("%w %q; Legacy and 2.0 are supported", ErrUnsupportedVersion, p.Version)
 	}
 	if !p.Interface.PrivateKey.present() || allZero(p.Interface.PrivateKey.value[:]) {
 		return fmt.Errorf("invalid [Interface].PrivateKey: expected a non-zero 32-byte base64 key")
@@ -133,7 +146,10 @@ func (p Profile) Validate() error {
 		return err
 	}
 	if p.Interface.Obfuscation.JunkPacketMinSize > p.Interface.Obfuscation.JunkPacketMaxSize {
-		return fmt.Errorf("invalid AWG 2.0 obfuscation: Jmin must not exceed Jmax")
+		return fmt.Errorf("invalid AmneziaWG obfuscation: Jmin must not exceed Jmax")
+	}
+	if p.Version == VersionLegacy && (p.Interface.Obfuscation.PacketJunkSizes[2] != 0 || p.Interface.Obfuscation.PacketJunkSizes[3] != 0) {
+		return fmt.Errorf("invalid AmneziaWG Legacy profile: S3/S4 must be absent")
 	}
 	for i, specialJunk := range p.Interface.Obfuscation.SpecialJunk {
 		if specialJunk == "" {
@@ -142,6 +158,9 @@ func (p Profile) Validate() error {
 		if len(specialJunk) > 2048 || strings.ContainsAny(specialJunk, "'\"\\\x00\r\n") || !strings.HasPrefix(specialJunk, "<") || !strings.HasSuffix(specialJunk, ">") {
 			return fmt.Errorf("invalid [Interface].I%d: expected an AWG packet signature", i+1)
 		}
+		if p.Version == VersionLegacy {
+			return fmt.Errorf("invalid AmneziaWG Legacy profile: I%d requires AWG 2.0", i+1)
+		}
 	}
 	if p.Peer.PresharedKey.set && allZero(p.Peer.PresharedKey.value[:]) {
 		return fmt.Errorf("invalid [Peer].PresharedKey: expected a non-zero 32-byte base64 key")
@@ -149,7 +168,7 @@ func (p Profile) Validate() error {
 	return nil
 }
 
-func parseObfuscation(values map[string]string) (Obfuscation, error) {
+func parseObfuscation(values map[string]string, version string) (Obfuscation, error) {
 	var result Obfuscation
 	var err error
 	if result.JunkPacketCount, err = parseUint16(values, "jc", "[Interface].Jc"); err != nil {
@@ -162,9 +181,13 @@ func parseObfuscation(values map[string]string) (Obfuscation, error) {
 		return result, err
 	}
 	if result.JunkPacketMinSize > result.JunkPacketMaxSize {
-		return result, fmt.Errorf("invalid AWG 2.0 obfuscation: Jmin must not exceed Jmax")
+		return result, fmt.Errorf("invalid AmneziaWG obfuscation: Jmin must not exceed Jmax")
 	}
-	for i := range result.PacketJunkSizes {
+	packetJunkCount := 2
+	if version == Version20 {
+		packetJunkCount = len(result.PacketJunkSizes)
+	}
+	for i := 0; i < packetJunkCount; i++ {
 		key := fmt.Sprintf("s%d", i+1)
 		display := fmt.Sprintf("[Interface].S%d", i+1)
 		if result.PacketJunkSizes[i], err = parseUint16(values, key, display); err != nil {
@@ -247,7 +270,11 @@ func parsePrefixes(raw, field string) ([]netip.Prefix, error) {
 		value := strings.TrimSpace(part)
 		prefix, err := netip.ParsePrefix(value)
 		if err != nil {
-			return nil, fmt.Errorf("invalid %s CIDR", field)
+			address, addressErr := netip.ParseAddr(value)
+			if addressErr != nil {
+				return nil, fmt.Errorf("invalid %s CIDR", field)
+			}
+			prefix = netip.PrefixFrom(address, address.BitLen())
 		}
 		if _, duplicate := seen[prefix]; duplicate {
 			return nil, fmt.Errorf("invalid %s: duplicate CIDR %q", field, value)

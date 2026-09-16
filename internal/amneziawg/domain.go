@@ -1,4 +1,4 @@
-// Package amneziawg parses and validates safe, single-peer AmneziaWG 2.0
+// Package amneziawg parses and validates safe, single-peer AmneziaWG
 // profiles. It deliberately does not apply DNS, routes, or lifecycle hooks.
 package amneziawg
 
@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	// Version20 is the only profile version accepted by this package.
-	Version20 = "2.0"
-	redacted  = "[redacted]"
+	VersionLegacy = "legacy"
+	Version20     = "2.0"
+	redacted      = "[redacted]"
 )
 
 // PrivateKey stores private key material without giving it a printable or
@@ -61,7 +61,8 @@ type Uint32Range struct {
 	Max uint32 `json:"max"`
 }
 
-// Obfuscation contains the complete AWG 2.0 obfuscation parameter set.
+// Obfuscation contains the supported AWG obfuscation parameter set. Legacy
+// profiles leave the S3/S4 slots and special-junk signatures empty.
 type Obfuscation struct {
 	JunkPacketCount   uint16         `json:"junk_packet_count"`
 	JunkPacketMinSize uint16         `json:"junk_packet_min_size"`
@@ -87,7 +88,7 @@ type Peer struct {
 	PresharedKey        PresharedKey `json:"preshared_key,omitempty"`
 }
 
-// Profile is a validated, single-interface, single-peer AWG 2.0 profile.
+// Profile is a validated, single-interface, single-peer AWG profile.
 // IgnoredParameters records DNS/routing inputs that were intentionally not
 // retained for application.
 type Profile struct {

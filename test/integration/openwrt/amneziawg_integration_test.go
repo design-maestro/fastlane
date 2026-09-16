@@ -55,14 +55,19 @@ func TestOpenWrtAmneziaWGPrototype(t *testing.T) {
 	if err := installAWGStandPackages(ctx, harness); err != nil {
 		t.Fatal(err)
 	}
-	if err := configureAWGNamespaceStand(ctx, harness); err != nil {
+	legacyProfile := os.Getenv("FASTLANE_OPENWRT_AWG_PROFILE") == "legacy"
+	if err := configureAWGNamespaceStand(ctx, harness, legacyProfile); err != nil {
 		t.Fatal(err)
 	}
 	if err := harness.sshCommand(ctx, fastlaneRemoteBinary+" firewall set bypass example.com"); err != nil {
 		t.Fatalf("configure direct exclusion: %v", err)
 	}
 
-	if err := harness.sshCommand(ctx, fastlaneRemoteBinary+" awg import --file /var/run/fastlane/test-client.conf --name 'QEMU AWG 2.0'"); err != nil {
+	profileName := "QEMU AWG 2.0"
+	if legacyProfile {
+		profileName = "QEMU AWG Legacy"
+	}
+	if err := harness.sshCommand(ctx, fastlaneRemoteBinary+" awg import --file /var/run/fastlane/test-client.conf --name "+shellQuote(profileName)); err != nil {
 		t.Fatal(err)
 	}
 	if err := harness.sshCommand(ctx, "test ! -e /var/run/fastlane/test-client.conf && ls -l /etc/fastlane/amneziawg.conf | grep -q '^-rw-------'"); err != nil {
@@ -200,7 +205,7 @@ func installAWGStandPackages(ctx context.Context, h *openWRTHarness) error {
 	return h.waitForSSH(ctx)
 }
 
-func configureAWGNamespaceStand(ctx context.Context, h *openWRTHarness) error {
+func configureAWGNamespaceStand(ctx context.Context, h *openWRTHarness, legacy bool) error {
 	script := `set -eu
 umask 077
 service firewall stop >/dev/null 2>&1 || true
@@ -280,5 +285,9 @@ mkdir -p /var/run/fastlane
 chmod 0700 /var/run/fastlane
 printf '%s\n' '[Interface]' "PrivateKey=$client_private" 'Address=198.18.0.2/32' 'MTU=1380' 'Jc=4' 'Jmin=40' 'Jmax=70' 'S1=12' 'S2=8' 'S3=6' 'S4=4' 'H1=1' 'H2=2' 'H3=3' 'H4=4' '' '[Peer]' "PublicKey=$server_public" 'AllowedIPs=0.0.0.0/0' 'Endpoint=127.0.0.1:51820' 'PersistentKeepalive=5' > /var/run/fastlane/test-client.conf
 chmod 0600 /var/run/fastlane/test-client.conf`
+	if legacy {
+		script = strings.ReplaceAll(script, " 'S3=6' 'S4=4'", "")
+		script = strings.Replace(script, "'Address=198.18.0.2/32'", "'Address=198.18.0.2'", 1)
+	}
 	return h.sshCommand(ctx, script)
 }

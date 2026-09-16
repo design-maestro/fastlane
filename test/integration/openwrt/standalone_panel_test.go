@@ -60,7 +60,7 @@ func TestOpenWrtStandaloneAWGPanel(t *testing.T) {
 	if err = installAWGStandPackages(ctx, h); err != nil {
 		t.Fatal(err)
 	}
-	if err = configureAWGNamespaceStand(ctx, h); err != nil {
+	if err = configureAWGNamespaceStand(ctx, h, false); err != nil {
 		t.Fatal(err)
 	}
 	t.Log("Xray and AWG namespace server installed")

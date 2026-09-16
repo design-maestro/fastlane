@@ -69,11 +69,30 @@ func TestParseAcceptsExplicitVersion20AndInlineComments(t *testing.T) {
 	}
 }
 
+func TestParseAcceptsExplicitLegacyVersion(t *testing.T) {
+	t.Parallel()
+
+	input := legacyProfile("Version = 1.0")
+	profile, err := Parse([]byte(input))
+	if err != nil || profile.Version != VersionLegacy {
+		t.Fatalf("profile=%+v error=%v", profile.Status(), err)
+	}
+}
+
 func TestParseRejectsExplicitUnsupportedVersion(t *testing.T) {
 	t.Parallel()
 
 	_, err := Parse([]byte(validProfile("ProtocolVersion = 3.0")))
 	if !errors.Is(err, ErrUnsupportedVersion) || !strings.Contains(err.Error(), "3.0") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestParseRejectsDuplicateVersionAliases(t *testing.T) {
+	t.Parallel()
+
+	_, err := Parse([]byte(validProfile("Version = 2.0\nProtocolVersion = 2")))
+	if err == nil || !strings.Contains(err.Error(), "duplicate parameter") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -158,7 +177,23 @@ func TestParseRejectsAWG3ParametersAsUnsupportedVersion(t *testing.T) {
 	}
 }
 
-func TestParseRejectsOlderAWGVersion(t *testing.T) {
+func TestParseAcceptsLegacyProfileWithoutS3AndS4(t *testing.T) {
+	t.Parallel()
+
+	input := legacyProfile("")
+	profile, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if profile.Version != VersionLegacy {
+		t.Fatalf("version = %q, want %q", profile.Version, VersionLegacy)
+	}
+	if profile.Interface.Obfuscation.PacketJunkSizes[2] != 0 || profile.Interface.Obfuscation.PacketJunkSizes[3] != 0 {
+		t.Fatalf("legacy S3/S4 = %v", profile.Interface.Obfuscation.PacketJunkSizes[2:])
+	}
+}
+
+func TestParseRejectsPartiallySpecifiedS3AndS4(t *testing.T) {
 	t.Parallel()
 
 	for _, field := range []string{"S3", "S4"} {
@@ -167,10 +202,31 @@ func TestParseRejectsOlderAWGVersion(t *testing.T) {
 			t.Parallel()
 			input := removeLine(validProfile(""), field+" =")
 			_, err := Parse([]byte(input))
-			if !errors.Is(err, ErrUnsupportedVersion) || !strings.Contains(err.Error(), field) {
+			if err == nil || !strings.Contains(err.Error(), "S3 and S4") {
 				t.Fatalf("error = %v", err)
 			}
 		})
+	}
+}
+
+func TestParseRejectsVersionParameterMismatch(t *testing.T) {
+	t.Parallel()
+
+	legacyDeclaredAs20 := removeLine(removeLine(validProfile("Version = 2.0"), "S3 ="), "S4 =")
+	if _, err := Parse([]byte(legacyDeclaredAs20)); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("legacy declared as 2.0 error = %v", err)
+	}
+	if _, err := Parse([]byte(validProfile("Version = 1.0"))); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("2.0 declared as legacy error = %v", err)
+	}
+}
+
+func TestParseRejectsSpecialJunkInLegacyProfile(t *testing.T) {
+	t.Parallel()
+
+	input := removeLine(removeLine(validProfile(""), "S3 ="), "S4 =")
+	if _, err := Parse([]byte(input)); err == nil || !strings.Contains(err.Error(), "I1 requires AWG 2.0") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -246,7 +302,7 @@ func TestParseValidatesKeysWithoutEchoingPrivateKey(t *testing.T) {
 func TestParseValidatesAddressCIDRs(t *testing.T) {
 	t.Parallel()
 
-	for _, address := range []string{"10.8.0.2", "10.8.0.2/33", "10.8.0.2/32, 10.8.0.2/32", ""} {
+	for _, address := range []string{"10.8.0.2/33", "10.8.0.2/32, 10.8.0.2/32", ""} {
 		address := address
 		t.Run(address, func(t *testing.T) {
 			t.Parallel()
@@ -255,6 +311,20 @@ func TestParseValidatesAddressCIDRs(t *testing.T) {
 				t.Fatalf("error = %v", err)
 			}
 		})
+	}
+}
+
+func TestParseNormalizesBareInterfaceAddresses(t *testing.T) {
+	t.Parallel()
+
+	profile, err := Parse([]byte(replaceValue(validProfile(""), "Address", "172.26.15.237, 2001:db8::2")))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	got := []string{profile.Interface.Addresses[0].String(), profile.Interface.Addresses[1].String()}
+	want := []string{"172.26.15.237/32", "2001:db8::2/128"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("addresses = %v, want %v", got, want)
 	}
 }
 
@@ -387,6 +457,14 @@ AllowedIPs = 0.0.0.0/0, ::/0
 Endpoint = vpn.example.com:51820
 PersistentKeepalive = 25
 `, testPrivateKey, extraInterface, testPublicKey)
+}
+
+func legacyProfile(extraInterface string) string {
+	input := removeLine(removeLine(validProfile(extraInterface), "S3 ="), "S4 =")
+	for _, field := range []string{"I1", "I2", "I3", "I4", "I5"} {
+		input = removeLine(input, field+" =")
+	}
+	return input
 }
 
 func sequence(start byte) []byte {

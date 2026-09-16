@@ -274,8 +274,8 @@ func (c *OpenWrtController) installPolicyRoutes(ctx context.Context, status Inte
 }
 
 func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
-	if profile.Version != Version20 || len(profile.Interface.Addresses) == 0 {
-		return nil, fmt.Errorf("invalid AmneziaWG 2.0 runtime profile")
+	if (profile.Version != VersionLegacy && profile.Version != Version20) || len(profile.Interface.Addresses) == 0 {
+		return nil, fmt.Errorf("invalid AmneziaWG runtime profile")
 	}
 	host, port, err := net.SplitHostPort(profile.Peer.Endpoint)
 	if err != nil {
@@ -304,15 +304,22 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 	set(name, "awg_jc", strconv.Itoa(int(o.JunkPacketCount)))
 	set(name, "awg_jmin", strconv.Itoa(int(o.JunkPacketMinSize)))
 	set(name, "awg_jmax", strconv.Itoa(int(o.JunkPacketMaxSize)))
-	for index, value := range o.PacketJunkSizes {
+	packetJunkCount := 2
+	if profile.Version == Version20 {
+		packetJunkCount = len(o.PacketJunkSizes)
+	}
+	for index := 0; index < packetJunkCount; index++ {
+		value := o.PacketJunkSizes[index]
 		set(name, fmt.Sprintf("awg_s%d", index+1), strconv.Itoa(int(value)))
 	}
 	for index, value := range o.MagicHeaders {
 		set(name, fmt.Sprintf("awg_h%d", index+1), formatRange(value))
 	}
-	for index, value := range o.SpecialJunk {
-		if value != "" {
-			set(name, fmt.Sprintf("awg_i%d", index+1), value)
+	if profile.Version == Version20 {
+		for index, value := range o.SpecialJunk {
+			if value != "" {
+				set(name, fmt.Sprintf("awg_i%d", index+1), value)
+			}
 		}
 	}
 	lines = append(lines, "set network."+peerSection+"="+peerSection)
