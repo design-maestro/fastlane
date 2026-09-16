@@ -376,6 +376,11 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 		if state.AWGProfileProbes == nil {
 			state.AWGProfileProbes = make(map[string]domain.AWGProbeState)
 		}
+		if probeState.CountryCode == "" {
+			previousProbe := state.AWGProfileProbes[id]
+			probeState.EgressIP = previousProbe.EgressIP
+			probeState.CountryCode = previousProbe.CountryCode
+		}
 		state.AWGProfileProbes[id] = *probeState
 		state.AWGLastProbe = probeState
 		if state.Health == nil {
