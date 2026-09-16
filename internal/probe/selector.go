@@ -28,12 +28,12 @@ func DefaultScoreConfig() ScoreConfig {
 		HealthyBonus:                  10_000,
 		UnhealthyPenalty:              10_000,
 		HealthyLatencyCeiling:         defaultHealthyLatencyCeiling,
-		FreshLatencyWeight:            0.7,
-		AverageLatencyWeight:          0.3,
-		LatencyVariationPenaltyWeight: 0.5,
-		FailureRatePenalty:            500 * time.Millisecond,
-		ConsecutiveFailurePenalty:     500 * time.Millisecond,
-		InstabilityUnitPenalty:        100 * time.Millisecond,
+		FreshLatencyWeight:            0.4,
+		AverageLatencyWeight:          0.6,
+		LatencyVariationPenaltyWeight: 1.0,
+		FailureRatePenalty:            1500 * time.Millisecond,
+		ConsecutiveFailurePenalty:     1500 * time.Millisecond,
+		InstabilityUnitPenalty:        250 * time.Millisecond,
 		MaxLatencyBaseline:            2 * time.Second,
 	}
 }
@@ -132,15 +132,13 @@ func SelectBestNode(nodes []domain.Node, health map[string]domain.NodeHealth, cf
 		if candidates[i].result.Healthy != candidates[j].result.Healthy {
 			return candidates[i].result.Healthy
 		}
-		leftFresh := selectionLatency(health[candidates[i].node.ID])
-		rightFresh := selectionLatency(health[candidates[j].node.ID])
-		leftAcceptable := cfg.HealthyLatencyCeiling > 0 && leftFresh > 0 && leftFresh <= cfg.HealthyLatencyCeiling
-		rightAcceptable := cfg.HealthyLatencyCeiling > 0 && rightFresh > 0 && rightFresh <= cfg.HealthyLatencyCeiling
+		leftLatency := effectiveSelectionLatency(health[candidates[i].node.ID], cfg)
+		rightLatency := effectiveSelectionLatency(health[candidates[j].node.ID], cfg)
+		leftAcceptable := cfg.HealthyLatencyCeiling > 0 && leftLatency > 0 && leftLatency <= cfg.HealthyLatencyCeiling
+		rightAcceptable := cfg.HealthyLatencyCeiling > 0 && rightLatency > 0 && rightLatency <= cfg.HealthyLatencyCeiling
 		if leftAcceptable != rightAcceptable {
 			return leftAcceptable
 		}
-		leftLatency := effectiveSelectionLatency(health[candidates[i].node.ID], cfg)
-		rightLatency := effectiveSelectionLatency(health[candidates[j].node.ID], cfg)
 		if leftLatency > 0 && rightLatency <= 0 {
 			return true
 		}

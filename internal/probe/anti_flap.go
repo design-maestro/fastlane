@@ -45,8 +45,12 @@ func ShouldSwitch(current, candidate domain.NodeHealth, now, lastSwitch time.Tim
 		return true, "current node unhealthy"
 	}
 
-	currentLatency := selectionLatency(current)
-	candidateLatency := selectionLatency(candidate)
+	// Compare the same latency-equivalent quality cost used by candidate
+	// ranking. This keeps latency relevant while allowing recent failures,
+	// jitter, and rolling history to outweigh a deceptively fast probe.
+	scoreConfig := DefaultScoreConfig()
+	currentLatency := effectiveSelectionLatency(current, scoreConfig)
+	candidateLatency := effectiveSelectionLatency(candidate, scoreConfig)
 	if now.Sub(lastSwitch) < policy.Cooldown {
 		return false, "cooldown active"
 	}
@@ -69,7 +73,7 @@ func ShouldSwitch(current, candidate domain.NodeHealth, now, lastSwitch time.Tim
 	}
 
 	if candidateLatency > 0 && currentLatency-candidateLatency >= policy.LatencyImprovement {
-		return true, fmt.Sprintf("latency improved by %s", currentLatency-candidateLatency)
+		return true, fmt.Sprintf("stability-adjusted quality improved by %s", currentLatency-candidateLatency)
 	}
 
 	return false, "current node acceptable"

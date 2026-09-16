@@ -149,3 +149,34 @@ func TestShouldSwitchRequiresTwoWinsAndTwentyPercentImprovement(t *testing.T) {
 		t.Fatalf("confirmed 20%% / 60ms improvement was rejected: should=%t reason=%q", should, reason)
 	}
 }
+
+func TestShouldSwitchPrefersStableCandidateOverFasterFlakyCurrent(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 9, 15, 20, 0, 0, 0, time.UTC)
+	current := domain.NodeHealth{
+		NodeID:               "fast-flaky",
+		Healthy:              true,
+		LastLatency:          domain.NewDuration(45 * time.Millisecond),
+		AverageLatency:       domain.NewDuration(50 * time.Millisecond),
+		LatencyVariation:     domain.NewDuration(80 * time.Millisecond),
+		SuccessCount:         10,
+		FailureCount:         5,
+		ConsecutiveSuccesses: 3,
+		InstabilityPenalty:   6,
+	}
+	candidate := domain.NodeHealth{
+		NodeID:               "steady",
+		Healthy:              true,
+		LastLatency:          domain.NewDuration(90 * time.Millisecond),
+		AverageLatency:       domain.NewDuration(90 * time.Millisecond),
+		LatencyVariation:     domain.NewDuration(5 * time.Millisecond),
+		SuccessCount:         100,
+		ConsecutiveSuccesses: 20,
+	}
+
+	should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), probe.DefaultSwitchPolicy())
+	if !should || reason == "" {
+		t.Fatalf("expected stable candidate to replace faster flaky current, should=%t reason=%q", should, reason)
+	}
+}
