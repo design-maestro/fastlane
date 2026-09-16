@@ -308,7 +308,7 @@ function commandCount(prefix) {
 
 function makeVPN() {
 	const page = loadPage('vpn');
-	page.pageData = [clone(statusFixture), clone(subscriptionsFixture), { status: 'idle' }];
+	page.pageData = [clone(statusFixture), clone(subscriptionsFixture), { status: 'idle' }, { state: 'absent', protocol: 'amneziawg', interface: {} }];
 	page.filter = 'all';
 	page.showHidden = false;
 	page.query = '';
@@ -908,6 +908,35 @@ async function smoke(section, name, run) {
 		assert.deepEqual(fileWrites, [{ path: '/var/run/fastlane/awg-import.conf', content: config }]);
 		commandSeen(['awg', 'import', '--file', '/var/run/fastlane/awg-import.conf', '--name', 'Backup AWG']);
 		assert.ok(toasts.some((toast) => toast.type === 'success' && /Files added: 1/.test(toast.message)));
+	});
+
+	await smoke('VPN', 'shows an imported AWG profile only in the common server list', async () => {
+		const page = makeVPN();
+		page.pageData[3] = {
+			state: 'imported', name: 'Backup AWG', protocol: 'amneziawg', active: false,
+			profile: { endpoint: 'vpn.example:51820', addresses: ['10.8.0.2/32'] },
+			last_probe: { success: true, latency_ms: 54, checked_at: '2026-09-16T06:00:00Z' }, interface: {}
+		};
+		const awgSource = page.subscriptions().find((sub) => sub.id === 'amneziawg');
+		assert.equal(awgSource.display_name, 'AWG file');
+		assert.equal(awgSource.nodes[0].kind, 'awg');
+		assert.match(treeText(page.renderTabs()), /AWG file/);
+		assert.match(treeText(page.renderTable()), /Backup AWG.*AmneziaWG.*54 ms/s);
+		assert.doesNotMatch(treeText(page.renderContent()), /One manual profile/);
+		page.filter = 'amneziawg';
+		await page.handleURLTests();
+		commandSeen(['awg', 'check']);
+	});
+
+	await smoke('VPN', 'shows the exact Legacy reason when an old AWG conf is rejected', async () => {
+		const page = makeVPN();
+		const fileInput = E('input'), error = E('div'), submit = E('button');
+		fileInput.files = [{ name: 'legacy.conf', size: 20, content: '[Interface]\nS1=1\nS2=2' }];
+		resolver = async (commandPath, args) => args[0] === 'awg' && args[1] === 'import'
+			? { code: 1, stdout: '', stderr: 'unsupported AmneziaWG version: profile lacks S3 and is older than AWG 2.0' }
+			: defaultResolver(commandPath, args);
+		await page.handleFileAddSubmit(fileInput, error, submit);
+		assert.match(error.textContent, /Legacy profile.*S1–S4/i);
 	});
 
 	await smoke('VPN', 'rejects multiple AWG profiles before importing anything', async () => {
