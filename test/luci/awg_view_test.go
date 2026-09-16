@@ -76,19 +76,23 @@ func TestFastLaneVPNViewOnlyRendersSafeAWGProfileFields(t *testing.T) {
 	}
 }
 
-func TestFastLaneVPNViewKeepsAWGCardResponsiveAndSeparate(t *testing.T) {
+func TestFastLaneVPNViewKeepsAWGInCommonServerList(t *testing.T) {
 	t.Parallel()
 	source := readVPNViewSource(t)
 	for _, want := range []string{
-		"class: 'fl-awg-card'",
-		"this.renderAWGCard()",
-		"One manual profile. It does not participate in automatic server selection.",
-		"@media(max-width:980px){.fl-awg-head{display:grid}",
-		"@media(max-width:520px){.fl-awg-head,.fl-awg-body{padding:14px}",
+		"id: 'amneziawg'",
+		"source_type: 'file'",
+		"kind: 'awg'",
+		"display_name: _('AWG file')",
+		"AWG 2.0 · experimental. It does not participate in automatic selection.",
+		"selected && selected.id === 'amneziawg'",
 		"E('section', { class: 'fl-server-panel'",
 	} {
 		if !strings.Contains(source, want) {
-			t.Fatalf("VPN view missing separate responsive AmneziaWG card marker %q", want)
+			t.Fatalf("VPN view missing common-list AmneziaWG marker %q", want)
 		}
+	}
+	if strings.Contains(source, "this.renderAWGCard()") {
+		t.Fatal("VPN view still renders the redundant standalone AmneziaWG card")
 	}
 }

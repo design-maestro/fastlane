@@ -141,7 +141,7 @@ function awgState(status) {
 	var state = trim(status.state).toLowerCase();
 	if (!status.profile)
 		return state === 'invalid' || state === 'error' ? state : 'absent';
-	if (state === 'invalid' || state === 'error' || state === 'preparing' || state === 'probe_failed')
+	if (state === 'invalid' || state === 'error' || state === 'incompatible' || state === 'preparing' || state === 'probe_failed')
 		return state;
 	if (state === 'connected' || status.active === true)
 		return 'connected';
@@ -478,7 +478,7 @@ return view.extend({
 			var subscriptionList = Array.isArray(subscriptions) ? subscriptions : [];
 			this.mergePersistedPings(status, subscriptionList);
 			this.mergeBackgroundPings(data[2], subscriptionList);
-			if (!this.showHidden && this.filter !== 'all' && !subscriptionList.some(L.bind(function(sub) { return sub.id === this.filter; }, this)))
+			if (!this.showHidden && this.filter !== 'all' && !this.subscriptions().some(L.bind(function(sub) { return sub.id === this.filter; }, this)))
 				this.filter = 'all';
 			return this.pageData;
 		}, this));
@@ -989,6 +989,10 @@ return view.extend({
 	handleRefreshSubscriptions: function(ev) {
 		if (ev) ev.preventDefault();
 		var selected = this.selectedSubscription();
+		if (selected && selected.id === 'amneziawg') {
+			fastlaneShell.showToast(_('Replace the AWG profile through Add servers → From file.'), 'info');
+			return Promise.resolve();
+		}
 		var args = selected ? [ 'refresh', '--subscription', selected.id ] : [ 'refresh', '--all' ];
 		return this.runAction(_('Updating subscriptions…'), this.exec(args), _('Subscriptions updated.'));
 	},
@@ -1135,6 +1139,8 @@ return view.extend({
 	handleURLTests: function(ev) {
 		if (ev) ev.preventDefault();
 		var selected = this.selectedSubscription();
+		if (selected && selected.id === 'amneziawg')
+			return this.handleAWGCheck();
 		var scope = selected && !isSubscriptionExpired(selected) ? selected.id : 'all';
 		return this.runAction(
 			_('Queuing GET check…'),
@@ -1301,11 +1307,13 @@ return view.extend({
 			});
 		}
 		var chain = Promise.resolve();
+		var currentFileIsAWG = false;
 		selected.forEach(function(file, index) {
 			chain = chain.then(function() {
+				currentFileIsAWG = /\.conf$/i.test(file.name || '');
 				errorBox.textContent = _('Adding') + ' ' + (index + 1) + ' / ' + selected.length + ': ' + file.name;
 				return read(file).then(function(content) {
-					if (/\.conf$/i.test(file.name || '')) {
+					if (currentFileIsAWG) {
 						return self.importAWGFileContent(file.name, content).then(function(result) {
 							content = '';
 							return result;
@@ -1323,7 +1331,10 @@ return view.extend({
 			fastlaneShell.showToast(_('Files added:') + ' ' + selected.length + '.', 'success');
 			return self.refreshView();
 		}).catch(function(err) {
-			var error = friendlyError((err && err.message) || String(err), _('Could not add the file. Check the YAML or AmneziaWG format.'));
+			var details = (err && err.message) || String(err);
+			var error = currentFileIsAWG
+				? { message: awgImportError(details) }
+				: friendlyError(details, _('Could not add the file. Check the YAML or AmneziaWG format.'));
 			errorBox.className = 'fl-modal-status';
 			errorBox.textContent = error.message;
 			submitButton.disabled = false;
@@ -1348,6 +1359,8 @@ return view.extend({
 
 	handleRemove: function(subID, ev) {
 		if (ev) ev.preventDefault();
+		if (subID === 'amneziawg')
+			return this.handleAWGRemove();
 		var sub = this.subscriptions().filter(function(item) { return item.id === subID; })[0];
 		var fileSource = sub && sub.source_type === 'file';
 		if (!window.confirm(fileSource ? _('Remove this file and all its servers?') : _('Remove this subscription?')))
@@ -1357,7 +1370,39 @@ return view.extend({
 
 	subscriptions: function() {
 		var value = this.pageData && this.pageData[1];
-		return Array.isArray(value) ? value : [];
+		var subscriptions = Array.isArray(value) ? value.slice() : [];
+		var awg = this.awgStatus();
+		if (!awg.__error && awg.profile) {
+			var endpoint = trim(awg.profile.endpoint);
+			subscriptions.push({
+				id: 'amneziawg',
+				display_name: _('AWG file'),
+				source_type: 'file',
+				kind: 'awg',
+				last_updated_at: awg.last_probe && awg.last_probe.checked_at,
+				nodes: [{
+					id: 'profile',
+					kind: 'awg',
+					name: trim(awg.name) || 'AmneziaWG',
+					remark: _('Experimental') + ' · AWG 2.0',
+					protocol: 'amneziawg',
+					address: endpoint
+				}]
+			});
+		}
+		return subscriptions;
+	},
+
+	awgObservation: function() {
+		var probe = this.awgStatus().last_probe;
+		if (!probe || !probe.checked_at)
+			return {};
+		return {
+			healthy: probe.success === true,
+			latency_ms: probe.success === true ? positiveLatency(probe.latency_ms) : null,
+			checked_at: probe.checked_at,
+			url_test: true
+		};
 	},
 
 	status: function() {
@@ -1395,8 +1440,9 @@ return view.extend({
 			var nodes = Array.isArray(sub.nodes) ? sub.nodes : [];
 			for (var n = 0; n < nodes.length; n++) {
 				var node = nodes[n];
-				var hiddenByKeyword = this.matchingAutoHideKeyword(node);
-				var manuallyHidden = this.isManuallyHidden(sub.id, node.id);
+				var isAWG = node.kind === 'awg';
+				var hiddenByKeyword = isAWG ? '' : this.matchingAutoHideKeyword(node);
+				var manuallyHidden = isAWG ? false : this.isManuallyHidden(sub.id, node.id);
 				var hidden = manuallyHidden || hiddenByKeyword !== '';
 				if (this.showHidden !== hidden)
 					continue;
@@ -1407,7 +1453,7 @@ return view.extend({
 					continue;
 				if (this.protocol !== 'all' && trim(node.protocol).toLowerCase() !== this.protocol)
 					continue;
-					var observed = this.pings[sub.id + ':' + node.id] || {};
+					var observed = isAWG ? this.awgObservation() : (this.pings[sub.id + ':' + node.id] || {});
 					var latency = positiveLatency(observed.latency_ms);
 				rows.push({ sub: sub, node: node, observed: observed, latency: latency, hidden: hidden, manuallyHidden: manuallyHidden, hiddenByKeyword: hiddenByKeyword });
 			}
@@ -1466,7 +1512,7 @@ return view.extend({
 		var connected = state.connected === true;
 		var operationalMode = resolveOperationalMode(state, status.active_transport);
 		var vpnActive = operationalMode === 'vpn';
-		var hasAvailableNodes = this.subscriptions().filter(function(sub) { return !isSubscriptionExpired(sub); }).some(L.bind(function(sub) {
+		var hasAvailableNodes = this.subscriptions().filter(function(sub) { return sub.id !== 'amneziawg' && !isSubscriptionExpired(sub); }).some(L.bind(function(sub) {
 			return (sub.nodes || []).some(L.bind(function(node) { return !this.isHidden(sub.id, node.id, node); }, this));
 		}, this));
 		var mode = connected ? (state.mode === 'auto' ? 'auto' : 'manual') : 'disconnected';
@@ -1475,8 +1521,10 @@ return view.extend({
 			activeSubscription = this.subscriptions().filter(function(sub) { return sub.id === state.active_subscription_id; })[0];
 		var activeSource = vpnActive && activeSubscription ? sourceName(activeSubscription) : (operationalMode === 'recovering' ? _('Switching…') : _('Not active'));
 		var activeNode = vpnActive && status.active_node ? status.active_node : null;
-		var activeServer = activeNode ? nodeLocation(activeNode).country : (operationalMode === 'recovering' ? _('Switching…') : _('Not active'));
-		var observed = this.pings[state.active_subscription_id + ':' + state.active_node_id] || {};
+		if (!activeNode && vpnActive && state.active_connection_kind === 'amneziawg' && activeSubscription)
+			activeNode = (activeSubscription.nodes || [])[0] || null;
+		var activeServer = activeNode ? (activeNode.kind === 'awg' ? nodeName(activeNode) : nodeLocation(activeNode).country) : (operationalMode === 'recovering' ? _('Switching…') : _('Not active'));
+		var observed = state.active_connection_kind === 'amneziawg' ? this.awgObservation() : (this.pings[state.active_subscription_id + ':' + state.active_node_id] || {});
 		var pingValue = vpnActive ? formatLatency(observed.latency_ms) : (operationalMode === 'recovering' ? _('Waiting…') : _('Not available'));
 		return E('div', { class: 'fl-status' }, [
 			E('div', { class: 'fl-status-cell fl-status-main fl-status-main-' + operationalMode }, [ E('span', { class: 'fl-dot ' + (vpnActive ? 'fl-dot-on' : (operationalMode === 'recovering' ? 'fl-dot-recovering' : '')) }), operationalStatusLabel(operationalMode) ]),
@@ -1557,7 +1605,7 @@ return view.extend({
 				continue;
 			var totalNodes = Array.isArray(subscriptions[t].nodes) ? subscriptions[t].nodes : [];
 			for (var x = 0; x < totalNodes.length; x++) {
-				if (this.isHidden(subscriptions[t].id, totalNodes[x].id, totalNodes[x])) hiddenCount++;
+				if (totalNodes[x].kind !== 'awg' && this.isHidden(subscriptions[t].id, totalNodes[x].id, totalNodes[x])) hiddenCount++;
 				else total++;
 			}
 		}
@@ -1570,8 +1618,8 @@ return view.extend({
 		for (var i = 0; i < subscriptions.length; i++) {
 			var sub = subscriptions[i];
 			var subActive = !this.showHidden && (this.filter === sub.id || (availableSubscriptions.length === 1 && this.filter === 'all' && !isSubscriptionExpired(sub)));
-			var visibleCount = (sub.nodes || []).filter(L.bind(function(node) { return !this.isHidden(sub.id, node.id, node); }, this)).length;
-			var subMeta = sub.last_error ? _('Update failed') : (sub.last_updated_at ? _('Updated') + ' ' + formatTime(sub.last_updated_at) : _('Ready'));
+			var visibleCount = (sub.nodes || []).filter(L.bind(function(node) { return node.kind === 'awg' || !this.isHidden(sub.id, node.id, node); }, this)).length;
+			var subMeta = sub.id === 'amneziawg' ? _('File · experimental') : (sub.last_error ? _('Update failed') : (sub.last_updated_at ? _('Updated') + ' ' + formatTime(sub.last_updated_at) : _('Ready')));
 			var expiry = subscriptionExpiryPresentation(sub.expires_at);
 			tabs.push(E('button', { class: 'fl-tab ' + (subActive ? 'fl-tab-active' : ''), role: 'tab', 'aria-selected': subActive ? 'true' : 'false', click: ui.createHandlerFn(this, 'handleFilter', sub.id), 'aria-label': sourceName(sub) + (sub.last_error ? ': ' + _('update failed') : '') }, [
 				E('span', { class: 'fl-tab-top' }, [ E('span', {}, [ sourceName(sub) ]), E('span', { class: 'fl-count' }, [ String(visibleCount) ]) ]),
@@ -1598,40 +1646,54 @@ return view.extend({
 		headings.push(E('th', { style: 'width:14%' }, [ _('Protocol') ]), E('th', { style: 'width:15%' }, [ _('Ping (GET)') ]), E('th', { style: 'width:16%' }, [ _('Status') ]), E('th', { style: 'width:7%' }, [ '' ]));
 		var body = [];
 		for (var i = 0; i < rows.length; i++) {
-			var row = rows[i], active = vpnActive && state.active_subscription_id === row.sub.id && state.active_node_id === row.node.id && state.connected;
+			var row = rows[i], isAWG = row.node.kind === 'awg', active = vpnActive && state.active_subscription_id === row.sub.id && state.active_node_id === row.node.id && state.connected;
 			var actionKey = row.sub.id + ':' + row.node.id;
 			var expired = isSubscriptionExpired(row.sub);
-			var testing = !!this.testingNodes[row.sub.id + ':' + row.node.id];
+			var testing = isAWG ? !!this.awgBusy : !!this.testingNodes[row.sub.id + ':' + row.node.id];
 			var checked = observationTime(row.observed) > 0;
-			var unavailable = checked && row.observed.healthy === false && !row.observed.test_error && !active;
+			var awgStateValue = isAWG ? awgState(this.awgStatus()) : '';
+			var unavailable = isAWG
+				? awgStateValue === 'invalid' || awgStateValue === 'error' || awgStateValue === 'incompatible'
+				: checked && row.observed.healthy === false && !row.observed.test_error && !active;
 			var slow = row.observed.healthy === true && !row.observed.test_error && positiveLatency(row.latency) > 1000;
 			var statusText = testing ? _('Checking')
 				: active ? _('Active')
 					: expired ? _('Expired')
+						: isAWG && unavailable ? _('Profile error')
 						: row.observed.test_error ? _('Check failed')
 							: unavailable ? _('Unavailable')
 								: checked ? (slow ? _('Slow') : _('Ready'))
 									: _('Not checked');
-			var presentation = nodePresentation(row.node);
+			var presentation = isAWG ? {
+				code: '',
+				title: nodeName(row.node),
+				description: _('Experimental') + ' · ' + trim(row.node.address)
+			} : nodePresentation(row.node);
 			var emoji = flagEmoji(nodeRawName(row.node)) || flagEmojiFromCode(presentation.code);
 			var marker = emoji
 				? E('div', { class: 'fl-server-mark fl-server-flag-emoji', 'aria-hidden': 'true' }, [ E('span', { class: 'fl-server-flag-glyph' }, [ emoji ]) ])
 				: E('div', { class: 'fl-server-mark' }, [ icon(active ? 'bolt' : 'server') ]);
+			var menuActions = isAWG ? [
+				E('button', { class: 'fl-button fl-button-primary', disabled: this.busy || unavailable || active ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGConnect') }, [ active ? _('Connected') : _('Connect') ]),
+				E('button', { class: 'fl-button', disabled: testing ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGCheck') }, [ testing ? _('Checking…') : _('Check ping (GET)') ]),
+				E('button', { class: 'fl-button fl-button-danger', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGRemove') }, [ _('Delete') ]),
+				E('div', { class: 'fl-more-note' }, [ _('AWG 2.0 · experimental. It does not participate in automatic selection.') ])
+			] : [
+				row.hiddenByKeyword ? E('div', { class: 'fl-more-note' }, [ _('Hidden by rule') + ': “' + row.hiddenByKeyword + '”' ]) : '',
+				row.hiddenByKeyword ? E('a', { class: 'fl-button', href: L.url('admin/services/fastlane/settings') }, [ _('Edit hide rules') ]) : (row.manuallyHidden ? E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, false) }, [ _('Restore') ]) : E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id) }, [ active && state.mode === 'manual' ? _('Pinned') : _('Connect') ])),
+				row.hidden ? '' : E('button', { class: 'fl-button', disabled: testing ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleURLTest', row.sub.id, row.node.id) }, [ testing ? _('Checking…') : _('Check ping (GET)') ]),
+				row.hidden ? '' : E('button', { class: 'fl-button fl-button-warning', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, true) }, [ _('Hide') ]),
+				row.sub.id === 'server-list' ? E('button', { class: 'fl-button fl-button-danger', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRemoveServer', row.sub.id, row.node.id) }, [ _('Remove server') ]) : ''
+			];
 			var cells = [ E('td', { 'data-label': _('Server') }, [ E('div', { class: 'fl-server' }, [ marker, E('div', { class: 'fl-server-text' }, [ E('div', { class: 'fl-server-name' }, [ presentation.title ]), E('div', { class: 'fl-server-address' }, [ presentation.description ]) ]) ]) ]) ];
 			if (all) cells.push(E('td', { class: 'fl-meta-cell fl-meta-source', 'data-label': _('Source') }, [ E('span', { class: 'fl-source' }, [ sourceName(row.sub) ]) ]));
 			cells.push(
-				E('td', { class: 'fl-meta-cell', 'data-label': _('Protocol') }, [ E('span', { class: 'fl-protocol' }, [ trim(row.node.protocol) || '—' ]) ]),
+				E('td', { class: 'fl-meta-cell', 'data-label': _('Protocol') }, [ E('span', { class: 'fl-protocol' }, [ isAWG ? 'AmneziaWG' : (trim(row.node.protocol) || '—') ]) ]),
 				E('td', { class: 'fl-meta-cell', 'data-label': _('Ping (GET)') }, [ testing ? E('span', { class: 'fl-testing-label' }, [ E('span', { class: 'fl-inline-loader' }), _('Checking') ]) : E('span', { class: 'fl-latency ' + this.latencyClass(row.latency, row.observed), title: (slow ? _('The server is available, but latency is very high.') + ' ' : '') + (row.observed.url || _('HTTPS GET through this server, bypassing the active VPN')) }, [ formatLatency(row.latency) ]) ]),
 				E('td', { class: 'fl-meta-cell fl-meta-status', 'data-label': _('Status') }, [ E('span', { class: 'fl-node-status ' + (active && !unavailable ? 'fl-node-status-active' : '') + (unavailable ? ' fl-node-status-bad' : '') + (expired ? ' fl-node-status-expired' : '') }, [ testing ? E('span', { class: 'fl-inline-loader' }) : E('span', { class: 'fl-node-status-dot' }), statusText ]) ]),
 				E('td', { class: 'fl-actions-cell', 'data-label': _('Actions') }, [ expired ? '' : E('div', { class: 'fl-more' + (this.activeMenuKey === actionKey ? ' fl-more-open' : ''), 'data-menu-key': actionKey }, [
 					E('button', { type: 'button', class: 'fl-more-toggle', 'aria-label': _('Server actions'), 'aria-haspopup': 'menu', 'aria-expanded': this.activeMenuKey === actionKey ? 'true' : 'false', click: ui.createHandlerFn(this, 'handleServerMenuToggle', actionKey) }),
-					E('div', { class: 'fl-more-menu', role: 'menu', hidden: this.activeMenuKey === actionKey ? null : 'hidden', click: function(ev) { ev.stopPropagation(); } }, [
-							row.hiddenByKeyword ? E('div', { class: 'fl-more-note' }, [ _('Hidden by rule') + ': “' + row.hiddenByKeyword + '”' ]) : '',
-							row.hiddenByKeyword ? E('a', { class: 'fl-button', href: L.url('admin/services/fastlane/settings') }, [ _('Edit hide rules') ]) : (row.manuallyHidden ? E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, false) }, [ _('Restore') ]) : E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id) }, [ active && state.mode === 'manual' ? _('Pinned') : _('Connect') ])),
-						row.hidden ? '' : E('button', { class: 'fl-button', disabled: testing ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleURLTest', row.sub.id, row.node.id) }, [ testing ? _('Checking…') : _('Check ping (GET)') ]),
-						row.hidden ? '' : E('button', { class: 'fl-button fl-button-warning', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, true) }, [ _('Hide') ]),
-						row.sub.id === 'server-list' ? E('button', { class: 'fl-button fl-button-danger', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRemoveServer', row.sub.id, row.node.id) }, [ _('Remove server') ]) : ''
-					])
+					E('div', { class: 'fl-more-menu', role: 'menu', hidden: this.activeMenuKey === actionKey ? null : 'hidden', click: function(ev) { ev.stopPropagation(); } }, menuActions)
 				]) ])
 			);
 			var rowAttrs = { class: (active ? 'fl-active-row ' : '') + (row.hidden ? 'fl-hidden-row ' : '') + (expired ? 'fl-expired-row' : ''), 'aria-current': active ? 'true' : null };
@@ -1639,8 +1701,12 @@ return view.extend({
 				rowAttrs.tabindex = '0';
 				rowAttrs.role = 'button';
 				rowAttrs.title = _('Connect this server manually');
-				rowAttrs.click = ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id);
-				rowAttrs.keydown = L.bind(this.handleRowKey, this, row.sub.id, row.node.id);
+				rowAttrs.click = isAWG ? ui.createHandlerFn(this, 'handleAWGConnect') : ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id);
+				rowAttrs.keydown = isAWG ? L.bind(function(ev) {
+					if (!ev || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+					ev.preventDefault();
+					return this.handleAWGConnect(ev);
+				}, this) : L.bind(this.handleRowKey, this, row.sub.id, row.node.id);
 			}
 			body.push(E('tr', rowAttrs, cells));
 		}
@@ -1652,8 +1718,9 @@ return view.extend({
 	renderContent: function() {
 		var subscriptions = this.subscriptions();
 		var selected = this.selectedSubscription();
+		var selectedAWG = !!selected && selected.id === 'amneziawg';
 		var selectedExpired = !!selected && isSubscriptionExpired(selected);
-		var selectableSubscriptions = subscriptions.filter(function(sub) { return !isSubscriptionExpired(sub); });
+		var selectableSubscriptions = subscriptions.filter(function(sub) { return sub.id !== 'amneziawg' && !isSubscriptionExpired(sub); });
 		var countries = this.filterCountries();
 		var protocols = this.filterProtocols();
 		this.toastErrors = this.toastErrors || {};
@@ -1689,7 +1756,6 @@ return view.extend({
 			fastlaneShell.renderHeader('vpn'),
 			E('main', { class: 'fl-shell' }, [
 			this.renderStatus(),
-			this.renderAWGCard(),
 			this.busy ? E('div', { class: 'fl-busy', role: 'status', 'aria-live': 'polite' }, [ this.busy ]) : '',
 			backgroundActive ? E('div', { class: 'fl-busy', role: 'status', 'aria-live': 'polite' }, [
 				E('span', { class: 'fl-inline-loader' }),
@@ -1709,12 +1775,12 @@ return view.extend({
 				E('div', { class: 'fl-toolbar-actions' }, [
 					E('label', { class: 'fl-search-wrap' }, [ E('span', { class: 'fl-sr-only' }, [ _('Search servers') ]), E('input', { class: 'fl-search', value: this.query, placeholder: _('Search servers…'), input: L.bind(this.handleSearch, this) }) ]),
 					E('select', { class: 'fl-select', 'aria-label': _('Country'), change: L.bind(this.handleCountry, this) }, [ E('option', { value: 'all', selected: this.country === 'all' ? 'selected' : null }, [ _('All countries') ]) ].concat(countries.map(L.bind(function(country) { return E('option', { value: country, selected: this.country === country ? 'selected' : null }, [ countryCatalog.name(country) ]); }, this)))),
-					E('select', { class: 'fl-select', 'aria-label': _('Protocol'), change: L.bind(this.handleProtocol, this) }, [ E('option', { value: 'all', selected: this.protocol === 'all' ? 'selected' : null }, [ _('All protocols') ]) ].concat(protocols.map(L.bind(function(protocol) { return E('option', { value: protocol, selected: this.protocol === protocol ? 'selected' : null }, [ protocol.toUpperCase() ]); }, this)))),
+					E('select', { class: 'fl-select', 'aria-label': _('Protocol'), change: L.bind(this.handleProtocol, this) }, [ E('option', { value: 'all', selected: this.protocol === 'all' ? 'selected' : null }, [ _('All protocols') ]) ].concat(protocols.map(L.bind(function(protocol) { return E('option', { value: protocol, selected: this.protocol === protocol ? 'selected' : null }, [ protocol === 'amneziawg' ? 'AmneziaWG' : protocol.toUpperCase() ]); }, this)))),
 					E('select', { class: 'fl-select', 'aria-label': _('Server sorting'), change: L.bind(this.handleSort, this) }, [ E('option', { value: 'latency', selected: this.sort === 'latency' ? 'selected' : null }, [ _('Sort: ping (GET)') ]), E('option', { value: 'name', selected: this.sort === 'name' ? 'selected' : null }, [ _('Sort: name') ]), E('option', { value: 'source', selected: this.sort === 'source' ? 'selected' : null }, [ _('Sort: source') ]) ])
 				]),
 				E('div', { class: 'fl-toolbar-buttons' }, [
-					E('button', { class: 'fl-button fl-button-quiet fl-toolbar-refresh', disabled: this.busy || !selectableSubscriptions.length || selectedExpired ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRefreshSubscriptions') }, [ icon('refresh'), _('Update subscriptions') ]),
-					E('button', { class: 'fl-button fl-button-quiet', disabled: this.busy || backgroundActive || !selectableSubscriptions.length || selectedExpired ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleURLTests') }, [ backgroundActive ? E('span', { class: 'fl-inline-loader' }) : icon('bolt'), backgroundActive ? _('Check running in background') : _('Check ping (GET)') ])
+					E('button', { class: 'fl-button fl-button-quiet fl-toolbar-refresh', disabled: this.busy || selectedAWG || !selectableSubscriptions.length || selectedExpired ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRefreshSubscriptions') }, [ icon('refresh'), _('Update subscriptions') ]),
+					E('button', { class: 'fl-button fl-button-quiet', disabled: this.busy || backgroundActive || (!selectedAWG && !selectableSubscriptions.length) || selectedExpired ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleURLTests') }, [ backgroundActive ? E('span', { class: 'fl-inline-loader' }) : icon('bolt'), backgroundActive ? _('Check running in background') : _('Check ping (GET)') ])
 				])
 			]),
 			E('div', { class: 'fl-table-wrap' }, [ this.renderTable() ])

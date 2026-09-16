@@ -330,6 +330,12 @@ msgstr "Не участвуют в авто"
 msgid "Expired"
 msgstr "Срок истёк"
 
+msgid "Experimental"
+msgstr "Экспериментально"
+
+msgid "File · experimental"
+msgstr "Файл · экспериментально"
+
 msgid "Expired on"
 msgstr "Истекла"
 
@@ -1194,6 +1200,12 @@ msgstr "Точка подключения"
 msgid "AWG 2.0 prototype"
 msgstr "Прототип AWG 2.0"
 
+msgid "AWG 2.0 · experimental. It does not participate in automatic selection."
+msgstr "AWG 2.0 · экспериментально. Не участвует в автовыборе."
+
+msgid "AWG file"
+msgstr "Файл AWG"
+
 msgid "Experimental AmneziaWG profile"
 msgstr "Экспериментальный профиль AmneziaWG"
 
@@ -1253,6 +1265,12 @@ msgstr "Подготавливаю туннель…"
 
 msgid "Profile"
 msgstr "Профиль"
+
+msgid "Profile error"
+msgstr "Ошибка профиля"
+
+msgid "Replace the AWG profile through Add servers → From file."
+msgstr "Замените профиль AWG через «Добавить серверы» → «Через файл»."
 
 msgid "Profile name"
 msgstr "Название профиля"
