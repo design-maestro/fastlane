@@ -50,10 +50,12 @@ Earlier DNS claims must not be treated as proof of these stronger assertions.
 
 ## Target-device gates deferred until installation
 
-- Exact target NanoPi firmware/kernel ABI and matching AWG module must be verified;
-  x86_64 OpenWrt package success does not establish ARM64/FriendlyWrt compatibility.
-- GeoIP/GeoSite routing and AWG kernel compatibility must still be observed on
-  the actual NanoPi before AWG is enabled there.
+- The target NanoPi has no matching AWG kernel module. The follow-up release
+  packages a pinned ARM64 `amneziawg-go` fallback, but Linux TUN, netifd startup,
+  handshake and egress still must be observed on the actual device before AWG is
+  considered accepted there.
+- GeoIP/GeoSite routing and the userspace AWG path must still be observed on the
+  actual NanoPi before AWG is enabled there.
 - The user cancelled the 24-hour VM soak and chose to perform extended testing
   after release. Short QEMU samples do not establish NanoPi performance or
   24-hour stability.
