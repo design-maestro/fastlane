@@ -26,6 +26,12 @@ printf 'build-openwrt GOARCH=%s GOMIPS=%s OUTPUT_DIR=%s\n' "${GOARCH:-}" "${GOMI
 mkdir -p "${OUTPUT_DIR:?}"
 : > "${OUTPUT_DIR}/fastlane"
 `)
+	writeExecutable(t, filepath.Join(repoDir, "scripts", "build-amneziawg-go.sh"), `#!/bin/sh
+set -eu
+printf 'build-amneziawg-go GOARCH=%s GOMIPS=%s OUTPUT_DIR=%s\n' "${GOARCH:-}" "${GOMIPS:-}" "${OUTPUT_DIR:-}" >> "${RELEASE_TEST_LOG:?}"
+mkdir -p "${OUTPUT_DIR:?}"
+: > "${OUTPUT_DIR}/amneziawg-go"
+`)
 	writeExecutable(t, filepath.Join(repoDir, "scripts", "package-openwrt.sh"), `#!/bin/sh
 set -eu
 printf 'package-openwrt VERSION=%s ARCH=%s BINARY_DIR=%s\n' "${VERSION:-}" "${ARCH:-}" "${BINARY_PATH%/*}" >> "${RELEASE_TEST_LOG:?}"
@@ -77,6 +83,9 @@ printf '#!/bin/sh\n' > "$2"
 		"build-openwrt GOARCH=mipsle GOMIPS=softfloat OUTPUT_DIR=" + filepath.Join(repoDir, "bin", "openwrt", "mipsel_24kc"),
 		"build-openwrt GOARCH=amd64 GOMIPS= OUTPUT_DIR=" + filepath.Join(repoDir, "bin", "openwrt", "x86_64"),
 		"build-openwrt GOARCH=arm64 GOMIPS= OUTPUT_DIR=" + filepath.Join(repoDir, "bin", "openwrt", "aarch64_cortex-a53"),
+		"build-amneziawg-go GOARCH=mipsle GOMIPS=softfloat OUTPUT_DIR=" + filepath.Join(repoDir, "bin", "openwrt", "mipsel_24kc"),
+		"build-amneziawg-go GOARCH=amd64 GOMIPS= OUTPUT_DIR=" + filepath.Join(repoDir, "bin", "openwrt", "x86_64"),
+		"build-amneziawg-go GOARCH=arm64 GOMIPS= OUTPUT_DIR=" + filepath.Join(repoDir, "bin", "openwrt", "aarch64_cortex-a53"),
 		"package-openwrt VERSION=1.2.3 ARCH=mipsel_24kc BINARY_DIR=" + filepath.Join(repoDir, "bin", "openwrt", "mipsel_24kc"),
 		"package-openwrt VERSION=1.2.3 ARCH=x86_64 BINARY_DIR=" + filepath.Join(repoDir, "bin", "openwrt", "x86_64"),
 		"package-openwrt VERSION=1.2.3 ARCH=aarch64_cortex-a53 BINARY_DIR=" + filepath.Join(repoDir, "bin", "openwrt", "aarch64_cortex-a53"),

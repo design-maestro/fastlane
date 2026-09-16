@@ -5,6 +5,7 @@ PKG_DIR="${PKG_DIR:-dist/fastlane-ipk}"
 ARCH="${ARCH:-mipsel_24kc}"
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 BINARY_PATH="${BINARY_PATH:-${ROOT_DIR}/bin/openwrt/fastlane}"
+AWG_BINARY_PATH="${AWG_BINARY_PATH:-$(dirname "${BINARY_PATH}")/amneziawg-go}"
 DATA_DIR="${PKG_DIR}/data"
 RELEASE_DATA_DIR="${PKG_DIR}/release-data"
 CONTROL_DIR="${PKG_DIR}/control"
@@ -38,6 +39,7 @@ mkdir -p \
 	"${DATA_DIR}" \
 	"${DATA_DIR}/etc/uci-defaults" \
 	"${DATA_DIR}/usr/bin" \
+	"${DATA_DIR}/usr/libexec" \
 	"${DATA_DIR}/usr/lib/lua/luci/i18n" \
 	"${DATA_DIR}/usr/share/licenses/fastlane" \
 	"${DATA_DIR}/usr/share/luci/menu.d" \
@@ -49,12 +51,17 @@ mkdir -p \
 	"${WORK_DIR}"
 
 cp "${BINARY_PATH}" "${DATA_DIR}/usr/bin/fastlane"
+if [ -f "${AWG_BINARY_PATH}" ]; then
+	cp "${AWG_BINARY_PATH}" "${DATA_DIR}/usr/libexec/fastlane-amneziawg-go"
+	chmod 0755 "${DATA_DIR}/usr/libexec/fastlane-amneziawg-go"
+fi
 cp -R "${ROOT_DIR}/openwrt/root/." "${DATA_DIR}/"
 cp "${ROOT_DIR}/scripts/uninstall.sh" "${DATA_DIR}/usr/libexec/fastlane-uninstall"
 cp "${ROOT_DIR}/LICENSE" "${DATA_DIR}/usr/share/licenses/fastlane/LICENSE"
 cp "${ROOT_DIR}/NOTICE" "${DATA_DIR}/usr/share/licenses/fastlane/NOTICE"
 cp "${ROOT_DIR}/THIRD_PARTY_NOTICES.md" "${DATA_DIR}/usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md"
 cp "${ROOT_DIR}/LICENSES/UPSTREAM-MIT.txt" "${DATA_DIR}/usr/share/licenses/fastlane/UPSTREAM-MIT.txt"
+cp "${ROOT_DIR}/LICENSES/AMNEZIAWG-GO-MIT.txt" "${DATA_DIR}/usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt"
 [ -d "${DATA_DIR}/etc/init.d" ] && find "${DATA_DIR}/etc/init.d" -type f -exec chmod 0755 {} \;
 [ -d "${DATA_DIR}/usr/libexec" ] && find "${DATA_DIR}/usr/libexec" -type f -exec chmod 0755 {} \;
 cp "${ROOT_DIR}/luci-app-fastlane/root/usr/share/luci/menu.d/luci-app-fastlane.json" \
@@ -133,11 +140,16 @@ harden_secret_storage() {
 			/etc/fastlane/settings.json \
 		/etc/fastlane/state.json \
 			/etc/fastlane/amneziawg.conf \
+			/etc/fastlane/amneziawg-profiles.json \
 			/etc/fastlane/.fastlane.lock \
 			/etc/fastlane/speedtest.lock
 		do
 			[ -e "${path}" ] && chmod 0600 "${path}" >/dev/null 2>&1 || true
 		done
+		if [ -d /etc/fastlane/amneziawg.d ]; then
+			chmod 0700 /etc/fastlane/amneziawg.d >/dev/null 2>&1 || true
+			find /etc/fastlane/amneziawg.d -maxdepth 1 -type f -name '*.conf' -exec chmod 0600 {} \; >/dev/null 2>&1 || true
+		fi
 		find /etc/fastlane -maxdepth 1 -type f -name '*.corrupt-*' -exec chmod 0600 {} \; >/dev/null 2>&1 || true
 	fi
 
@@ -233,7 +245,8 @@ for relative_path in \
 	usr/share/licenses/fastlane/LICENSE \
 	usr/share/licenses/fastlane/NOTICE \
 	usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md \
-	usr/share/licenses/fastlane/UPSTREAM-MIT.txt
+	usr/share/licenses/fastlane/UPSTREAM-MIT.txt \
+	usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt
 do
 	source_path="${RELEASE_DATA_DIR}/${relative_path}"
 	compat_path="${RELEASE_DATA_DIR}/usr/libexec/fastlane-release-data/${relative_path}"
