@@ -8,7 +8,7 @@ const jobNames = {'health-check':tr('Проверяем серверы'),'refres
 const messages = {auth_required:tr('Войдите с ключом доступа.'),auth_rate_limited:tr('Слишком много попыток входа. Повторите через минуту.'),job_already_running:tr('Дождитесь завершения текущей операции.'),operation_failed:tr('Операция не выполнена. Проверьте данные и состояние подключения; подробности доступны в журнале службы.'),invalid_request:tr('Проверьте заполненные поля.'),feature_unavailable:tr('Эта функция недоступна в установленной службе.')};
 messages.vpn_runtime_unavailable=tr('В локальном превью нет VPN-движка. Подключение проверяется на отдельном OpenWrt-стенде; состояние VPN не изменено.');
 messages.operation_cancelled=tr('Проверка остановлена.');
-Object.assign(messages,{unsafe_awg_directive:tr('В профиле есть команды запуска или остановки. Такие файлы не разрешены.'),unsupported_awg_version:tr('Поддерживается только AWG 2.0. Экспортируйте профиль этой версии.'),unsupported_awg_parameter:tr('В профиле есть неподдерживаемые параметры AWG.'),awg_import_failed:tr('Не удалось импортировать AWG. Проверьте ключи, адрес и единственный Peer; перед заменой отключите активный профиль.')});
+Object.assign(messages,{unsafe_awg_directive:tr('В профиле есть команды запуска или остановки. Такие файлы не разрешены.'),unsupported_awg_version:tr('Поддерживаются профили AWG Legacy и 2.0.'),unsupported_awg_parameter:tr('В профиле есть неподдерживаемые параметры AWG.'),awg_import_failed:tr('Не удалось импортировать AWG. Проверьте ключи, адрес и единственный Peer; перед заменой отключите активный профиль.')});
 let noticeTimer;
 function notice(message, error = false) { clearTimeout(noticeTimer); $('notice').textContent = message; $('notice').classList.toggle('bad', error); if(message)noticeTimer=setTimeout(()=>{$('notice').textContent='';},error?6000:3000); }
 async function api(path, method = 'GET', body) {
@@ -58,7 +58,8 @@ function latencyMS(health) {
 function pingText(health) { const value=latencyMS(health); return value===null?tr('Нет замера'):value+tr(' мс'); }
 function pingClass(health) {const value=latencyMS(health);return value===null?'':value<=100?'fl-latency-good':value<=200?'fl-latency-mid':value<=1000?'fl-latency-slow':'fl-latency-critical';}
 function awgNode() {
-  return awg && awg.state!=='absent' ? {id:'awg-profile',subscription_id:'local-awg',kind:'awg',name:awg.name || 'AmneziaWG',remark:tr('Экспериментально · AWG 2.0'),protocol:'amneziawg',address:awg.profile?.endpoint || ''} : null;
+  const version=awg?.profile?.version==='legacy'?'Legacy':'2.0';
+  return awg && awg.state!=='absent' ? {id:'awg-profile',subscription_id:'local-awg',kind:'awg',name:awg.name || 'AmneziaWG',remark:tr('Экспериментально')+' · AWG '+version,protocol:'amneziawg',address:awg.profile?.endpoint || ''} : null;
 }
 function subscriptions() {
   const result=[...(snapshot.subscriptions || [])],node=awgNode();
@@ -126,7 +127,8 @@ function renderServers() {
       if(node.kind==='awg'){
         const check=element('button',tr('Проверить пинг (GET)'),'fl-button');check.dataset.operation='';check.dataset.action='check';check.onclick=()=>{menu.hidden=true;operation('awg/check');};
         const remove=element('button',tr('Удалить профиль'),'fl-button fl-button-danger');remove.dataset.operation='';remove.onclick=()=>confirmAction(tr('Удалить профиль AWG? Если он активен, интернет пойдёт напрямую.'),()=>operation('awg','DELETE'));
-        menu.append(check,remove,element('span',tr('AWG 2.0 · экспериментально. Не участвует в автовыборе.'),'fl-more-note'),element('span','','fl-more-note awg-probe-detail'));
+        const version=awg?.profile?.version==='legacy'?'Legacy':'2.0';
+        menu.append(check,remove,element('span','AWG '+version+' · '+tr('Экспериментально. Не участвует в автовыборе.'),'fl-more-note'),element('span','','fl-more-note awg-probe-detail'));
       }else{
         const check=element('button',tr('Проверить пинг (GET)'),'fl-button');check.dataset.operation='';check.dataset.action='check';check.onclick=()=>{menu.hidden=true;operation('vpn/check','POST',{subscription_id:row.flNode.subscription_id,node_id:row.flNode.id});};
         const hide=element('button',tr('Скрыть'),'fl-button fl-button-warning');hide.dataset.operation='';hide.dataset.action='hide';hide.onclick=()=>{menu.hidden=true;if(keywordHidden(row.flNode)){location.hash='settings';return;}operation('vpn/hidden','POST',{subscription_id:row.flNode.subscription_id,node_id:row.flNode.id,hidden:!hidden(row.flNode)});};

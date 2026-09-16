@@ -122,7 +122,7 @@ func TestOpenWrtAWGSoak(t *testing.T) {
 	run("pause_daemon", h.PauseFastLaneDaemon)
 	run("install_xray", h.InstallXray)
 	run("install_awg", func(ctx context.Context) error { return installAWGStandPackages(ctx, h) })
-	run("configure_awg_stand", func(ctx context.Context) error { return configureAWGNamespaceStand(ctx, h) })
+	run("configure_awg_stand", func(ctx context.Context) error { return configureAWGNamespaceStand(ctx, h, false) })
 	run("configure_checks", func(ctx context.Context) error {
 		return h.sshCommand(ctx, fastlaneRemoteBinary+" firewall set bypass example.com && "+fastlaneRemoteBinary+" settings set refresh-interval 24h && "+fastlaneRemoteBinary+" settings set health-check-interval 0s")
 	})

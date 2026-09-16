@@ -107,6 +107,34 @@ func TestOpenWrtControllerPreparesSecretThroughStdinAndConnectsPolicyRoute(t *te
 	}
 }
 
+func TestOpenWrtControllerPreparesLegacyWithoutS3S4(t *testing.T) {
+	profile, err := Parse([]byte(legacyProfile("")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := successfulControllerRunner()
+	controller := newControllerForTest(t, runner)
+	if err := controller.Prepare(context.Background(), profile); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	var batch string
+	for _, call := range runner.calls {
+		if call.name == "uci" && len(call.stdin) > 0 {
+			batch = string(call.stdin)
+		}
+	}
+	for _, expected := range []string{"awg_s1='10'", "awg_s2='20'", "awg_h1='100-200'"} {
+		if !strings.Contains(batch, expected) {
+			t.Fatalf("legacy UCI batch missing %q:\n%s", expected, batch)
+		}
+	}
+	for _, forbidden := range []string{"awg_s3=", "awg_s4=", "awg_i1="} {
+		if strings.Contains(batch, forbidden) {
+			t.Fatalf("legacy UCI batch contains %q:\n%s", forbidden, batch)
+		}
+	}
+}
+
 func TestOpenWrtControllerRejectsKernelVermagicMismatch(t *testing.T) {
 	runner := successfulControllerRunner()
 	runner.run = func(call controllerCall) ([]byte, error) {

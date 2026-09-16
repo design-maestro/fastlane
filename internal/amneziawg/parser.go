@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	// ErrUnsupportedVersion marks profiles from AWG versions other than 2.0.
+	// ErrUnsupportedVersion marks profiles outside the supported Legacy/2.0 set.
 	ErrUnsupportedVersion = errors.New("unsupported AmneziaWG version")
 	// ErrUnsupportedParameter marks parameters outside the safe import contract.
 	ErrUnsupportedParameter = errors.New("unsupported AmneziaWG parameter")
@@ -29,12 +29,13 @@ var awg3Parameters = map[string]struct{}{
 }
 
 type rawProfile struct {
-	sections map[string]map[string]string
-	seen     map[string]map[string]bool
-	ignored  map[string]struct{}
+	sections        map[string]map[string]string
+	seen            map[string]map[string]bool
+	ignored         map[string]struct{}
+	declaredVersion string
 }
 
-// Parse parses and validates one native AWG 2.0 .conf profile.
+// Parse parses and validates one native AWG Legacy or 2.0 .conf profile.
 func Parse(data []byte) (Profile, error) {
 	raw, err := parseINI(data)
 	if err != nil {
@@ -93,11 +94,16 @@ func parseINI(data []byte) (rawProfile, error) {
 			return rawProfile{}, fmt.Errorf("line %d: %w: parameter %q requires AWG 3.x; only 2.0 is supported", lineNumber, ErrUnsupportedVersion, canonicalKey)
 		}
 		if currentSection == "interface" && (normalizedKey == "version" || normalizedKey == "protocolversion") {
-			if value != "2" && value != Version20 {
-				return rawProfile{}, fmt.Errorf("line %d: %w %q; only 2.0 is supported", lineNumber, ErrUnsupportedVersion, value)
-			}
-			if raw.seen[currentSection][normalizedKey] {
+			if raw.seen[currentSection][normalizedKey] || raw.declaredVersion != "" {
 				return rawProfile{}, fmt.Errorf("line %d: duplicate parameter %q in [Interface]", lineNumber, canonicalKey)
+			}
+			switch strings.ToLower(value) {
+			case "1", "1.0", VersionLegacy:
+				raw.declaredVersion = VersionLegacy
+			case "2", Version20:
+				raw.declaredVersion = Version20
+			default:
+				return rawProfile{}, fmt.Errorf("line %d: %w %q; Legacy and 2.0 are supported", lineNumber, ErrUnsupportedVersion, value)
 			}
 			raw.seen[currentSection][normalizedKey] = true
 			continue

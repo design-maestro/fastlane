@@ -78,7 +78,7 @@ func (s *Service) GetAWGStatus(ctx context.Context) (AWGStatus, error) {
 }
 
 func (s *Service) awgStatus(ctx context.Context) (AWGStatus, error) {
-	result := AWGStatus{State: "absent", Protocol: "AmneziaWG 2.0"}
+	result := AWGStatus{State: "absent", Protocol: "AmneziaWG"}
 	if s.awgStore == nil {
 		result.Message = "AmneziaWG profile storage is not configured"
 		return result, nil
@@ -98,6 +98,11 @@ func (s *Service) awgStatus(ctx context.Context) (AWGStatus, error) {
 	}
 	redacted := profile.Status()
 	result.Profile = &redacted
+	if profile.Version == amneziawg.VersionLegacy {
+		result.Protocol = "AmneziaWG Legacy"
+	} else {
+		result.Protocol = "AmneziaWG 2.0"
+	}
 	state, stateErr := s.store.LoadState()
 	if stateErr != nil {
 		return result, fmt.Errorf("load state: %w", stateErr)

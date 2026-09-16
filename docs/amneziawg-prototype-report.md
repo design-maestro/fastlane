@@ -1,15 +1,16 @@
-# AmneziaWG 2.0 prototype report
+# AmneziaWG prototype report
 
 ## Scope
 
-This prototype adds one manually managed AmneziaWG 2.0 profile to Fast Lane. It is intentionally separate from Xray subscriptions and does not participate in automatic speed-based server selection.
+This prototype adds one manually managed AmneziaWG Legacy or 2.0 profile to Fast Lane. It is intentionally separate from Xray subscriptions and does not participate in automatic speed-based server selection.
 
 The prototype was exercised on an isolated OpenWrt 24.10.5 x86_64 QEMU stand with Xray v26.7.28 and a kernel AmneziaWG interface managed by netifd. It has not been installed on the user's NanoPi and the QEMU measurements below must not be treated as NanoPi performance figures.
 
 ## Implemented
 
 - Import one native `.conf` containing exactly one interface and one peer.
-- Require the AWG 2.0 parameters `S1`, `S2`, `S3`, and `S4`; reject Legacy profiles and unsupported AWG 3 parameters with a specific error.
+- Accept Legacy profiles with `S1`/`S2` and AWG 2.0 profiles with `S1`-`S4`; reject partially specified `S3`/`S4` and unsupported AWG 3 parameters.
+- Normalize bare interface IPv4/IPv6 addresses to `/32` and `/128`, matching exports produced by the Amnezia client.
 - Reject `PreUp`, `PostUp`, `PreDown`, and `PostDown`. Imported DNS, table, and route ownership are not applied.
 - Keep the private key in a `0600` file and omit it and the raw profile from status, diagnostics, command arguments, and logs.
 - Verify the running kernel ABI before using the kernel module. Fast Lane never force-installs a module.
@@ -24,6 +25,8 @@ The prototype was exercised on an isolated OpenWrt 24.10.5 x86_64 QEMU stand wit
 
 The full `TestOpenWrtAmneziaWGPrototype` scenario passed with non-zero AWG 2.0 `S1-S4` values.
 
+The same full scenario also passed in Legacy mode with only `S1`/`S2` and a bare IPv4 interface address. The measured hot switch was 2.083 seconds, failure to managed direct was 15.204 seconds, recovery was 16.682 seconds, and the QEMU throughput sample was 8.61 Mbit/s. These remain stand measurements, not NanoPi performance figures.
+
 - A real AWG handshake and HTTPS egress succeeded.
 - TCP through Xray/AWG, UDP through the AWG route table, and DNS through the AWG route table succeeded.
 - A domain configured as direct was observed on WAN and was not observed on the AWG interface.
@@ -37,7 +40,7 @@ The full `TestOpenWrtAmneziaWGPrototype` scenario passed with non-zero AWG 2.0 `
 
 ## Profile supplied for validation
 
-`R_RN2GTDRN_49.conf` was inspected without copying its secret into the repository. It contains MTU and the older AmneziaWG parameters but no `S3` or `S4`, so the prototype classifies it as a Legacy/1.x profile and does not import it as AWG 2.0. A fresh AWG 2.0 export containing `S1-S4` is required for a later user-profile test.
+`R_RN2GTDRN_49.conf` and `R_RN2GTDRN_51.conf` were inspected without copying their secrets into the repository. The first is classified as Legacy because it has no `S3`/`S4`; the second is AWG 2.0 and uses a bare IPv4 interface address. Both now pass parser validation. Real egress still has to be confirmed on compatible OpenWrt hardware before claiming that either user profile connects successfully.
 
 ## Remaining limitations
 

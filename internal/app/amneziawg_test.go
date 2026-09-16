@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,6 +77,20 @@ func TestAWGImportRejectsHooksWithoutPersistingSecret(t *testing.T) {
 	}
 	if len(profileStore.raw) != 0 {
 		t.Fatal("unsafe profile was persisted")
+	}
+}
+
+func TestAWGImportAcceptsLegacyAndReportsProtocol(t *testing.T) {
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: domain.DefaultRuntimeState()}
+	profileStore := &awgProfileMemoryStore{}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: profileStore})
+	legacy := strings.ReplaceAll(strings.ReplaceAll(validAWGProfile, "S3 = 0\n", ""), "S4 = 0\n", "")
+	status, err := service.ImportAWGProfile("legacy", []byte(legacy))
+	if err != nil {
+		t.Fatalf("ImportAWGProfile: %v", err)
+	}
+	if status.Protocol != "AmneziaWG Legacy" || status.Profile == nil || status.Profile.Version != amneziawg.VersionLegacy {
+		t.Fatalf("status = %+v", status)
 	}
 }
 

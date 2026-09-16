@@ -330,12 +330,10 @@ function commandError(result) {
 function awgImportError(value) {
 	var details = trim(value && value.message ? value.message : value);
 	var normalized = details.toLowerCase();
-	if (normalized.indexOf('lacks s3') >= 0 || normalized.indexOf('lacks s4') >= 0 || normalized.indexOf('older than awg 2.0') >= 0)
-		return _('This is an AmneziaWG Legacy profile. Export an AWG 2.0 profile with S1–S4.');
 	if (normalized.indexOf('lifecycle hooks are forbidden') >= 0)
 		return _('PreUp, PostUp, PreDown and PostDown commands are not allowed. Fast Lane manages routes itself.');
 	if (normalized.indexOf('unsupported amneziawg parameter') >= 0 || normalized.indexOf('requires awg 3.x') >= 0)
-		return _('This profile contains parameters that the AWG 2.0 prototype does not support.');
+		return _('This profile contains unsupported AmneziaWG parameters.');
 	return _('Could not import the AmneziaWG profile. Check the configuration.');
 }
 
@@ -1195,7 +1193,7 @@ return view.extend({
 		var filePane = E('div', { class: 'fl-add-pane', hidden: 'hidden' }, [
 			E('label', { class: 'fl-file-picker' }, [ files, E('span', {}, [ E('strong', {}, [ _('Choose configuration files') ]), _('You can add several files at once') ]) ]),
 			fileList,
-			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('Use Clash/Mihomo YAML, a provider file, or one AmneziaWG 2.0 .conf profile. AmneziaWG is imported as the experimental tunnel.') ])
+			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('Use Clash/Mihomo YAML, a provider file, or one AmneziaWG Legacy/2.0 .conf profile. AmneziaWG is imported as the experimental tunnel.') ])
 		]);
 		var mode = 'subscription';
 		var subscriptionButton = E('button', { class: 'fl-add-mode-button fl-add-mode-button-active', type: 'button' }, [ _('Subscription') ]);
@@ -1374,6 +1372,7 @@ return view.extend({
 		var awg = this.awgStatus();
 		if (!awg.__error && awg.profile) {
 			var endpoint = trim(awg.profile.endpoint);
+			var version = trim(awg.profile.version) === 'legacy' ? 'Legacy' : '2.0';
 			subscriptions.push({
 				id: 'amneziawg',
 				display_name: _('AWG file'),
@@ -1384,7 +1383,7 @@ return view.extend({
 					id: 'profile',
 					kind: 'awg',
 					name: trim(awg.name) || 'AmneziaWG',
-					remark: _('Experimental') + ' · AWG 2.0',
+					remark: _('Experimental') + ' · AWG ' + version,
 					protocol: 'amneziawg',
 					address: endpoint
 				}]
@@ -1647,6 +1646,7 @@ return view.extend({
 		var body = [];
 		for (var i = 0; i < rows.length; i++) {
 			var row = rows[i], isAWG = row.node.kind === 'awg', active = vpnActive && state.active_subscription_id === row.sub.id && state.active_node_id === row.node.id && state.connected;
+			var awgVersion = isAWG && trim(this.awgStatus().profile && this.awgStatus().profile.version) === 'legacy' ? 'Legacy' : '2.0';
 			var actionKey = row.sub.id + ':' + row.node.id;
 			var expired = isSubscriptionExpired(row.sub);
 			var testing = isAWG ? !!this.awgBusy : !!this.testingNodes[row.sub.id + ':' + row.node.id];
@@ -1677,7 +1677,7 @@ return view.extend({
 				E('button', { class: 'fl-button fl-button-primary', disabled: this.busy || unavailable || active ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGConnect') }, [ active ? _('Connected') : _('Connect') ]),
 				E('button', { class: 'fl-button', disabled: testing ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGCheck') }, [ testing ? _('Checking…') : _('Check ping (GET)') ]),
 				E('button', { class: 'fl-button fl-button-danger', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleAWGRemove') }, [ _('Delete') ]),
-				E('div', { class: 'fl-more-note' }, [ _('AWG 2.0 · experimental. It does not participate in automatic selection.') ])
+				E('div', { class: 'fl-more-note' }, [ 'AWG ' + awgVersion + ' · ' + _('Experimental. It does not participate in automatic selection.') ])
 			] : [
 				row.hiddenByKeyword ? E('div', { class: 'fl-more-note' }, [ _('Hidden by rule') + ': “' + row.hiddenByKeyword + '”' ]) : '',
 				row.hiddenByKeyword ? E('a', { class: 'fl-button', href: L.url('admin/services/fastlane/settings') }, [ _('Edit hide rules') ]) : (row.manuallyHidden ? E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleHidden', row.sub.id, row.node.id, false) }, [ _('Restore') ]) : E('button', { class: 'fl-button fl-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleConnect', row.sub.id, row.node.id) }, [ active && state.mode === 'manual' ? _('Pinned') : _('Connect') ])),

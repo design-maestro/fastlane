@@ -48,7 +48,7 @@ func TestFastLaneVPNViewRendersAllAWGStatesAndActions(t *testing.T) {
 		"state === 'connected'", "state === 'probe_failed'", "return 'direct'",
 		"No profile imported", "Import profile", "Replace profile",
 		"handleAWGConnect", "handleAWGCheck", "handleAWGDisconnect", "handleAWGRemove",
-		"awgImportError(err)", "AmneziaWG Legacy profile", "lifecycle hooks are forbidden",
+		"awgImportError(err)", "lifecycle hooks are forbidden",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("VPN view missing AmneziaWG state or action marker %q", want)
@@ -84,7 +84,7 @@ func TestFastLaneVPNViewKeepsAWGInCommonServerList(t *testing.T) {
 		"source_type: 'file'",
 		"kind: 'awg'",
 		"display_name: _('AWG file')",
-		"AWG 2.0 · experimental. It does not participate in automatic selection.",
+		"Experimental. It does not participate in automatic selection.",
 		"selected && selected.id === 'amneziawg'",
 		"E('section', { class: 'fl-server-panel'",
 	} {
