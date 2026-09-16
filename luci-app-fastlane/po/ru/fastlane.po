@@ -258,6 +258,9 @@ msgstr "Не удалось обновить состояние VPN. Показ�
 msgid "Could not refresh subscriptions. Showing the last loaded data."
 msgstr "Не удалось обновить подписки. Показываем последние загруженные данные."
 
+msgid "Could not refresh AmneziaWG profiles. Showing the last loaded data."
+msgstr "Не удалось обновить профили AmneziaWG. Показываем последние загруженные данные."
+
 msgid "Could not remove Fast Lane."
 msgstr "Не удалось удалить Fast Lane."
 

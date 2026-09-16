@@ -17,7 +17,7 @@
 		"order": 10,
 		"action": {
 			"type": "view",
-			"path": "fastlane/vpn-20260910-hide-keywords-v27"
+			"path": "fastlane/vpn-20260910-hide-keywords-v28"
 		}
 	},
 	"admin/services/fastlane/diagnostics": {

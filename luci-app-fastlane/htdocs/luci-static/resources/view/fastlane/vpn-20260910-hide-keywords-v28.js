@@ -1,4 +1,5 @@
 'use strict';
+// Keep the filename revisioned so LuCI reloads this module after upgrades.
 'require view';
 'require fs';
 'require ui';
@@ -472,6 +473,7 @@ return view.extend({
 			this.fetchErrors = {};
 			var status = data[0];
 			var subscriptions = data[1];
+			var awgs = data[3];
 			if (status && status.__error) {
 				this.fetchErrors.status = status.__error;
 				if (previous[0] && !previous[0].__error)
@@ -486,11 +488,17 @@ return view.extend({
 			} else if (this.toastErrors) {
 				delete this.toastErrors.subscriptions;
 			}
+			if (awgs && awgs.__error) {
+				this.fetchErrors.awg = awgs.__error;
+				awgs = Array.isArray(previous[3]) ? previous[3] : [];
+			} else if (this.toastErrors) {
+				delete this.toastErrors.awg;
+			}
 			var subscriptionList = Array.isArray(subscriptions) ? subscriptions : [];
-			var awgList = Array.isArray(data[3]) ? data[3] : [];
+			var awgList = Array.isArray(awgs) ? awgs : [];
 			return this.refreshGeoCountries(subscriptionList, awgList).then(L.bind(function() {
 				this.applyGeoCountries(subscriptionList);
-				this.pageData = [ status, subscriptions, data[2] || { status: 'idle' }, data[3] || {} ];
+				this.pageData = [ status, subscriptions, data[2] || { status: 'idle' }, awgs ];
 				this.mergePersistedPings(status, subscriptionList);
 				this.mergeBackgroundPings(data[2], subscriptionList);
 				if (!this.showHidden && this.filter !== 'all' && !this.subscriptions().some(L.bind(function(sub) { return sub.id === this.filter; }, this)))
@@ -1812,6 +1820,7 @@ return view.extend({
 		var errors = [];
 		if (this.fetchErrors && this.fetchErrors.status) errors.push({ key: 'status', value: this.fetchErrors.status, fallback: _('Could not refresh VPN status. Showing the last confirmed state.') });
 		if (this.fetchErrors && this.fetchErrors.subscriptions) errors.push({ key: 'subscriptions', value: this.fetchErrors.subscriptions, fallback: _('Could not refresh subscriptions. Showing the last loaded data.') });
+		if (this.fetchErrors && this.fetchErrors.awg) errors.push({ key: 'awg', value: this.fetchErrors.awg, fallback: _('Could not refresh AmneziaWG profiles. Showing the last loaded data.') });
 		if (this.pageData && this.pageData[0] && this.pageData[0].__error && !(this.fetchErrors && this.fetchErrors.status)) errors.push({ key: 'status', value: this.pageData[0].__error, fallback: _('Could not read VPN status. Reload the page.') });
 		if (this.pageData && this.pageData[1] && this.pageData[1].__error && !(this.fetchErrors && this.fetchErrors.subscriptions)) errors.push({ key: 'subscriptions', value: this.pageData[1].__error, fallback: _('Could not load subscriptions. Reload the page.') });
 		var subscriptionErrors = subscriptions.filter(function(sub) { return !!sub.last_error; });
