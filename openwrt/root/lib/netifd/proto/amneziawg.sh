@@ -46,6 +46,16 @@ proto_amneziawg_peer() {
 }
 
 proto_amneziawg_emit() { local value; config_get value "$config" "$1"; [ -n "$value" ] && echo "$2=$value" >> "$awg_cfg"; }
+proto_amneziawg_emit_bool() {
+	local value
+	config_get value "$config" "$1"
+	[ -n "$value" ] || return 0
+	case "$value" in
+		1|true|on) value=on ;;
+		*) value=off ;;
+	esac
+	echo "$2=$value" >> "$awg_cfg"
+}
 
 proto_amneziawg_setup() {
 	local config="$1" private_key addresses mtu force_userspace result awg_cfg="" awg_err="" attempt ready=0
@@ -96,7 +106,7 @@ proto_amneziawg_setup() {
 	proto_amneziawg_emit awg_rekey_after_time RekeyAfterTime; proto_amneziawg_emit awg_rekey_timeout RekeyTimeout
 	proto_amneziawg_emit awg_reject_after_time RejectAfterTime; proto_amneziawg_emit awg_keepalive_timeout KeepaliveTimeout
 	proto_amneziawg_emit awg_max_handshake_attempts MaxHandshakeAttempts
-	proto_amneziawg_emit awg_random_trailers RandomTrailers; proto_amneziawg_emit awg_disable_cookies DisableCookies
+	proto_amneziawg_emit_bool awg_random_trailers RandomTrailers; proto_amneziawg_emit_bool awg_disable_cookies DisableCookies
 	config_foreach proto_amneziawg_peer "amneziawg_$config"
 	"$AWG" setconf "$config" "$awg_cfg" >/dev/null 2>"$awg_err"; result=$?; rm -f "$awg_cfg" "$awg_err"
 	[ "$result" -eq 0 ] || { proto_amneziawg_fail; return 1; }
