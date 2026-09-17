@@ -9,6 +9,8 @@ FASTLANE_BIN="/usr/bin/fastlane"
 FASTLANE_CRON_HELPER="/usr/libexec/fastlane-cron"
 FASTLANE_AWG_RUNTIME_SOURCE="/usr/libexec/fastlane-amneziawg-go"
 FASTLANE_AWG_RUNTIME_TARGET="/usr/bin/amneziawg-go"
+FASTLANE_AWG_PROTO_SOURCE="/usr/libexec/fastlane-amneziawg-proto"
+FASTLANE_AWG_PROTO_TARGET="/lib/netifd/proto/amneziawg.sh"
 FASTLANE_RUNTIME_ROOT="/tmp/fastlane-runtime"
 
 install_awg_runtime() {
@@ -22,6 +24,20 @@ install_awg_runtime() {
 	cp "${FASTLANE_AWG_RUNTIME_SOURCE}" "${staged}" || return 1
 	chmod 0755 "${staged}" || return 1
 	mv -f "${staged}" "${FASTLANE_AWG_RUNTIME_TARGET}"
+}
+
+install_awg_protocol() {
+	local staged
+
+	[ -f "${FASTLANE_AWG_PROTO_SOURCE}" ] || return 0
+	if [ -f "${FASTLANE_AWG_PROTO_TARGET}" ] && cmp -s "${FASTLANE_AWG_PROTO_SOURCE}" "${FASTLANE_AWG_PROTO_TARGET}"; then
+		return 0
+	fi
+	mkdir -p "$(dirname "${FASTLANE_AWG_PROTO_TARGET}")" || return 1
+	staged="${FASTLANE_AWG_PROTO_TARGET}.fastlane-new.$$"
+	cp "${FASTLANE_AWG_PROTO_SOURCE}" "${staged}" || return 1
+	chmod 0755 "${staged}" || return 1
+	mv -f "${staged}" "${FASTLANE_AWG_PROTO_TARGET}"
 }
 
 migrate_health_runtime_files() {
@@ -54,6 +70,7 @@ start_service() {
 	management_token_file="${FASTLANE_MANAGEMENT_TOKEN_FILE:-/etc/fastlane/management.token}"
 
 	[ -x "${FASTLANE_BIN}" ] || return 1
+	install_awg_protocol || return 1
 	install_awg_runtime || return 1
 	[ -x "${FASTLANE_CRON_HELPER}" ] && "${FASTLANE_CRON_HELPER}" ensure-xray-log-retention >/dev/null 2>&1 || true
 	migrate_health_runtime_files "${root}"

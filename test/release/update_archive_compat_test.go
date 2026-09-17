@@ -34,6 +34,7 @@ func validateLegacyUpdateArchive(data []byte) error {
 			name == "etc/init.d/fastlane" ||
 			name == "etc/init.d/xray" ||
 			strings.HasPrefix(name, "usr/libexec/fastlane-") ||
+			name == "lib/netifd/proto/amneziawg.sh" ||
 			strings.HasPrefix(name, "www/luci-static/resources/fastlane/") ||
 			strings.HasPrefix(name, "www/luci-static/resources/view/fastlane/") ||
 			name == "usr/share/luci/menu.d/luci-app-fastlane.json" ||

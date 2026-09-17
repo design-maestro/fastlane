@@ -56,6 +56,7 @@ if [ -f "${AWG_BINARY_PATH}" ]; then
 	chmod 0755 "${DATA_DIR}/usr/libexec/fastlane-amneziawg-go"
 fi
 cp -R "${ROOT_DIR}/openwrt/root/." "${DATA_DIR}/"
+cp "${ROOT_DIR}/openwrt/root/lib/netifd/proto/amneziawg.sh" "${DATA_DIR}/usr/libexec/fastlane-amneziawg-proto"
 cp "${ROOT_DIR}/scripts/uninstall.sh" "${DATA_DIR}/usr/libexec/fastlane-uninstall"
 cp "${ROOT_DIR}/LICENSE" "${DATA_DIR}/usr/share/licenses/fastlane/LICENSE"
 cp "${ROOT_DIR}/NOTICE" "${DATA_DIR}/usr/share/licenses/fastlane/NOTICE"
@@ -240,6 +241,11 @@ create_tarball "${DATA_DIR}" "${WORK_DIR}/data.tar.gz"
 rm -rf "${RELEASE_DATA_DIR}"
 mkdir -p "${RELEASE_DATA_DIR}"
 cp -R "${DATA_DIR}/." "${RELEASE_DATA_DIR}/"
+# Existing updaters intentionally reject new top-level system paths. Keep the
+# protocol helper under the established Fast Lane libexec prefix; the refreshed
+# init script publishes it atomically on service restart.
+proto_release_path="${RELEASE_DATA_DIR}/lib/netifd/proto/amneziawg.sh"
+rm -f "${proto_release_path}"
 for relative_path in \
 	etc/uci-defaults/luci-i18n-fastlane-ru \
 	usr/lib/lua/luci/i18n/fastlane.ru.lmo \
