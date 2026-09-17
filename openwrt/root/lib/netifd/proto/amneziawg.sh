@@ -48,7 +48,7 @@ proto_amneziawg_peer() {
 proto_amneziawg_emit() { local value; config_get value "$config" "$1"; [ -n "$value" ] && echo "$2=$value" >> "$awg_cfg"; }
 
 proto_amneziawg_setup() {
-	local config="$1" private_key addresses mtu force_userspace result awg_cfg="" awg_err=""
+	local config="$1" private_key addresses mtu force_userspace result awg_cfg="" awg_err="" attempt ready=0
 	config_load network
 	config_get private_key "$config" private_key
 	config_get addresses "$config" addresses
@@ -69,6 +69,14 @@ proto_amneziawg_setup() {
 		ip link del dev "$config" 2>/dev/null || true
 		rm -f "/var/run/amneziawg/$config.sock"
 		amneziawg-go "$config" >/dev/null 2>&1 || { proto_amneziawg_fail; return 1; }
+		# The userspace daemon forks before its UAPI socket is ready. Waiting
+		# here prevents awg from falling back to the older kernel path and
+		# rejecting AWG 3.1 fields during the short startup race.
+		for attempt in 1 2 3 4 5; do
+			[ -S "/var/run/amneziawg/$config.sock" ] && { ready=1; break; }
+			sleep 1
+		done
+		[ "$ready" = 1 ] || { proto_amneziawg_fail; return 1; }
 	elif proto_amneziawg_kernel; then
 		ip link del dev "$config" 2>/dev/null
 		ip link add dev "$config" type amneziawg || { proto_amneziawg_fail; return 1; }
