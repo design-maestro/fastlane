@@ -42,6 +42,9 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: make package-release VERSION="${VERSION}"
 
+      - name: Verify packaged AmneziaWG userspace tools
+        run: ./scripts/check-openwrt-awg-tools.sh dist
+
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
