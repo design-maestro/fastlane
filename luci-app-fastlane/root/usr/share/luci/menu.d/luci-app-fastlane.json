@@ -41,7 +41,7 @@
 		"order": 40,
 		"action": {
 			"type": "view",
-			"path": "fastlane/settings-20260910-hide-keywords-v8"
+			"path": "fastlane/settings-20260917-v9"
 		}
 	}
 }

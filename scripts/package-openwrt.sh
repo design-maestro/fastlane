@@ -109,7 +109,7 @@ for view_name in \
 	vpn.js vpn-20260910-hide-keywords-v29.js \
 	routing.js routing-20260906-v5.js \
 	diagnostics.js diagnostics-20260904-v3.js \
-	settings.js settings-20260910-hide-keywords-v8.js
+	settings.js settings-20260917-v9.js
 do
 	cp "${ROOT_DIR}/luci-app-fastlane/htdocs/luci-static/resources/view/fastlane/${view_name}" \
 		"${DATA_DIR}/www/luci-static/resources/view/fastlane/${view_name}"
