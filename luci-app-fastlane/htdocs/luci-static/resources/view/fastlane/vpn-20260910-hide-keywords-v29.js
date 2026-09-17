@@ -1591,6 +1591,7 @@ return view.extend({
 			var testing = isAWG ? this.awgBusyProfileID === row.node.id : !!this.testingNodes[row.sub.id + ':' + row.node.id];
 			var checked = observationTime(row.observed) > 0;
 			var awgStateValue = isAWG ? awgState(rowAWGStatus) : '';
+			var awgProbeFailed = isAWG && checked && row.observed.healthy === false;
 			var unavailable = isAWG
 				? awgStateValue === 'invalid' || awgStateValue === 'error' || awgStateValue === 'incompatible'
 				: checked && row.observed.healthy === false && !row.observed.test_error && !active;
@@ -1599,6 +1600,7 @@ return view.extend({
 				: active ? _('Active')
 					: expired ? _('Expired')
 						: isAWG && unavailable ? _('Profile error')
+							: awgProbeFailed ? _('Unavailable')
 						: row.observed.test_error ? _('Check failed')
 							: unavailable ? _('Unavailable')
 								: checked ? (slow ? _('Slow') : _('Ready'))

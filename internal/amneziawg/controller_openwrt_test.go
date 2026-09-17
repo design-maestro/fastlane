@@ -104,7 +104,7 @@ func TestOpenWrtControllerPreparesSecretThroughStdinAndConnectsPolicyRoute(t *te
 		t.Fatalf("netifd configuration was not reloaded:\n%s", joined)
 	}
 	if !strings.Contains(joined, "ip -4 route replace default dev fastlane_awg table 51821") ||
-		!strings.Contains(joined, "ip -4 rule add fwmark 0x200 table 51821 priority 10900") {
+		!strings.Contains(joined, "ip -4 rule add fwmark 0x400 table 51821 priority 10900") {
 		t.Fatalf("policy route was not installed:\n%s", joined)
 	}
 }

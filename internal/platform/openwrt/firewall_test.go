@@ -43,7 +43,7 @@ func TestBuildNFTablesRules(t *testing.T) {
 		"chain output",
 		"priority -100",
 		"meta mark 0x100 return",
-		"meta mark 0x200 return",
+		"meta mark 0x400 return",
 	}
 	for _, want := range wants {
 		if !strings.Contains(rules, want) {
@@ -53,7 +53,7 @@ func TestBuildNFTablesRules(t *testing.T) {
 	if mark, redirect := strings.Index(rules, "meta mark 0x100 return"), strings.LastIndex(rules, "redirect to :12345"); mark < 0 || redirect < 0 || mark > redirect {
 		t.Fatalf("marked URL-test traffic must bypass output redirect before proxy targets\n%s", rules)
 	}
-	if mark, redirect := strings.Index(rules, "meta mark 0x200 return"), strings.LastIndex(rules, "redirect to :12345"); mark < 0 || redirect < 0 || mark > redirect {
+	if mark, redirect := strings.Index(rules, "meta mark 0x400 return"), strings.LastIndex(rules, "redirect to :12345"); mark < 0 || redirect < 0 || mark > redirect {
 		t.Fatalf("marked AmneziaWG traffic must bypass output redirect before proxy targets\n%s", rules)
 	}
 }

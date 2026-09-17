@@ -21,7 +21,10 @@ const (
 	DefaultInterfaceName = "fastlane_awg"
 	FastLaneAWGTool      = "/usr/libexec/fastlane-amneziawg"
 	RouteTable           = 51821
-	RouteMark            = 0x200
+	// RouteMark must not overlap mwan3's 0x100/0x200 policy marks.  The
+	// router may still establish an AWG handshake with an overlapping mark,
+	// while the actual HTTPS traffic is sent through WAN instead of AWG.
+	RouteMark = 0x400
 )
 
 type Compatibility struct {

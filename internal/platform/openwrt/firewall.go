@@ -25,7 +25,9 @@ const (
 	udpTProxyTable    = "100"
 	udpTProxyPriority = "1000"
 	probeBypassMark   = "0x100"
-	awgBypassMark     = "0x200"
+	// Keep in sync with amneziawg.RouteMark.  0x200 is owned by mwan3 on
+	// common OpenWrt images, so AWG uses 0x400.
+	awgBypassMark = "0x400"
 
 	minConntrackMax = 16384
 	maxConntrackMax = 131072
