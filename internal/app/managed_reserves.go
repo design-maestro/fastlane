@@ -311,11 +311,12 @@ func (s *Service) tryManagedReserveFailover(ctx context.Context, snapshot autoSe
 				updated.AutoScope = ""
 			}
 			updated.LastSwitchAt = s.currentTime().UTC()
-			updated.LastSwitchReason = "emergency failover to verified reserve"
+			updated.LastSwitchReason = switchReason("emergency failover", activeNodeLabel(snapshot.subscriptions, snapshot.state), reserve.node, "verified reserve HTTPS GET; "+failureReason)
 			updated.LastFailureReason = failureReason
 			if saveErr := s.saveState(updated); saveErr != nil {
 				return saveErr
 			}
+			s.logInfo("emergency failover applied", "from_node", activeNodeLabel(snapshot.subscriptions, snapshot.state), "to_node", nodeLabel(reserve.node), "result", "verified reserve HTTPS GET", "trigger", failureReason)
 			switched = true
 			return nil
 		}

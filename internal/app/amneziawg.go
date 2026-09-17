@@ -234,6 +234,8 @@ func (s *Service) awgStatusLocked(ctx context.Context, id string) (AWGStatus, er
 	result.Profile = &redacted
 	if profile.Version == amneziawg.VersionLegacy {
 		result.Protocol = "AmneziaWG Legacy"
+	} else if profile.Version == amneziawg.Version31 {
+		result.Protocol = "AmneziaWG 3.1"
 	} else {
 		result.Protocol = "AmneziaWG 2.0"
 	}
@@ -321,6 +323,10 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 	}
 	if prepare {
 		prepared, statusErr := s.awgController.Status(ctx)
+		activeProfile := stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID == id
+		if activeProfile && (statusErr != nil || !prepared.Up || prepared.Device == "" || prepared.Address == "") {
+			return "", prepared, fmt.Errorf("active AmneziaWG profile is unavailable; refusing to replace it during a check")
+		}
 		if stateBefore.PreparedAWGProfileID != id {
 			if err := s.awgController.Remove(ctx); err != nil {
 				return "", amneziawg.InterfaceStatus{}, fmt.Errorf("remove prepared AmneziaWG profile: %w", err)

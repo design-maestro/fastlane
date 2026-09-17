@@ -85,6 +85,7 @@ type awgControllerFake struct {
 	disconnected int
 	removed      int
 	status       amneziawg.InterfaceStatus
+	statusErr    error
 }
 
 func (c *awgControllerFake) Preflight(context.Context) (amneziawg.Compatibility, error) {
@@ -110,7 +111,7 @@ func (c *awgControllerFake) Remove(context.Context) error {
 	return nil
 }
 func (c *awgControllerFake) Status(context.Context) (amneziawg.InterfaceStatus, error) {
-	return c.status, nil
+	return c.status, c.statusErr
 }
 
 type awgManagedBackend struct{ *managedRecordingBackend }
@@ -190,6 +191,37 @@ func TestAWGFailedCheckDoesNotChangeUserRoute(t *testing.T) {
 	}
 	if stateStore.state.AWGLastProbe == nil || stateStore.state.AWGLastProbe.Success {
 		t.Fatalf("probe state = %+v", stateStore.state.AWGLastProbe)
+	}
+}
+
+func TestAWGCheckDoesNotReplaceUnavailableActiveProfile(t *testing.T) {
+	profile, err := amneziawg.Parse([]byte(validAWGProfile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := profile.StableID()
+	state := domain.DefaultRuntimeState()
+	state.ActiveConnectionKind = "amneziawg"
+	state.ActiveAWGProfileID = id
+	state.PreparedAWGProfileID = id
+	state.ActiveSubscriptionID = awgSubscriptionID
+	state.ActiveNodeID = id
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	state.SelectedOutboundTag = "fastlane-node-awg-test"
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: state}
+	profileStore := &awgProfileMemoryStore{raw: []byte(validAWGProfile)}
+	controller := &awgControllerFake{statusErr: errors.New("interface is down")}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: profileStore, AWGController: controller})
+
+	if _, err := service.CheckAWGProfile(context.Background(), id); err == nil || !strings.Contains(err.Error(), "refusing to replace") {
+		t.Fatalf("CheckAWGProfile error = %v", err)
+	}
+	if controller.prepared != 0 || controller.removed != 0 || controller.connected != 0 {
+		t.Fatalf("active profile was changed: prepare/remove/connect=%d/%d/%d", controller.prepared, controller.removed, controller.connected)
+	}
+	if stateStore.state.ActiveAWGProfileID != id || !stateStore.state.Connected || stateStore.state.SelectedOutboundTag != "fastlane-node-awg-test" {
+		t.Fatalf("active route changed: %+v", stateStore.state)
 	}
 }
 

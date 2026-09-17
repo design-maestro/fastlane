@@ -49,7 +49,7 @@ func successfulControllerRunner() *controllerRunner {
 		switch {
 		case joined == "uname -r":
 			return []byte("5.15.150\n"), nil
-		case strings.HasPrefix(joined, "awg --version"):
+		case strings.HasPrefix(joined, FastLaneAWGTool+" --version"):
 			return []byte("amneziawg-tools v2\n"), nil
 		case strings.HasPrefix(joined, "modinfo "):
 			return []byte("5.15.150 SMP mod_unload\n"), nil
@@ -59,7 +59,7 @@ func successfulControllerRunner() *controllerRunner {
 			return nil, errors.New("not installed")
 		case strings.HasPrefix(joined, "ubus call "):
 			return []byte(`{"up":true,"l3_device":"fastlane_awg","ipv4-address":[{"address":"10.8.0.2"}]}`), nil
-		case strings.HasPrefix(joined, "awg show "):
+		case strings.HasPrefix(joined, FastLaneAWGTool+" show "):
 			return []byte(testPublicKey + "\t1700000000\n"), nil
 		default:
 			return nil, nil
@@ -144,7 +144,7 @@ func TestOpenWrtControllerRejectsKernelVermagicMismatch(t *testing.T) {
 		switch {
 		case joined == "uname -r":
 			return []byte("6.6.1\n"), nil
-		case strings.HasPrefix(joined, "awg --version"):
+		case strings.HasPrefix(joined, FastLaneAWGTool+" --version"):
 			return []byte("v2\n"), nil
 		case strings.HasPrefix(joined, "modinfo "):
 			return []byte("5.15.150 SMP\n"), nil
@@ -171,7 +171,7 @@ func TestOpenWrtControllerAcceptsUserspaceRuntimeWithoutKernelModule(t *testing.
 		switch {
 		case joined == "uname -r":
 			return []byte("6.6.134+\n"), nil
-		case joined == "awg --version":
+		case joined == FastLaneAWGTool+" --version":
 			return []byte("amneziawg-tools v1.0.20260618-2\n"), nil
 		case strings.HasPrefix(joined, "modinfo "):
 			return nil, errors.New("module not found")
@@ -183,7 +183,7 @@ func TestOpenWrtControllerAcceptsUserspaceRuntimeWithoutKernelModule(t *testing.
 	}
 	controller := newControllerForTest(t, runner)
 	protoPath := filepath.Join(controller.SysRoot, "lib/netifd/proto/amneziawg.sh")
-	if err := os.WriteFile(protoPath, []byte("#!/bin/sh\namneziawg-go --version\n"), 0o755); err != nil {
+	if err := os.WriteFile(protoPath, []byte("#!/bin/sh\nAWG="+FastLaneAWGTool+"\namneziawg-go --version\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	tunPath := filepath.Join(controller.SysRoot, "dev/net/tun")
@@ -199,13 +199,70 @@ func TestOpenWrtControllerAcceptsUserspaceRuntimeWithoutKernelModule(t *testing.
 	}
 }
 
+func TestOpenWrtControllerPreparesAWG31OnlyWithCompatibleBundledChain(t *testing.T) {
+	profile, err := Parse([]byte(validProfile("Version = 3.1\nHeaderProtectionKey = " + testPrivateKey + "\nContentPaddingAddition = 10\nRekeyAfterTime = 60\nRekeyTimeout = 5\nRejectAfterTime = 120\nKeepaliveTimeout = 9\nMaxHandshakeAttempts = 7\nRandomTrailers = true\nDisableCookies = false")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := successfulControllerRunner()
+	runner.run = func(call controllerCall) ([]byte, error) {
+		joined := call.name + " " + strings.Join(call.args, " ")
+		switch joined {
+		case "uname -r":
+			return []byte("6.6.134+\n"), nil
+		case FastLaneAWGTool + " --version":
+			return []byte("amneziawg-tools v3.1.20260812\n"), nil
+		case "amneziawg-go --version":
+			return []byte("amneziawg-go v3.1.20260828\n"), nil
+		default:
+			return nil, nil
+		}
+	}
+	controller := newControllerForTest(t, runner)
+	protoPath := filepath.Join(controller.SysRoot, "lib/netifd/proto/amneziawg.sh")
+	if err := os.WriteFile(protoPath, []byte("#!/bin/sh\nAWG="+FastLaneAWGTool+"\namneziawg-go\nawg_header_protection_key\nawg_random_trailers\nawg_force_userspace\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tunPath := filepath.Join(controller.SysRoot, "dev/net/tun")
+	if err := os.MkdirAll(filepath.Dir(tunPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tunPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Prepare(context.Background(), profile); err != nil {
+		t.Fatalf("prepare AWG 3.1: %v", err)
+	}
+	var batch string
+	for _, call := range runner.calls {
+		if call.name == "uci" && len(call.stdin) > 0 {
+			batch = string(call.stdin)
+		}
+	}
+	if !strings.Contains(batch, "awg_force_userspace='1'") {
+		t.Fatalf("AWG 3.1 UCI batch must force userspace runtime:\n%s", batch)
+	}
+}
+
+func TestOpenWrtControllerRejectsAWG31WithOldBundledTools(t *testing.T) {
+	profile, err := Parse([]byte(validProfile("Version = 3.1\nHeaderProtectionKey = " + testPrivateKey + "\nContentPaddingAddition = 10\nRekeyAfterTime = 60\nRekeyTimeout = 5\nRejectAfterTime = 120\nKeepaliveTimeout = 9\nMaxHandshakeAttempts = 7\nRandomTrailers = true\nDisableCookies = false")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := successfulControllerRunner()
+	controller := newControllerForTest(t, runner)
+	if err := controller.Prepare(context.Background(), profile); err == nil || !strings.Contains(err.Error(), "incompatible with AWG 3.1") {
+		t.Fatalf("prepare error = %v", err)
+	}
+}
+
 func TestOpenWrtControllerRejectsUserspaceWithoutTUN(t *testing.T) {
 	runner := &controllerRunner{run: func(call controllerCall) ([]byte, error) {
 		joined := call.name + " " + strings.Join(call.args, " ")
 		switch {
 		case joined == "uname -r":
 			return []byte("6.6.134+\n"), nil
-		case joined == "awg --version":
+		case joined == FastLaneAWGTool+" --version":
 			return []byte("amneziawg-tools v2\n"), nil
 		case strings.HasPrefix(joined, "modinfo "):
 			return nil, errors.New("module not found")
@@ -217,7 +274,7 @@ func TestOpenWrtControllerRejectsUserspaceWithoutTUN(t *testing.T) {
 	}}
 	controller := newControllerForTest(t, runner)
 	protoPath := filepath.Join(controller.SysRoot, "lib/netifd/proto/amneziawg.sh")
-	if err := os.WriteFile(protoPath, []byte("#!/bin/sh\namneziawg-go --version\n"), 0o755); err != nil {
+	if err := os.WriteFile(protoPath, []byte("#!/bin/sh\nAWG="+FastLaneAWGTool+"\namneziawg-go --version\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	status, err := controller.Preflight(context.Background())
@@ -233,7 +290,7 @@ func TestOpenWrtControllerUsesOpenWrtKernelABIWhenModinfoIsMissing(t *testing.T)
 		switch {
 		case joined == "uname -r":
 			return []byte("6.6.119\n"), nil
-		case joined == "awg --version":
+		case joined == FastLaneAWGTool+" --version":
 			return []byte("amneziawg-tools v2\n"), nil
 		case strings.HasPrefix(joined, "modinfo "):
 			return nil, errors.New("not found")

@@ -19,6 +19,7 @@ import (
 
 const (
 	DefaultInterfaceName = "fastlane_awg"
+	FastLaneAWGTool      = "/usr/libexec/fastlane-amneziawg"
 	RouteTable           = 51821
 	RouteMark            = 0x200
 )
@@ -87,9 +88,9 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 		return result, errors.New(result.FailureReason)
 	}
 	result.Netifd = true
-	tools, err := c.run(ctx, nil, "awg", "--version")
+	tools, err := c.run(ctx, nil, FastLaneAWGTool, "--version")
 	if err != nil {
-		result.FailureReason = "amneziawg-tools are not installed"
+		result.FailureReason = "Fast Lane AmneziaWG tools are not installed"
 		return result, errors.New(result.FailureReason)
 	}
 	result.Tools = strings.TrimSpace(string(tools))
@@ -101,7 +102,7 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 			return false
 		}
 		protoScript, readErr := os.ReadFile(protoPath)
-		if readErr != nil || !bytes.Contains(protoScript, []byte("amneziawg-go")) {
+		if readErr != nil || !bytes.Contains(protoScript, []byte("amneziawg-go")) || !bytes.Contains(protoScript, []byte(FastLaneAWGTool)) {
 			userspaceFailure = "installed AmneziaWG netifd protocol does not support amneziawg-go"
 			return false
 		}
@@ -112,6 +113,12 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 		result.Runtime = strings.TrimSpace(string(version))
 		result.Compatible = true
 		return true
+	}
+	// Fast Lane ships and owns the userspace chain. Prefer it to probing a
+	// possibly absent kernel module: some BusyBox builds print diagnostics for
+	// an unsupported modinfo invocation on every health check.
+	if userspaceAvailable() {
+		return result, nil
 	}
 	fallbackFailure := func(primary string) string {
 		if userspaceFailure != "" {
@@ -186,12 +193,16 @@ func packageField(control, name string) string {
 }
 
 func (c *OpenWrtController) Prepare(ctx context.Context, profile Profile) error {
-	if _, err := c.Preflight(ctx); err != nil {
+	compatibility, err := c.Preflight(ctx)
+	if err != nil {
 		return err
 	}
 	if profile.Version == Version31 {
+		if !strings.Contains(compatibility.Tools, "v3.1.") || !strings.Contains(compatibility.Runtime, "v3.1.") {
+			return fmt.Errorf("installed Fast Lane AmneziaWG runtime is incompatible with AWG 3.1")
+		}
 		proto, err := os.ReadFile(c.rooted("lib/netifd/proto/amneziawg.sh"))
-		if err != nil || !bytes.Contains(proto, []byte("awg_header_protection_key")) || !bytes.Contains(proto, []byte("awg_random_trailers")) {
+		if err != nil || !bytes.Contains(proto, []byte("awg_header_protection_key")) || !bytes.Contains(proto, []byte("awg_random_trailers")) || !bytes.Contains(proto, []byte("awg_force_userspace")) {
 			return fmt.Errorf("installed AmneziaWG netifd protocol does not support AWG 3.1")
 		}
 	}
@@ -289,7 +300,7 @@ func (c *OpenWrtController) Status(ctx context.Context) (InterfaceStatus, error)
 		status.Address = raw.IPv6[0].Address
 	}
 	if raw.Up {
-		if handshakes, showErr := c.run(ctx, nil, "awg", "show", c.interfaceName(), "latest-handshakes"); showErr == nil {
+		if handshakes, showErr := c.run(ctx, nil, FastLaneAWGTool, "show", c.interfaceName(), "latest-handshakes"); showErr == nil {
 			for _, field := range strings.Fields(string(handshakes)) {
 				if value, parseErr := strconv.ParseInt(field, 10, 64); parseErr == nil && value > status.LastHandshake {
 					status.LastHandshake = value
@@ -370,6 +381,7 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 		}
 	}
 	if profile.Version == Version31 {
+		set(name, "awg_force_userspace", "1")
 		v := profile.Interface.V31
 		if v.HeaderProtectionKey.present() {
 			set(name, "awg_header_protection_key", v.HeaderProtectionKey.base64())

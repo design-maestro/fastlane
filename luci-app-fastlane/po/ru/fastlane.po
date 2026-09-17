@@ -1266,6 +1266,9 @@ msgstr "Точка подключения"
 msgid "AWG 2.0"
 msgstr "AWG 2.0"
 
+msgid "AWG profiles"
+msgstr "Профили AWG"
+
 msgid "Experimental. It does not participate in automatic selection."
 msgstr "Экспериментально. Не участвует в автовыборе."
 

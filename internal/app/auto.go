@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/design-maestro/fastlane/internal/backend"
@@ -383,11 +384,12 @@ func (s *Service) runManualFailoverWithSnapshot(ctx context.Context, failureReas
 		updated.Mode = domain.SelectionModeManual
 		updated.AutoScope = ""
 		updated.LastSwitchAt = s.currentTime().UTC()
-		updated.LastSwitchReason = "manual emergency failover"
+		updated.LastSwitchReason = switchReason("manual emergency failover", activeNodeLabel(snapshot.subscriptions, snapshot.state), prepared.decision.SelectedNode, "verified HTTPS GET; "+failureReason)
 		updated.LastFailureReason = failureReason
 		if err := s.saveState(updated); err != nil {
 			return fmt.Errorf("save manual failover state: %w", err)
 		}
+		s.logInfo("manual emergency failover applied", "from_node", activeNodeLabel(snapshot.subscriptions, snapshot.state), "to_node", nodeLabel(prepared.decision.SelectedNode), "result", "verified HTTPS GET", "trigger", failureReason)
 		return nil
 	})
 }
@@ -866,7 +868,12 @@ func (s *Service) commitAutoSelection(ctx context.Context, sub domain.Subscripti
 	state.LastTransportFailureReason = ""
 	if decision.Switch {
 		state.LastSwitchAt = s.currentTime().UTC()
-		state.LastSwitchReason = decision.Reason
+		previous := currentState.ActiveNodeID
+		if node, ok := sub.NodeByID(currentState.ActiveNodeID); ok {
+			previous = nodeLabel(node)
+		}
+		state.LastSwitchReason = switchReason("automatic optimization", previous, decision.SelectedNode, decision.Reason)
+		s.logInfo("automatic server switch applied", "from_node", previous, "to_node", nodeLabel(decision.SelectedNode), "reason", decision.Reason)
 	}
 
 	if err := s.saveState(state); err != nil {
@@ -874,6 +881,41 @@ func (s *Service) commitAutoSelection(ctx context.Context, sub domain.Subscripti
 	}
 
 	return decision.SelectedNode, nil
+}
+
+func switchReason(kind, previousID string, next domain.Node, details string) string {
+	previousID = strings.TrimSpace(previousID)
+	if previousID == "" {
+		previousID = "none"
+	}
+	return fmt.Sprintf("%s: %s -> %s; %s", kind, previousID, nodeLabel(next), strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(details), "\n", " "), "\r", " "))
+}
+
+func activeNodeLabel(subscriptions []domain.Subscription, state domain.RuntimeState) string {
+	for _, sub := range subscriptions {
+		if sub.ID != state.ActiveSubscriptionID {
+			continue
+		}
+		if node, ok := sub.NodeByID(state.ActiveNodeID); ok {
+			return nodeLabel(node)
+		}
+	}
+	return state.ActiveNodeID
+}
+
+func nodeLabel(node domain.Node) string {
+	name := strings.TrimSpace(node.Name)
+	id := strings.TrimSpace(node.ID)
+	if name == "" {
+		if id == "" {
+			return "unknown"
+		}
+		return id
+	}
+	if id == "" || id == name {
+		return name
+	}
+	return name + " [" + id + "]"
 }
 
 func (s *Service) persistAutoFailure(ctx context.Context, sub domain.Subscription, state domain.RuntimeState, decision autoSelectionDecision) error {

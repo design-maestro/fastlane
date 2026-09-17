@@ -2,7 +2,7 @@
 # Fast Lane-owned AmneziaWG netifd protocol. Supports amneziawg-go v3.1.
 # Based on the upstream amneziawg-tools protocol handler (Apache-2.0).
 
-AWG=/usr/bin/awg
+AWG=/usr/libexec/fastlane-amneziawg
 [ -n "$INCLUDE_ONLY" ] || { . /lib/functions.sh; . ../netifd-proto.sh; init_proto "$@"; }
 
 proto_amneziawg_init_config() {
@@ -23,11 +23,11 @@ proto_amneziawg_init_config() {
 	proto_config_add_string awg_max_handshake_attempts
 	proto_config_add_boolean awg_random_trailers
 	proto_config_add_boolean awg_disable_cookies
+	proto_config_add_boolean awg_force_userspace
 	available=1; no_proto_task=1
 }
 
 proto_amneziawg_kernel() {
-	[ -e /sys/module/amneziawg ] || modprobe amneziawg >/dev/null 2>&1 || true
 	[ -e /sys/module/amneziawg ]
 }
 
@@ -48,18 +48,35 @@ proto_amneziawg_peer() {
 proto_amneziawg_emit() { local value; config_get value "$config" "$1"; [ -n "$value" ] && echo "$2=$value" >> "$awg_cfg"; }
 
 proto_amneziawg_setup() {
-	local config="$1" private_key addresses mtu
+	local config="$1" private_key addresses mtu force_userspace result awg_cfg="" awg_err=""
 	config_load network
 	config_get private_key "$config" private_key
 	config_get addresses "$config" addresses
 	config_get mtu "$config" mtu
-	[ -n "$private_key" ] || { proto_setup_failed "$config"; return 1; }
-	if proto_amneziawg_kernel; then ip link del dev "$config" 2>/dev/null; ip link add dev "$config" type amneziawg
-	elif command -v amneziawg-go >/dev/null; then rm -f "/var/run/amneziawg/$config.sock"; amneziawg-go "$config"
-	else proto_setup_failed "$config"; return 1; fi
+	config_get_bool force_userspace "$config" awg_force_userspace 0
+	proto_amneziawg_fail() {
+		logger -t fastlane-awg "interface $config configuration rejected"
+		rm -f "$awg_cfg" "$awg_err"
+		ip link del dev "$config" 2>/dev/null || true
+		rm -f "/var/run/amneziawg/$config.sock"
+		proto_block_restart "$config"
+		proto_setup_failed "$config"
+		return 1
+	}
+	[ -n "$private_key" ] || { proto_amneziawg_fail; return 1; }
+	if [ "$force_userspace" = 1 ]; then
+		command -v amneziawg-go >/dev/null || { proto_amneziawg_fail; return 1; }
+		ip link del dev "$config" 2>/dev/null || true
+		rm -f "/var/run/amneziawg/$config.sock"
+		amneziawg-go "$config" >/dev/null 2>&1 || { proto_amneziawg_fail; return 1; }
+	elif proto_amneziawg_kernel; then
+		ip link del dev "$config" 2>/dev/null
+		ip link add dev "$config" type amneziawg || { proto_amneziawg_fail; return 1; }
+	elif command -v amneziawg-go >/dev/null; then rm -f "/var/run/amneziawg/$config.sock"; amneziawg-go "$config" >/dev/null 2>&1 || { proto_amneziawg_fail; return 1; }
+	else proto_amneziawg_fail; return 1; fi
 	[ -n "$mtu" ] && ip link set mtu "$mtu" dev "$config"
 	proto_init_update "$config" 1
-	umask 077; mkdir -p /tmp/amneziawg; awg_cfg="/tmp/amneziawg/$config"
+	umask 077; mkdir -p /tmp/amneziawg; awg_cfg="/tmp/amneziawg/$config"; awg_err="${awg_cfg}.err"
 	echo '[Interface]' > "$awg_cfg"; echo "PrivateKey=$private_key" >> "$awg_cfg"
 	proto_amneziawg_emit listen_port ListenPort; proto_amneziawg_emit fwmark FwMark
 	proto_amneziawg_emit awg_jc Jc; proto_amneziawg_emit awg_jmin Jmin; proto_amneziawg_emit awg_jmax Jmax
@@ -73,8 +90,8 @@ proto_amneziawg_setup() {
 	proto_amneziawg_emit awg_max_handshake_attempts MaxHandshakeAttempts
 	proto_amneziawg_emit awg_random_trailers RandomTrailers; proto_amneziawg_emit awg_disable_cookies DisableCookies
 	config_foreach proto_amneziawg_peer "amneziawg_$config"
-	"$AWG" setconf "$config" "$awg_cfg"; result=$?; rm -f "$awg_cfg"
-	[ "$result" -eq 0 ] || { proto_setup_failed "$config"; return 1; }
+	"$AWG" setconf "$config" "$awg_cfg" >/dev/null 2>"$awg_err"; result=$?; rm -f "$awg_cfg" "$awg_err"
+	[ "$result" -eq 0 ] || { proto_amneziawg_fail; return 1; }
 	for address in $addresses; do case "$address" in *:*/*) proto_add_ipv6_address "${address%%/*}" "${address##*/}";; *.*/*) proto_add_ipv4_address "${address%%/*}" "${address##*/}";; esac; done
 	proto_send_update "$config"
 }

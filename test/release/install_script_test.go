@@ -280,13 +280,14 @@ func TestInstallScriptUsesApprovedLocalAssetsAndPreservesSettings(t *testing.T) 
 		t.Fatal("temporary executable left behind", matches)
 	}
 	for relativePath, want := range map[string]string{
-		"etc/uci-defaults/luci-i18n-fastlane-ru":             "#!/bin/sh\nexit 0\n",
-		"usr/lib/lua/luci/i18n/fastlane.ru.lmo":              "compiled translation",
-		"usr/share/licenses/fastlane/LICENSE":                "license\n",
-		"usr/share/licenses/fastlane/NOTICE":                 "notice\n",
-		"usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md": "third party\n",
-		"usr/share/licenses/fastlane/UPSTREAM-MIT.txt":       "upstream MIT\n",
-		"usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt":   "AWG MIT\n",
+		"etc/uci-defaults/luci-i18n-fastlane-ru":                  "#!/bin/sh\nexit 0\n",
+		"usr/lib/lua/luci/i18n/fastlane.ru.lmo":                   "compiled translation",
+		"usr/share/licenses/fastlane/LICENSE":                     "license\n",
+		"usr/share/licenses/fastlane/NOTICE":                      "notice\n",
+		"usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md":      "third party\n",
+		"usr/share/licenses/fastlane/UPSTREAM-MIT.txt":            "upstream MIT\n",
+		"usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt":        "AWG MIT\n",
+		"usr/share/licenses/fastlane/AMNEZIAWG-TOOLS-GPL-2.0.txt": "AWG GPL\n",
 	} {
 		data, readErr := os.ReadFile(filepath.Join(root, relativePath))
 		if readErr != nil || string(data) != want {
@@ -1018,6 +1019,7 @@ func writeTestTarball(t *testing.T, path string, serviceScripts ...string) {
 	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md", 0o644, "third party\n")
 	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/UPSTREAM-MIT.txt", 0o644, "upstream MIT\n")
 	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt", 0o644, "AWG MIT\n")
+	addTarFile(t, tw, "./usr/libexec/fastlane-release-data/usr/share/licenses/fastlane/AMNEZIAWG-TOOLS-GPL-2.0.txt", 0o644, "AWG GPL\n")
 	addTarFile(t, tw, "./www/luci-static/resources/view/fastlane/overview.js", 0o644, "'use strict';\n")
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)

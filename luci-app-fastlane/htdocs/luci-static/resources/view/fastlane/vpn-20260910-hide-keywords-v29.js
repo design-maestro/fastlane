@@ -1310,7 +1310,8 @@ return view.extend({
 			var awg = awgs[i];
 			if (!awg || !awg.profile) continue;
 			var endpoint = trim(awg.profile.endpoint);
-			var version = trim(awg.profile.version) === 'legacy' ? 'Legacy' : '2.0';
+			var profileVersion = trim(awg.profile.version);
+			var version = profileVersion === 'legacy' ? 'Legacy' : (profileVersion === '3.1' ? '3.1' : '2.0');
 			serverList.nodes.push({
 					id: awg.id,
 					kind: 'awg',
@@ -1508,7 +1509,7 @@ return view.extend({
 		return E('section', { class: 'fl-awg-card', 'aria-label': _('AmneziaWG profile') }, [
 			E('div', { class: 'fl-awg-head' }, [
 				E('div', {}, [
-					E('div', { class: 'fl-awg-title-row' }, [ E('h2', { class: 'fl-awg-title' }, [ _('AmneziaWG') ]), E('span', { class: 'fl-awg-badge' }, [ _('AWG 2.0') ]) ]),
+					E('div', { class: 'fl-awg-title-row' }, [ E('h2', { class: 'fl-awg-title' }, [ _('AmneziaWG') ]), E('span', { class: 'fl-awg-badge' }, [ _('AWG profiles') ]) ]),
 					E('p', { class: 'fl-awg-description' }, [ _('Imported profiles participate in shared GET checks and automatic selection.') ])
 				]),
 				E('div', { class: 'fl-awg-state fl-awg-state-' + presentation.tone, role: 'status', 'aria-live': 'polite' }, [
@@ -1583,7 +1584,8 @@ return view.extend({
 		for (var i = 0; i < rows.length; i++) {
 			var row = rows[i], isAWG = row.node.kind === 'awg', active = vpnActive && state.active_subscription_id === row.sub.id && state.active_node_id === row.node.id && state.connected;
 			var rowAWGStatus = isAWG ? this.awgStatusByID(row.node.id) : {};
-			var awgVersion = isAWG && trim(rowAWGStatus.profile && rowAWGStatus.profile.version) === 'legacy' ? 'Legacy' : '2.0';
+			var rowProfileVersion = trim(rowAWGStatus.profile && rowAWGStatus.profile.version);
+			var awgVersion = isAWG ? (rowProfileVersion === 'legacy' ? 'Legacy' : (rowProfileVersion === '3.1' ? '3.1' : '2.0')) : '';
 			var actionKey = row.sub.id + ':' + row.node.id;
 			var expired = isSubscriptionExpired(row.sub);
 			var testing = isAWG ? this.awgBusyProfileID === row.node.id : !!this.testingNodes[row.sub.id + ':' + row.node.id];

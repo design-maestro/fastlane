@@ -6,6 +6,8 @@ ARCH="${ARCH:-mipsel_24kc}"
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 BINARY_PATH="${BINARY_PATH:-${ROOT_DIR}/bin/openwrt/fastlane}"
 AWG_BINARY_PATH="${AWG_BINARY_PATH:-$(dirname "${BINARY_PATH}")/amneziawg-go}"
+AWG_TOOL_BINARY_PATH="${AWG_TOOL_BINARY_PATH:-$(dirname "${BINARY_PATH}")/amneziawg}"
+AWG_TOOL_LICENSE_PATH="${AWG_TOOL_LICENSE_PATH:-$(dirname "${AWG_TOOL_BINARY_PATH}")/amneziawg-tools-COPYING}"
 DATA_DIR="${PKG_DIR}/data"
 RELEASE_DATA_DIR="${PKG_DIR}/release-data"
 CONTROL_DIR="${PKG_DIR}/control"
@@ -55,6 +57,10 @@ if [ -f "${AWG_BINARY_PATH}" ]; then
 	cp "${AWG_BINARY_PATH}" "${DATA_DIR}/usr/libexec/fastlane-amneziawg-go"
 	chmod 0755 "${DATA_DIR}/usr/libexec/fastlane-amneziawg-go"
 fi
+[ -x "${AWG_TOOL_BINARY_PATH}" ] || { printf '%s\n' 'missing Fast Lane AmneziaWG tools binary' >&2; exit 1; }
+[ -f "${AWG_TOOL_LICENSE_PATH}" ] || { printf '%s\n' 'missing AmneziaWG tools license' >&2; exit 1; }
+cp "${AWG_TOOL_BINARY_PATH}" "${DATA_DIR}/usr/libexec/fastlane-amneziawg"
+chmod 0755 "${DATA_DIR}/usr/libexec/fastlane-amneziawg"
 cp -R "${ROOT_DIR}/openwrt/root/." "${DATA_DIR}/"
 cp "${ROOT_DIR}/openwrt/root/lib/netifd/proto/amneziawg.sh" "${DATA_DIR}/usr/libexec/fastlane-amneziawg-proto"
 cp "${ROOT_DIR}/scripts/uninstall.sh" "${DATA_DIR}/usr/libexec/fastlane-uninstall"
@@ -63,6 +69,7 @@ cp "${ROOT_DIR}/NOTICE" "${DATA_DIR}/usr/share/licenses/fastlane/NOTICE"
 cp "${ROOT_DIR}/THIRD_PARTY_NOTICES.md" "${DATA_DIR}/usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md"
 cp "${ROOT_DIR}/LICENSES/UPSTREAM-MIT.txt" "${DATA_DIR}/usr/share/licenses/fastlane/UPSTREAM-MIT.txt"
 cp "${ROOT_DIR}/LICENSES/AMNEZIAWG-GO-MIT.txt" "${DATA_DIR}/usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt"
+cp "${AWG_TOOL_LICENSE_PATH}" "${DATA_DIR}/usr/share/licenses/fastlane/AMNEZIAWG-TOOLS-GPL-2.0.txt"
 [ -d "${DATA_DIR}/etc/init.d" ] && find "${DATA_DIR}/etc/init.d" -type f -exec chmod 0755 {} \;
 [ -d "${DATA_DIR}/usr/libexec" ] && find "${DATA_DIR}/usr/libexec" -type f -exec chmod 0755 {} \;
 [ -d "${DATA_DIR}/lib/netifd/proto" ] && find "${DATA_DIR}/lib/netifd/proto" -type f -exec chmod 0755 {} \;
@@ -253,7 +260,8 @@ for relative_path in \
 	usr/share/licenses/fastlane/NOTICE \
 	usr/share/licenses/fastlane/THIRD_PARTY_NOTICES.md \
 	usr/share/licenses/fastlane/UPSTREAM-MIT.txt \
-	usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt
+	usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt \
+	usr/share/licenses/fastlane/AMNEZIAWG-TOOLS-GPL-2.0.txt
 do
 	source_path="${RELEASE_DATA_DIR}/${relative_path}"
 	compat_path="${RELEASE_DATA_DIR}/usr/libexec/fastlane-release-data/${relative_path}"

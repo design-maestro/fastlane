@@ -9,6 +9,7 @@ FASTLANE_BIN="/usr/bin/fastlane"
 FASTLANE_CRON_HELPER="/usr/libexec/fastlane-cron"
 FASTLANE_AWG_RUNTIME_SOURCE="/usr/libexec/fastlane-amneziawg-go"
 FASTLANE_AWG_RUNTIME_TARGET="/usr/bin/amneziawg-go"
+FASTLANE_AWG_TOOL="/usr/libexec/fastlane-amneziawg"
 FASTLANE_AWG_PROTO_SOURCE="/usr/libexec/fastlane-amneziawg-proto"
 FASTLANE_AWG_PROTO_TARGET="/lib/netifd/proto/amneziawg.sh"
 FASTLANE_RUNTIME_ROOT="/tmp/fastlane-runtime"
@@ -17,6 +18,7 @@ install_awg_runtime() {
 	local staged
 
 	[ -x "${FASTLANE_AWG_RUNTIME_SOURCE}" ] || return 0
+	[ -x "${FASTLANE_AWG_TOOL}" ] || return 1
 	if [ -x "${FASTLANE_AWG_RUNTIME_TARGET}" ] && cmp -s "${FASTLANE_AWG_RUNTIME_SOURCE}" "${FASTLANE_AWG_RUNTIME_TARGET}"; then
 		return 0
 	fi
