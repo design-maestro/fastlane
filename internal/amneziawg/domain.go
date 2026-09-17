@@ -16,6 +16,7 @@ import (
 const (
 	VersionLegacy = "legacy"
 	Version20     = "2.0"
+	Version31     = "3.1"
 	redacted      = "[redacted]"
 )
 
@@ -80,13 +81,29 @@ type Interface struct {
 	Addresses   []netip.Prefix `json:"addresses"`
 	MTU         uint16         `json:"mtu,omitempty"`
 	Obfuscation Obfuscation    `json:"obfuscation"`
+	V31         V31Parameters  `json:"v31,omitempty"`
+}
+
+// V31Parameters contains the additional device settings introduced by
+// amneziawg-go 3.1. Values are kept typed so malformed profiles cannot turn
+// into shell arguments during the OpenWrt hand-off.
+type V31Parameters struct {
+	HeaderProtectionKey    PrivateKey  `json:"header_protection_key,omitempty"`
+	ContentPaddingAddition Uint32Range `json:"content_padding_addition,omitempty"`
+	RekeyAfterTime         Uint32Range `json:"rekey_after_time,omitempty"`
+	RekeyTimeout           Uint32Range `json:"rekey_timeout,omitempty"`
+	RejectAfterTime        Uint32Range `json:"reject_after_time,omitempty"`
+	KeepaliveTimeout       Uint32Range `json:"keepalive_timeout,omitempty"`
+	MaxHandshakeAttempts   Uint32Range `json:"max_handshake_attempts,omitempty"`
+	RandomTrailers         bool        `json:"random_trailers,omitempty"`
+	DisableCookies         bool        `json:"disable_cookies,omitempty"`
 }
 
 // Peer describes the safe, runtime-relevant part of the single [Peer].
 type Peer struct {
 	PublicKey           PublicKey    `json:"public_key"`
 	Endpoint            string       `json:"endpoint"`
-	PersistentKeepalive uint16       `json:"persistent_keepalive,omitempty"`
+	PersistentKeepalive Uint32Range  `json:"persistent_keepalive,omitempty"`
 	PresharedKey        PresharedKey `json:"preshared_key,omitempty"`
 }
 
@@ -121,7 +138,7 @@ func (p Profile) StableID() string {
 		Obfuscation       Obfuscation
 		PublicKey         PublicKey
 		Endpoint          string
-		Keepalive         uint16
+		Keepalive         Uint32Range
 		PresharedKey      [32]byte
 		PresharedKeyIsSet bool
 	}{

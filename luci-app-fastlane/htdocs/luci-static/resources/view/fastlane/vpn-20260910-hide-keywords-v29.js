@@ -1128,7 +1128,7 @@ return view.extend({
 		var filePane = E('div', { class: 'fl-add-pane', hidden: 'hidden' }, [
 			E('label', { class: 'fl-file-picker' }, [ files, E('span', {}, [ E('strong', {}, [ _('Choose configuration files') ]), _('You can add several files at once') ]) ]),
 			fileList,
-			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('Use Clash/Mihomo YAML, a provider file, or an AmneziaWG Legacy/2.0 .conf profile.') ])
+			E('p', { class: 'fl-modal-help fl-dialog-help' }, [ _('Use Clash/Mihomo YAML, a provider file, or an AmneziaWG Legacy/2.0/3.1 .conf profile.') ])
 		]);
 		var mode = 'subscription';
 		var subscriptionButton = E('button', { class: 'fl-add-mode-button fl-add-mode-button-active', type: 'button' }, [ _('Subscription') ]);

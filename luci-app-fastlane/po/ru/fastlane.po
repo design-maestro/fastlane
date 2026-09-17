@@ -1332,8 +1332,8 @@ msgstr "Импортируйте конфигурацию AmneziaWG."
 msgid "Traffic is using the AmneziaWG tunnel."
 msgstr "Трафик идёт через туннель AmneziaWG."
 
-msgid "Use Clash/Mihomo YAML, a provider file, or an AmneziaWG Legacy/2.0 .conf profile."
-msgstr "Используйте Clash/Mihomo YAML, provider-файл или профиль AmneziaWG Legacy/2.0 в формате .conf."
+msgid "Use Clash/Mihomo YAML, a provider file, or an AmneziaWG Legacy/2.0/3.1 .conf profile."
+msgstr "Используйте Clash/Mihomo YAML, provider-файл или профиль AmneziaWG Legacy/2.0/3.1 в формате .conf."
 
 msgid "AmneziaWG profile"
 msgstr "Профиль AmneziaWG"

@@ -64,6 +64,7 @@ cp "${ROOT_DIR}/LICENSES/UPSTREAM-MIT.txt" "${DATA_DIR}/usr/share/licenses/fastl
 cp "${ROOT_DIR}/LICENSES/AMNEZIAWG-GO-MIT.txt" "${DATA_DIR}/usr/share/licenses/fastlane/AMNEZIAWG-GO-MIT.txt"
 [ -d "${DATA_DIR}/etc/init.d" ] && find "${DATA_DIR}/etc/init.d" -type f -exec chmod 0755 {} \;
 [ -d "${DATA_DIR}/usr/libexec" ] && find "${DATA_DIR}/usr/libexec" -type f -exec chmod 0755 {} \;
+[ -d "${DATA_DIR}/lib/netifd/proto" ] && find "${DATA_DIR}/lib/netifd/proto" -type f -exec chmod 0755 {} \;
 cp "${ROOT_DIR}/luci-app-fastlane/root/usr/share/luci/menu.d/luci-app-fastlane.json" \
 	"${DATA_DIR}/usr/share/luci/menu.d/luci-app-fastlane.json"
 cp "${ROOT_DIR}/luci-app-fastlane/root/usr/share/rpcd/acl.d/luci-app-fastlane.json" \
@@ -140,7 +141,7 @@ harden_secret_storage() {
 			/etc/fastlane/settings.json \
 		/etc/fastlane/state.json \
 			/etc/fastlane/amneziawg.conf \
-			/etc/fastlane/amneziawg-profiles.json \
+		/etc/fastlane/amneziawg-profiles.json \
 			/etc/fastlane/.fastlane.lock \
 			/etc/fastlane/speedtest.lock
 		do

@@ -189,6 +189,12 @@ func (c *OpenWrtController) Prepare(ctx context.Context, profile Profile) error 
 	if _, err := c.Preflight(ctx); err != nil {
 		return err
 	}
+	if profile.Version == Version31 {
+		proto, err := os.ReadFile(c.rooted("lib/netifd/proto/amneziawg.sh"))
+		if err != nil || !bytes.Contains(proto, []byte("awg_header_protection_key")) || !bytes.Contains(proto, []byte("awg_random_trailers")) {
+			return fmt.Errorf("installed AmneziaWG netifd protocol does not support AWG 3.1")
+		}
+	}
 	batch, err := c.uciBatch(profile)
 	if err != nil {
 		return err
@@ -315,7 +321,7 @@ func (c *OpenWrtController) installPolicyRoutes(ctx context.Context, status Inte
 }
 
 func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
-	if (profile.Version != VersionLegacy && profile.Version != Version20) || len(profile.Interface.Addresses) == 0 {
+	if (profile.Version != VersionLegacy && profile.Version != Version20 && profile.Version != Version31) || len(profile.Interface.Addresses) == 0 {
 		return nil, fmt.Errorf("invalid AmneziaWG runtime profile")
 	}
 	host, port, err := net.SplitHostPort(profile.Peer.Endpoint)
@@ -346,7 +352,7 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 	set(name, "awg_jmin", strconv.Itoa(int(o.JunkPacketMinSize)))
 	set(name, "awg_jmax", strconv.Itoa(int(o.JunkPacketMaxSize)))
 	packetJunkCount := 2
-	if profile.Version == Version20 {
+	if profile.Version == Version20 || profile.Version == Version31 {
 		packetJunkCount = len(o.PacketJunkSizes)
 	}
 	for index := 0; index < packetJunkCount; index++ {
@@ -356,12 +362,26 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 	for index, value := range o.MagicHeaders {
 		set(name, fmt.Sprintf("awg_h%d", index+1), formatRange(value))
 	}
-	if profile.Version == Version20 {
+	if profile.Version == Version20 || profile.Version == Version31 {
 		for index, value := range o.SpecialJunk {
 			if value != "" {
 				set(name, fmt.Sprintf("awg_i%d", index+1), value)
 			}
 		}
+	}
+	if profile.Version == Version31 {
+		v := profile.Interface.V31
+		if v.HeaderProtectionKey.present() {
+			set(name, "awg_header_protection_key", v.HeaderProtectionKey.base64())
+		}
+		set(name, "awg_content_padding_addition", formatRange(v.ContentPaddingAddition))
+		set(name, "awg_rekey_after_time", formatRange(v.RekeyAfterTime))
+		set(name, "awg_rekey_timeout", formatRange(v.RekeyTimeout))
+		set(name, "awg_reject_after_time", formatRange(v.RejectAfterTime))
+		set(name, "awg_keepalive_timeout", formatRange(v.KeepaliveTimeout))
+		set(name, "awg_max_handshake_attempts", formatRange(v.MaxHandshakeAttempts))
+		set(name, "awg_random_trailers", strconv.FormatBool(v.RandomTrailers))
+		set(name, "awg_disable_cookies", strconv.FormatBool(v.DisableCookies))
 	}
 	lines = append(lines, "set network."+peerSection+"="+peerSection)
 	set(peerSection, "public_key", profile.Peer.PublicKey.String())
@@ -375,8 +395,8 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 	if hasIPv6Address(profile.Interface.Addresses) {
 		addList(peerSection, "allowed_ips", "::/0")
 	}
-	if profile.Peer.PersistentKeepalive > 0 {
-		set(peerSection, "persistent_keepalive", strconv.Itoa(int(profile.Peer.PersistentKeepalive)))
+	if profile.Peer.PersistentKeepalive.Max > 0 {
+		set(peerSection, "persistent_keepalive", formatRange(profile.Peer.PersistentKeepalive))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n"), nil
 }
