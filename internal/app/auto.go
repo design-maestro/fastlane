@@ -16,15 +16,27 @@ const autoScopeAll = "all"
 const activeGETFailureReasonPrefix = "active GET failed: "
 
 type autoSelectionDecision struct {
-	CurrentNodeID       string
-	CandidateNode       domain.Node
-	CandidateScore      domain.ScoreResult
-	SelectedNode        domain.Node
-	Health              map[string]domain.NodeHealth
-	HasHealthyCandidate bool
-	Switch              bool
-	Reconnect           bool
-	Reason              string
+	CurrentNodeID             string
+	CandidateNode             domain.Node
+	CandidateScore            domain.ScoreResult
+	SelectedNode              domain.Node
+	Health                    map[string]domain.NodeHealth
+	HasHealthyCandidate       bool
+	Switch                    bool
+	Reconnect                 bool
+	Reason                    string
+	OptimizationCandidateID   string
+	OptimizationCandidateWins int
+}
+
+func optimizationCandidateWins(state domain.RuntimeState, current, candidate domain.NodeHealth, policy probe.SwitchPolicy, runProbes bool) (string, int) {
+	if !runProbes || !probe.IsOptimizationCandidate(current, candidate, policy) {
+		return "", 0
+	}
+	if state.OptimizationCandidateID == candidate.NodeID {
+		return candidate.NodeID, state.OptimizationCandidateWins + 1
+	}
+	return candidate.NodeID, 1
 }
 
 // RunAutoHealthCheck probes the active auto-mode subscription and reconnects when needed.
@@ -484,6 +496,8 @@ func (s *Service) commitPreparedAutoHealthCheck(ctx context.Context, prepared pr
 
 	if !decision.Reconnect && !decision.Switch {
 		state.Health = decision.Health
+		state.OptimizationCandidateID = decision.OptimizationCandidateID
+		state.OptimizationCandidateWins = decision.OptimizationCandidateWins
 		state.LastFailureReason = ""
 		if s.shouldPersistAutoHealthState(persistedState, state) {
 			if err := s.saveState(state); err != nil {
@@ -536,6 +550,8 @@ func (s *Service) commitPreparedAutoHealthCheckAll(ctx context.Context, prepared
 
 	if !decision.Reconnect && !decision.Switch {
 		state.Health = decision.Health
+		state.OptimizationCandidateID = decision.OptimizationCandidateID
+		state.OptimizationCandidateWins = decision.OptimizationCandidateWins
 		state.AutoScope = autoScopeAll
 		state.LastFailureReason = ""
 		if s.shouldPersistAutoHealthState(persistedState, state) {
@@ -642,7 +658,8 @@ func (s *Service) evaluateAutoSelectionAll(ctx context.Context, subscriptions []
 
 	currentHealth := health[currentNodeID]
 	policy := switchPolicyFromSettings(settings)
-	shouldSwitch, reason := probe.ShouldSwitch(currentHealth, candidateHealth, s.currentTime().UTC(), state.LastSwitchAt, policy)
+	trackerID, trackerWins := optimizationCandidateWins(state, currentHealth, candidateHealth, policy, runProbes)
+	shouldSwitch, reason := probe.ShouldSwitchWithWins(currentHealth, candidateHealth, s.currentTime().UTC(), state.LastSwitchAt, policy, trackerWins)
 	selectedNode := candidateNode
 	if !shouldSwitch && currentNodeID != "" {
 		if activeNode, ok := currentSub.NodeByID(currentNodeID); ok {
@@ -660,6 +677,7 @@ func (s *Service) evaluateAutoSelectionAll(ctx context.Context, subscriptions []
 	decision.SelectedNode = selectedNode
 	decision.Switch = selectedNode.ID != currentNodeID || selectedSub.ID != state.ActiveSubscriptionID
 	decision.Reason = reason
+	decision.OptimizationCandidateID, decision.OptimizationCandidateWins = trackerID, trackerWins
 	return decision, selectedSub, fallbackSub, nil
 }
 
@@ -752,7 +770,8 @@ func (s *Service) evaluateAutoSelection(ctx context.Context, sub domain.Subscrip
 
 	currentHealth := health[currentNodeID]
 	policy := switchPolicyFromSettings(settings)
-	shouldSwitch, reason := probe.ShouldSwitch(currentHealth, candidateHealth, time.Now().UTC(), state.LastSwitchAt, policy)
+	trackerID, trackerWins := optimizationCandidateWins(state, currentHealth, candidateHealth, policy, runProbes)
+	shouldSwitch, reason := probe.ShouldSwitchWithWins(currentHealth, candidateHealth, time.Now().UTC(), state.LastSwitchAt, policy, trackerWins)
 
 	selectedNode := candidateNode
 	if !shouldSwitch && currentNodeID != "" {
@@ -772,6 +791,7 @@ func (s *Service) evaluateAutoSelection(ctx context.Context, sub domain.Subscrip
 	decision.SelectedNode = selectedNode
 	decision.Switch = selectedNode.ID != currentNodeID
 	decision.Reason = reason
+	decision.OptimizationCandidateID, decision.OptimizationCandidateWins = trackerID, trackerWins
 	return decision, nil
 }
 
@@ -833,6 +853,8 @@ func (s *Service) commitAutoSelection(ctx context.Context, sub domain.Subscripti
 	}
 
 	state.Health = decision.Health
+	state.OptimizationCandidateID = ""
+	state.OptimizationCandidateWins = 0
 	state.Mode = domain.SelectionModeAuto
 	state.Connected = true
 	state.ActiveSubscriptionID = sub.ID
@@ -941,13 +963,15 @@ func (s *Service) logAutoDecision(msg string, sub domain.Subscription, decision 
 }
 
 func switchPolicyFromSettings(settings domain.Settings) probe.SwitchPolicy {
+	configured := settings.EffectiveAutoPolicy()
 	policy := probe.DefaultSwitchPolicy()
-	if settings.SwitchCooldown.Duration() >= 0 {
-		policy.Cooldown = settings.SwitchCooldown.Duration()
-	}
-	if settings.LatencyThreshold.Duration() >= 0 {
-		policy.LatencyImprovement = settings.LatencyThreshold.Duration()
-	}
+	policy.AllowOptimization = configured.AllowOptimization
+	policy.CurrentLatencyCeiling = configured.CurrentLatencyCeiling.Duration()
+	policy.Cooldown = configured.Cooldown.Duration()
+	policy.LatencyImprovement = configured.LatencyImprovement.Duration()
+	policy.RelativeImprovement = configured.RelativeImprovement
+	policy.RequiredLatencyWins = configured.RequiredCandidateWins
+	policy.FailureThreshold = configured.FailureThreshold
 	return policy
 }
 

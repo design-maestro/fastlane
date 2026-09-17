@@ -204,7 +204,7 @@ func TestSelectBestNodeFailsOnEmptyInput(t *testing.T) {
 	}
 }
 
-func TestSelectBestNodePrefersFreshLatencyOverHistory(t *testing.T) {
+func TestSelectBestNodePrefersEstablishedHistoryOverOneFastProbe(t *testing.T) {
 	t.Parallel()
 
 	nodes := []domain.Node{
@@ -234,8 +234,8 @@ func TestSelectBestNodePrefersFreshLatencyOverHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("select best node: %v", err)
 	}
-	if best.ID != "fresh-fast" {
-		t.Fatalf("expected fresh 26ms node, got %s", best.ID)
+	if best.ID != "historically-stable" {
+		t.Fatalf("expected established node to outrank a single fast probe, got %s", best.ID)
 	}
 }
 

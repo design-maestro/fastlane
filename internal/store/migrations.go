@@ -93,6 +93,8 @@ func decodeSettings(data []byte, path string) (domain.Settings, error) {
 		URLTestTimeout      *domain.Duration      `json:"url_test_timeout"`
 		SwitchCooldown      *domain.Duration      `json:"switch_cooldown"`
 		LatencyThreshold    *domain.Duration      `json:"latency_threshold"`
+		AutoProfile         *domain.AutoProfile   `json:"auto_profile"`
+		CustomAutoPolicy    *domain.AutoPolicy    `json:"custom_auto_policy"`
 		AutoExcludedNodes   *[]string             `json:"auto_excluded_nodes"`
 		AutoHideKeywords    *[]string             `json:"auto_hide_keywords"`
 		DNS                 *rawDNSSettings       `json:"dns"`
@@ -139,6 +141,18 @@ func decodeSettings(data []byte, path string) (domain.Settings, error) {
 	}
 	if raw.LatencyThreshold != nil {
 		settings.LatencyThreshold = *raw.LatencyThreshold
+	}
+	if raw.AutoProfile != nil {
+		settings.AutoProfile = *raw.AutoProfile
+		if raw.CustomAutoPolicy != nil {
+			settings.CustomAutoPolicy = *raw.CustomAutoPolicy
+		}
+	} else {
+		// Existing installations keep their tuning rather than silently adopting a preset.
+		settings.AutoProfile = domain.AutoProfileCustom
+		settings.CustomAutoPolicy = domain.PresetAutoPolicy(domain.AutoProfileBalanced)
+		settings.CustomAutoPolicy.Cooldown = settings.SwitchCooldown
+		settings.CustomAutoPolicy.LatencyImprovement = settings.LatencyThreshold
 	}
 	if raw.AutoExcludedNodes != nil {
 		settings.AutoExcludedNodes = append([]string(nil), (*raw.AutoExcludedNodes)...)

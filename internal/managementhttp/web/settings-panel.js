@@ -50,6 +50,27 @@ const translations = {
   "URL test timeout": "Тайм-аут URL-теста",
   "Maximum wait time": "Максимальное время ожидания",
   "Automatic selection": "Автовыбор",
+  "Choose how carefully Fast Lane keeps the active server.": "Выберите, насколько бережно Fast Lane сохраняет текущий сервер.",
+  "Selection profile": "Профиль выбора",
+  "Games": "Игры",
+  "Streaming": "Стриминг",
+  "Balanced": "Баланс",
+  "Custom": "Свой",
+  "Keep the current server. Switch only after a confirmed connection loss.": "Сохраняем текущий сервер. Переключаемся только при подтверждённой потере связи.",
+  "Keep the current server. Switch after sustained connection degradation or a connection loss.": "Сохраняем текущий сервер. Переключаемся при устойчивом ухудшении соединения или потере связи.",
+  "Choose a stable server and switch after a confirmed improvement.": "Выбираем стабильный сервер и переключаемся при подтверждённом улучшении.",
+  "Configure automatic selection yourself.": "Настройте автоматический выбор самостоятельно.",
+  "Allow optimization": "Разрешить оптимизацию",
+  "Switch to a measurably better server when the connection is healthy": "Переключаться на заметно лучший сервер при рабочем соединении",
+  "Current latency ceiling": "Порог текущей задержки",
+  "Start optimization only above this average latency; 0 disables the ceiling": "Начинать оптимизацию только выше этой средней задержки; 0 отключает порог",
+  "Required absolute latency improvement": "Требуемый выигрыш по задержке в миллисекундах",
+  "Relative improvement": "Относительный выигрыш",
+  "Required share of improvement, for example 0.35": "Требуемая доля выигрыша, например 0.35",
+  "Confirmed measurements": "Подтверждённые замеры",
+  "Consecutive better measurements from the same candidate": "Последовательные лучшие замеры одного кандидата",
+  "Failure threshold": "Порог ошибок",
+  "Consecutive failed checks before emergency switching": "Последовательные неудачные проверки до аварийного переключения",
   "Fast Lane avoids reconnecting for insignificant latency differences.": "Fast Lane не переподключается при незначительной разнице в задержке.",
   "Pause between switches": "Пауза между переключениями",
   "Prevents constant server hopping": "Предотвращает постоянные переключения между серверами",
@@ -196,6 +217,55 @@ function create(container, shared) {
 		this.draft[key] = !!(ev && ev.target && ev.target.checked);
 		var label = ev && ev.target && ev.target.parentNode ? ev.target.parentNode.querySelector('[data-toggle-label]') : null;
 		if (label) label.textContent = this.draft[key] ? _('On') : _('Off');
+		if (key === 'auto_allow_optimization') this.paint();
+	},
+
+	autoProfile: function() { return this.draft.auto_profile || 'balanced'; },
+
+	prepareAutoDraft: function(source) {
+		var policy = source.custom_auto_policy || {};
+		this.draft.auto_profile = source.auto_profile || 'custom';
+		this.draft.auto_allow_optimization = !!policy.allow_optimization;
+		this.draft.auto_current_latency_ceiling = policy.current_latency_ceiling || '0s';
+		this.draft.auto_latency_improvement = policy.latency_improvement || '70ms';
+		this.draft.auto_relative_improvement = policy.relative_improvement == null ? 0.35 : policy.relative_improvement;
+		this.draft.auto_required_candidate_wins = policy.required_candidate_wins || 4;
+		this.draft.auto_cooldown = policy.cooldown || '20m0s';
+		this.draft.auto_failure_threshold = policy.failure_threshold || 2;
+	},
+
+	handleAutoProfile: function(profile) {
+		this.draft.auto_profile = profile;
+		this.paint();
+	},
+
+	autoProfileControl: function() {
+		var profile = this.autoProfile();
+		var options = [ ['games', _('Games')], ['streaming', _('Streaming')], ['balanced', _('Balanced')], ['custom', _('Custom')] ];
+		var copy = {
+			games: _('Keep the current server. Switch only after a confirmed connection loss.'),
+			streaming: _('Keep the current server. Switch after sustained connection degradation or a connection loss.'),
+			balanced: _('Choose a stable server and switch after a confirmed improvement.'),
+			custom: _('Configure automatic selection yourself.')
+		};
+		var nodes = [ E('div', { class: 'fls-segments', role: 'group', 'aria-label': _('Selection profile') }, options.map(L.bind(function(option) {
+			return E('button', { type: 'button', class: 'fls-segment' + (profile === option[0] ? ' fls-segment-active' : ''), 'aria-pressed': profile === option[0] ? 'true' : 'false', click: L.bind(this.handleAutoProfile, this, option[0]) }, [ option[1] ]);
+		}, this))), E('p', { class: 'fls-profile-copy' }, [ copy[profile] ]) ];
+		if (profile === 'custom') {
+			var customFields = [
+			E('div', { class: 'fls-field fls-field-toggle' }, [ E('label', {}, [ _('Allow optimization'), E('span', { class: 'fls-hint' }, [ _('Switch to a measurably better server when the connection is healthy') ]) ]), E('label', { class: 'fls-toggle' }, [ E('input', { type: 'checkbox', 'data-setting-key': 'auto_allow_optimization', checked: this.draft.auto_allow_optimization ? 'checked' : null, change: L.bind(this.handleBool, this, 'auto_allow_optimization') }), E('span', { 'data-toggle-label': 'auto_allow_optimization' }, [ this.draft.auto_allow_optimization ? _('On') : _('Off') ]) ]) ]),
+			this.field('auto_failure_threshold', _('Failure threshold'), _('Consecutive failed checks before emergency switching'), 'number')
+			];
+			if (this.draft.auto_allow_optimization) customFields.splice(1, 0,
+			this.durationField('auto_current_latency_ceiling', _('Current latency ceiling'), _('Start optimization only above this average latency; 0 disables the ceiling'), [ 'ms' ]),
+			this.durationField('auto_latency_improvement', _('Minimum improvement'), _('Required absolute latency improvement'), [ 'ms' ]),
+			this.field('auto_relative_improvement', _('Relative improvement'), _('Required share of improvement, for example 0.35'), 'number'),
+			this.field('auto_required_candidate_wins', _('Confirmed measurements'), _('Consecutive better measurements from the same candidate'), 'number'),
+			this.durationField('auto_cooldown', _('Pause between switches'), _('Prevents constant server hopping'), [ 'm', 's' ])
+			);
+			nodes.push(E('div', { class: 'fls-fields fls-custom-policy' }, customFields));
+		}
+		return E('div', { class: 'fls-profile-control' }, nodes);
 	},
 
 
@@ -345,9 +415,7 @@ function create(container, shared) {
 					this.field('url_test_url', _('URL test address'), _('HTTPS page with a fast 204 response'), 'url'),
 					this.durationField('url_test_timeout', _('URL test timeout'), _('Maximum wait time'), [ 's' ])
 				]) ]),
-				E('section', { class: 'fls-card' }, [ E('h3', {}, [ _('Automatic selection') ]), E('p', {}, [ _('Fast Lane avoids reconnecting for insignificant latency differences.') ]), E('div', { class: 'fls-fields' }, [
-					this.durationField('switch_cooldown', _('Pause between switches'), _('Prevents constant server hopping'), [ 'm', 's' ]),
-					this.durationField('latency_threshold', _('Minimum improvement'), _('How much faster a new server must be'), [ 'ms' ]),
+				E('section', { class: 'fls-card' }, [ E('h3', {}, [ _('Automatic selection') ]), E('p', {}, [ _('Choose how carefully Fast Lane keeps the active server.') ]), this.autoProfileControl(), E('div', { class: 'fls-fields' }, [
 					E('div', { class: 'fls-field fls-field-toggle' }, [ E('label', {}, [ _('Strict internet check'), E('span', { class: 'fls-hint' }, [ _('Restore the previous server if HTTPS does not work after connecting') ]) ]), E('label', { class: 'fls-toggle' }, [ E('input', { type: 'checkbox', 'data-setting-key': 'strict_egress_check', checked: this.draft.strict_egress_check ? 'checked' : null, change: L.bind(this.handleBool, this, 'strict_egress_check') }), E('span', { 'data-toggle-label': 'strict_egress_check' }, [ this.draft.strict_egress_check ? _('On') : _('Off') ]) ]) ]),
 					this.autoHideKeywordField()
 				]) ]),
@@ -505,8 +573,12 @@ function create(container, shared) {
       ev?.preventDefault();
       if (this.saving || this.remoteBusy || this.updateBusy()) return;
       const patch = {};
-      for (const key of ['refresh_interval','health_check_interval','url_test_url','url_test_timeout','switch_cooldown','latency_threshold','strict_egress_check']) {
-        if (this.draft[key] !== this.settings[key]) patch[key] = this.draft[key];
+			const savedPolicy = this.settings.custom_auto_policy || {};
+			const saved = { ...this.settings, auto_allow_optimization: !!savedPolicy.allow_optimization, auto_current_latency_ceiling: savedPolicy.current_latency_ceiling || '0s', auto_latency_improvement: savedPolicy.latency_improvement || '70ms', auto_relative_improvement: savedPolicy.relative_improvement == null ? 0.35 : savedPolicy.relative_improvement, auto_required_candidate_wins: savedPolicy.required_candidate_wins || 4, auto_cooldown: savedPolicy.cooldown || '20m0s', auto_failure_threshold: savedPolicy.failure_threshold || 2 };
+			const numeric = new Set(['auto_relative_improvement','auto_required_candidate_wins','auto_failure_threshold']);
+			for (const key of ['refresh_interval','health_check_interval','url_test_url','url_test_timeout','switch_cooldown','latency_threshold','strict_egress_check','auto_profile','auto_allow_optimization','auto_current_latency_ceiling','auto_latency_improvement','auto_relative_improvement','auto_required_candidate_wins','auto_cooldown','auto_failure_threshold']) {
+        if (this.draft[key] === saved[key]) continue;
+				patch[key] = numeric.has(key) ? Number(this.draft[key]) : this.draft[key];
       }
       if (!Object.keys(patch).length) { shared.notice(_('No settings changed.')); return; }
       if (!this.settingsRoot.querySelector('input[type=url]').reportValidity()) return;
@@ -514,8 +586,9 @@ function create(container, shared) {
       try {
         await this.queue('settings-panel','PATCH',patch,'settings-panel-save');
         const result = await shared.api('settings-panel');
-        this.settings = result.settings;
-        this.draft = {...result.settings};
+		this.settings = result.settings;
+		this.draft = {...result.settings};
+		this.prepareAutoDraft(result.settings);
         this.syncSettingsControls();
         shared.notice(_('Fast Lane settings saved.'));
       } catch (error) { shared.notice(_('Could not save settings.'), true); }

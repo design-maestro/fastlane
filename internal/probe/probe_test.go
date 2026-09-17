@@ -130,23 +130,52 @@ func TestShouldSwitchDoesNotOptimizeInsideCooldownEvenAboveCeiling(t *testing.T)
 	}
 }
 
-func TestShouldSwitchRequiresTwoWinsAndTwentyPercentImprovement(t *testing.T) {
+func TestShouldSwitchRequiresFourWinsAndThirtyFivePercentImprovement(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	policy := probe.DefaultSwitchPolicy()
 	current := domain.NodeHealth{NodeID: "current", Healthy: true, AverageLatency: domain.NewDuration(300 * time.Millisecond)}
-	candidate := domain.NodeHealth{NodeID: "candidate", Healthy: true, AverageLatency: domain.NewDuration(240 * time.Millisecond), ConsecutiveSuccesses: 1}
+	candidate := domain.NodeHealth{NodeID: "candidate", Healthy: true, AverageLatency: domain.NewDuration(180 * time.Millisecond), ConsecutiveSuccesses: 3}
 	if should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), policy); should || reason != "latency improvement is not confirmed" {
 		t.Fatalf("single win was accepted: should=%t reason=%q", should, reason)
 	}
-	candidate.ConsecutiveSuccesses = 2
-	candidate.AverageLatency = domain.NewDuration(245 * time.Millisecond) // 55 ms, but less than 20%.
+	candidate.ConsecutiveSuccesses = 4
+	candidate.AverageLatency = domain.NewDuration(210 * time.Millisecond) // 90 ms, but less than 35%.
 	if should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), policy); should || reason != "relative improvement below threshold" {
-		t.Fatalf("sub-20%% improvement was accepted: should=%t reason=%q", should, reason)
+		t.Fatalf("sub-35%% improvement was accepted: should=%t reason=%q", should, reason)
 	}
-	candidate.AverageLatency = domain.NewDuration(240 * time.Millisecond)
+	candidate.AverageLatency = domain.NewDuration(195 * time.Millisecond)
 	if should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), policy); !should || reason == "" {
-		t.Fatalf("confirmed 20%% / 60ms improvement was rejected: should=%t reason=%q", should, reason)
+		t.Fatalf("confirmed 35%% / 105ms improvement was rejected: should=%t reason=%q", should, reason)
+	}
+}
+
+func TestShouldSwitchRejectsFastCandidateWithInstabilityHistory(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	current := domain.NodeHealth{
+		NodeID:               "steady",
+		Healthy:              true,
+		AverageLatency:       domain.NewDuration(150 * time.Millisecond),
+		ConsecutiveSuccesses: 20,
+		SuccessCount:         100,
+	}
+	candidate := domain.NodeHealth{
+		NodeID:               "fast-but-unstable",
+		Healthy:              true,
+		LastLatency:          domain.NewDuration(50 * time.Millisecond),
+		AverageLatency:       domain.NewDuration(55 * time.Millisecond),
+		LatencyVariation:     domain.NewDuration(50 * time.Millisecond),
+		SuccessCount:         9,
+		FailureCount:         1,
+		ConsecutiveSuccesses: 4,
+		InstabilityPenalty:   3,
+	}
+
+	should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), probe.DefaultSwitchPolicy())
+	if should || reason != "relative improvement below threshold" {
+		t.Fatalf("expected unstable fast candidate to be rejected, should=%t reason=%q", should, reason)
 	}
 }
 
@@ -178,5 +207,26 @@ func TestShouldSwitchPrefersStableCandidateOverFasterFlakyCurrent(t *testing.T) 
 	should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), probe.DefaultSwitchPolicy())
 	if !should || reason == "" {
 		t.Fatalf("expected stable candidate to replace faster flaky current, should=%t reason=%q", should, reason)
+	}
+}
+
+func TestShouldSwitchProfilePolicyKeepsGamesAndStreamingConnections(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	current := domain.NodeHealth{NodeID: "current", Healthy: true, AverageLatency: domain.NewDuration(250 * time.Millisecond)}
+	candidate := domain.NodeHealth{NodeID: "candidate", Healthy: true, AverageLatency: domain.NewDuration(100 * time.Millisecond), ConsecutiveSuccesses: 10}
+	games := probe.DefaultSwitchPolicy()
+	games.AllowOptimization = false
+	if should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), games); should || reason != "optimization disabled" {
+		t.Fatalf("games profile optimized a healthy route: should=%t reason=%q", should, reason)
+	}
+	streaming := probe.DefaultSwitchPolicy()
+	streaming.CurrentLatencyCeiling = 300 * time.Millisecond
+	if should, reason := probe.ShouldSwitch(current, candidate, now, now.Add(-time.Hour), streaming); should || reason != "current node is within profile latency ceiling" {
+		t.Fatalf("streaming profile optimized below its ceiling: should=%t reason=%q", should, reason)
+	}
+	current.Healthy = false
+	if should, _ := probe.ShouldSwitch(current, candidate, now, now, games); !should {
+		t.Fatal("games profile did not fail over after confirmed connection loss")
 	}
 }

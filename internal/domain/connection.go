@@ -102,6 +102,8 @@ type RuntimeState struct {
 	Health                     map[string]NodeHealth            `json:"health"`
 	LastSwitchAt               time.Time                        `json:"last_switch_at"`
 	LastSwitchReason           string                           `json:"last_switch_reason,omitempty"`
+	OptimizationCandidateID    string                           `json:"optimization_candidate_id,omitempty"`
+	OptimizationCandidateWins  int                              `json:"optimization_candidate_wins,omitempty"`
 	LastTransportSwitchAt      time.Time                        `json:"last_transport_switch_at"`
 	LastSuccessAt              time.Time                        `json:"last_success_at"`
 	LastFailureReason          string                           `json:"last_failure_reason"`

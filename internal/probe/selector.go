@@ -28,12 +28,12 @@ func DefaultScoreConfig() ScoreConfig {
 		HealthyBonus:                  10_000,
 		UnhealthyPenalty:              10_000,
 		HealthyLatencyCeiling:         defaultHealthyLatencyCeiling,
-		FreshLatencyWeight:            0.4,
-		AverageLatencyWeight:          0.6,
-		LatencyVariationPenaltyWeight: 1.0,
-		FailureRatePenalty:            1500 * time.Millisecond,
-		ConsecutiveFailurePenalty:     1500 * time.Millisecond,
-		InstabilityUnitPenalty:        250 * time.Millisecond,
+		FreshLatencyWeight:            0.2,
+		AverageLatencyWeight:          0.8,
+		LatencyVariationPenaltyWeight: 1.5,
+		FailureRatePenalty:            2500 * time.Millisecond,
+		ConsecutiveFailurePenalty:     3 * time.Second,
+		InstabilityUnitPenalty:        500 * time.Millisecond,
 		MaxLatencyBaseline:            2 * time.Second,
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/design-maestro/fastlane/internal/backend"
@@ -31,13 +32,21 @@ type settingsPanelRuntime interface {
 
 // Pointers distinguish omitted fields from deliberately false/zero values.
 type settingsPanelPatch struct {
-	RefreshInterval     *string `json:"refresh_interval"`
-	HealthCheckInterval *string `json:"health_check_interval"`
-	URLTestURL          *string `json:"url_test_url"`
-	URLTestTimeout      *string `json:"url_test_timeout"`
-	SwitchCooldown      *string `json:"switch_cooldown"`
-	LatencyThreshold    *string `json:"latency_threshold"`
-	StrictEgressCheck   *bool   `json:"strict_egress_check"`
+	RefreshInterval           *string  `json:"refresh_interval"`
+	HealthCheckInterval       *string  `json:"health_check_interval"`
+	URLTestURL                *string  `json:"url_test_url"`
+	URLTestTimeout            *string  `json:"url_test_timeout"`
+	SwitchCooldown            *string  `json:"switch_cooldown"`
+	LatencyThreshold          *string  `json:"latency_threshold"`
+	AutoProfile               *string  `json:"auto_profile"`
+	AutoAllowOptimization     *bool    `json:"auto_allow_optimization"`
+	AutoCurrentLatencyCeiling *string  `json:"auto_current_latency_ceiling"`
+	AutoLatencyImprovement    *string  `json:"auto_latency_improvement"`
+	AutoRelativeImprovement   *float64 `json:"auto_relative_improvement"`
+	AutoRequiredCandidateWins *int     `json:"auto_required_candidate_wins"`
+	AutoCooldown              *string  `json:"auto_cooldown"`
+	AutoFailureThreshold      *int     `json:"auto_failure_threshold"`
+	StrictEgressCheck         *bool    `json:"strict_egress_check"`
 }
 
 func (p settingsPanelPatch) values() map[string]string {
@@ -46,10 +55,24 @@ func (p settingsPanelPatch) values() map[string]string {
 		"refresh-interval": p.RefreshInterval, "health-check-interval": p.HealthCheckInterval,
 		"url-test-url": p.URLTestURL, "url-test-timeout": p.URLTestTimeout,
 		"switch-cooldown": p.SwitchCooldown, "latency-threshold": p.LatencyThreshold,
+		"auto-profile": p.AutoProfile, "auto.current-latency-ceiling": p.AutoCurrentLatencyCeiling,
+		"auto.latency-improvement": p.AutoLatencyImprovement, "auto.cooldown": p.AutoCooldown,
 	} {
 		if value != nil {
 			values[key] = *value
 		}
+	}
+	if p.AutoAllowOptimization != nil {
+		values["auto.allow-optimization"] = strconv.FormatBool(*p.AutoAllowOptimization)
+	}
+	if p.AutoRelativeImprovement != nil {
+		values["auto.relative-improvement"] = strconv.FormatFloat(*p.AutoRelativeImprovement, 'f', -1, 64)
+	}
+	if p.AutoRequiredCandidateWins != nil {
+		values["auto.required-candidate-wins"] = strconv.Itoa(*p.AutoRequiredCandidateWins)
+	}
+	if p.AutoFailureThreshold != nil {
+		values["auto.failure-threshold"] = strconv.Itoa(*p.AutoFailureThreshold)
 	}
 	if p.StrictEgressCheck != nil {
 		values["strict-egress-check"] = "false"

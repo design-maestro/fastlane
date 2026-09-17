@@ -61,6 +61,9 @@ func TestLoadSettingsMigratesMissingSchemaVersion(t *testing.T) {
 	if settings.Firewall.BlockQUIC {
 		t.Fatal("expected legacy settings to migrate to QUIC proxying by default")
 	}
+	if settings.AutoProfile != domain.AutoProfileCustom || settings.CustomAutoPolicy.Cooldown != settings.SwitchCooldown {
+		t.Fatalf("legacy automatic-selection tuning was not preserved as custom: %+v", settings)
+	}
 }
 
 func TestLoadSettingsPreservesLegacyFirewallTargetsWithoutDomains(t *testing.T) {

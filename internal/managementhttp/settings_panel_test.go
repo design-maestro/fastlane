@@ -70,12 +70,12 @@ func TestSettingsPanelPersistenceAndAtomicErrors(t *testing.T) {
 		}
 		return waitSettingsPanelJob(t, h)
 	}
-	job := post("/api/v1/settings-panel", "PATCH", `{"refresh_interval":"2h3m4s","health_check_interval":"0m0s","url_test_timeout":"7s","switch_cooldown":"1m30s","latency_threshold":"125ms","strict_egress_check":false,"url_test_url":"https://example.com/204"}`)
+	job := post("/api/v1/settings-panel", "PATCH", `{"refresh_interval":"2h3m4s","health_check_interval":"0m0s","url_test_timeout":"7s","switch_cooldown":"1m30s","latency_threshold":"125ms","strict_egress_check":false,"url_test_url":"https://example.com/204","auto_profile":"custom","auto_allow_optimization":true,"auto_current_latency_ceiling":"300ms","auto_latency_improvement":"70ms","auto_relative_improvement":0.35,"auto_required_candidate_wins":4,"auto_cooldown":"20m","auto_failure_threshold":3}`)
 	if !job.Succeeded {
 		t.Fatal(job)
 	}
 	saved, err := fs.LoadSettings()
-	if err != nil || saved.RefreshInterval.Duration() != 2*time.Hour+3*time.Minute+4*time.Second || saved.StrictEgressCheck || saved.LatencyThreshold.Duration() != 125*time.Millisecond || saved.HealthCheckInterval.Duration() != 0 {
+	if err != nil || saved.RefreshInterval.Duration() != 2*time.Hour+3*time.Minute+4*time.Second || saved.StrictEgressCheck || saved.LatencyThreshold.Duration() != 125*time.Millisecond || saved.HealthCheckInterval.Duration() != 0 || saved.AutoProfile != domain.AutoProfileCustom || saved.CustomAutoPolicy.FailureThreshold != 3 || saved.CustomAutoPolicy.CurrentLatencyCeiling.Duration() != 300*time.Millisecond {
 		t.Fatalf("not persisted: %+v %v", saved, err)
 	}
 	job = post("/api/v1/settings-panel", "PATCH", `{"refresh_interval":"9h","url_test_url":"http://user:DO_NOT_EXPOSE@example.com"}`)

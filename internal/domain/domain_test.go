@@ -87,6 +87,14 @@ func TestDefaultSettingsAreSane(t *testing.T) {
 	}
 }
 
+func TestStreamingAutoPolicyStartsOptimizationAbove250Milliseconds(t *testing.T) {
+	t.Parallel()
+	policy := domain.PresetAutoPolicy(domain.AutoProfileStreaming)
+	if policy.CurrentLatencyCeiling.Duration() != 250*time.Millisecond {
+		t.Fatalf("unexpected streaming latency ceiling: %s", policy.CurrentLatencyCeiling)
+	}
+}
+
 func TestCountryRoutingAcceptsTheCompleteISOCatalog(t *testing.T) {
 	t.Parallel()
 

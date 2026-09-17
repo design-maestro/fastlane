@@ -2632,6 +2632,9 @@ func (s *Service) PatchSettings(values map[string]string) (domain.Settings, erro
 			"refresh-interval": {}, "health-check-interval": {}, "url-test-url": {},
 			"url-test-timeout": {}, "switch-cooldown": {}, "latency-threshold": {},
 			"strict-egress-check": {}, "country-routing.enabled": {}, "country-routing.country": {},
+			"auto-profile": {}, "auto.allow-optimization": {}, "auto.current-latency-ceiling": {},
+			"auto.latency-improvement": {}, "auto.relative-improvement": {}, "auto.required-candidate-wins": {},
+			"auto.cooldown": {}, "auto.failure-threshold": {},
 		}
 		for key := range values {
 			if _, ok := allowed[key]; !ok {
@@ -2690,6 +2693,60 @@ func (s *Service) PatchSettings(values map[string]string) (domain.Settings, erro
 				return domain.Settings{}, err
 			}
 			entry.apply(d)
+		}
+		if raw, ok := values["auto-profile"]; ok {
+			profile := domain.AutoProfile(strings.TrimSpace(raw))
+			if profile != domain.AutoProfileGames && profile != domain.AutoProfileStreaming && profile != domain.AutoProfileBalanced && profile != domain.AutoProfileCustom {
+				return domain.Settings{}, fmt.Errorf("invalid auto profile")
+			}
+			settings.AutoProfile = profile
+		}
+		if raw, ok := values["auto.allow-optimization"]; ok {
+			value, err := parseBooleanSetting("auto.allow-optimization", raw)
+			if err != nil {
+				return domain.Settings{}, err
+			}
+			settings.CustomAutoPolicy.AllowOptimization = value
+		}
+		for _, entry := range []struct {
+			key   string
+			apply func(domain.Duration)
+		}{
+			{"auto.current-latency-ceiling", func(value domain.Duration) { settings.CustomAutoPolicy.CurrentLatencyCeiling = value }},
+			{"auto.latency-improvement", func(value domain.Duration) { settings.CustomAutoPolicy.LatencyImprovement = value }},
+			{"auto.cooldown", func(value domain.Duration) { settings.CustomAutoPolicy.Cooldown = value }},
+		} {
+			if raw, ok := values[entry.key]; ok {
+				value, err := domain.ParseDurationValue(raw)
+				if err != nil {
+					return domain.Settings{}, err
+				}
+				if err := validateSettingDuration(entry.key, value, true); err != nil {
+					return domain.Settings{}, err
+				}
+				entry.apply(value)
+			}
+		}
+		if raw, ok := values["auto.relative-improvement"]; ok {
+			value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+			if err != nil || value < 0 || value > 1 {
+				return domain.Settings{}, fmt.Errorf("invalid relative improvement")
+			}
+			settings.CustomAutoPolicy.RelativeImprovement = value
+		}
+		if raw, ok := values["auto.required-candidate-wins"]; ok {
+			value, err := strconv.Atoi(strings.TrimSpace(raw))
+			if err != nil || value < 1 || value > 20 {
+				return domain.Settings{}, fmt.Errorf("invalid required candidate wins")
+			}
+			settings.CustomAutoPolicy.RequiredCandidateWins = value
+		}
+		if raw, ok := values["auto.failure-threshold"]; ok {
+			value, err := strconv.Atoi(strings.TrimSpace(raw))
+			if err != nil || value < 1 || value > 20 {
+				return domain.Settings{}, fmt.Errorf("invalid failure threshold")
+			}
+			settings.CustomAutoPolicy.FailureThreshold = value
 		}
 		if raw, ok := values["strict-egress-check"]; ok {
 			enabled, err := parseBooleanSetting("strict-egress-check", raw)
