@@ -76,7 +76,7 @@ func TestFastLaneCurrentViewsKeepMobileInteractionContracts(t *testing.T) {
 		},
 		{
 			name: "Settings",
-			path: filepath.Join("view", "fastlane", "settings-20260910-hide-keywords-v8.js"),
+			path: filepath.Join("view", "fastlane", "settings-20260917-v9.js"),
 			required: []string{
 				"@media(max-width:850px)",
 				".fls-head{align-items:flex-start;flex-direction:column}",

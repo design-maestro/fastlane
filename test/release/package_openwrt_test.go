@@ -67,7 +67,7 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "diagnostics-20260904-v3.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "zapret.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings.js"), "'use strict';\n", 0o644)
-	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260910-hide-keywords-v8.js"), "'use strict';\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260917-v9.js"), "'use strict';\n", 0o644)
 
 	toolDir := t.TempDir()
 	writeExecutable(t, filepath.Join(toolDir, "po2lmo"), "#!/bin/sh\nprintf 'compiled translation' > \"$2\"\n")
@@ -180,7 +180,7 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 		"vpn-20260910-hide-keywords-v29.js",
 		"routing-20260906-v5.js",
 		"diagnostics-20260904-v3.js",
-		"settings-20260910-hide-keywords-v8.js",
+		"settings-20260917-v9.js",
 	} {
 		path := filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "www", "luci-static", "resources", "view", "fastlane", name)
 		if _, err := os.Stat(path); err != nil {

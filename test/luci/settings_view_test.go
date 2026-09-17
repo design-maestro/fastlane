@@ -203,7 +203,7 @@ func readSettingsViewSource(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
-	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260910-hide-keywords-v8.js")
+	path := filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260917-v9.js")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

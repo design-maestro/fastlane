@@ -1,4 +1,4 @@
 'use strict';
-'require view.fastlane.settings-20260910-hide-keywords-v8 as fastlaneSettings';
+'require view.fastlane.settings-20260917-v9 as fastlaneSettings';
 
 return fastlaneSettings;

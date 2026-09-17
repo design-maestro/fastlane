@@ -1,4 +1,4 @@
-/* Faithful port of settings-20260910-hide-keywords-v8.js. Screen renderers,
+/* Faithful port of settings-20260917-v9.js. Screen renderers,
  * duration controls, chips and CSS are retained from LuCI; transport is typed HTTP.
  * mount(container,{api,operation,notice,confirmAction,getSnapshot}) -> controller.
  * Call controller.refresh(snapshot) on EVERY root reload. mount only after login.
