@@ -74,6 +74,8 @@ type Settings struct {
 	URLTestTimeout      Duration         `json:"url_test_timeout"`
 	SwitchCooldown      Duration         `json:"switch_cooldown"`
 	LatencyThreshold    Duration         `json:"latency_threshold"`
+	AutoProfile         AutoProfile      `json:"auto_profile"`
+	CustomAutoPolicy    AutoPolicy       `json:"custom_auto_policy"`
 	AutoExcludedNodes   []string         `json:"auto_excluded_nodes"`
 	AutoHideKeywords    []string         `json:"auto_hide_keywords"`
 	DNS                 DNSSettings      `json:"dns"`
@@ -84,6 +86,45 @@ type Settings struct {
 	LogLevel            string           `json:"log_level"`
 	StrictEgressCheck   bool             `json:"strict_egress_check"`
 	CountryRouting      CountryRouting   `json:"country_routing"`
+}
+
+// AutoProfile controls how aggressively automatic selection may reconnect.
+type AutoProfile string
+
+const (
+	AutoProfileGames     AutoProfile = "games"
+	AutoProfileStreaming AutoProfile = "streaming"
+	AutoProfileBalanced  AutoProfile = "balanced"
+	AutoProfileCustom    AutoProfile = "custom"
+)
+
+// AutoPolicy is the persisted, user-editable automatic selection policy.
+type AutoPolicy struct {
+	AllowOptimization     bool     `json:"allow_optimization"`
+	CurrentLatencyCeiling Duration `json:"current_latency_ceiling"`
+	LatencyImprovement    Duration `json:"latency_improvement"`
+	RelativeImprovement   float64  `json:"relative_improvement"`
+	RequiredCandidateWins int      `json:"required_candidate_wins"`
+	Cooldown              Duration `json:"cooldown"`
+	FailureThreshold      int      `json:"failure_threshold"`
+}
+
+func PresetAutoPolicy(profile AutoProfile) AutoPolicy {
+	switch profile {
+	case AutoProfileGames:
+		return AutoPolicy{FailureThreshold: 3}
+	case AutoProfileStreaming:
+		return AutoPolicy{AllowOptimization: true, CurrentLatencyCeiling: NewDuration(250 * time.Millisecond), LatencyImprovement: NewDuration(70 * time.Millisecond), RelativeImprovement: 0.35, RequiredCandidateWins: 4, Cooldown: NewDuration(20 * time.Minute), FailureThreshold: 2}
+	default:
+		return AutoPolicy{AllowOptimization: true, LatencyImprovement: NewDuration(70 * time.Millisecond), RelativeImprovement: 0.35, RequiredCandidateWins: 4, Cooldown: NewDuration(20 * time.Minute), FailureThreshold: 2}
+	}
+}
+
+func (s Settings) EffectiveAutoPolicy() AutoPolicy {
+	if s.AutoProfile == AutoProfileCustom {
+		return s.CustomAutoPolicy
+	}
+	return PresetAutoPolicy(s.AutoProfile)
 }
 
 // CountryRouting keeps traffic for one user-selected country outside the VPN.
@@ -231,13 +272,15 @@ type FirewallSettings struct {
 // DefaultSettings returns the baseline configuration used on first start.
 func DefaultSettings() Settings {
 	return Settings{
-		SchemaVersion:       11,
+		SchemaVersion:       12,
 		RefreshInterval:     NewDuration(time.Hour),
 		HealthCheckInterval: NewDuration(30 * time.Minute),
 		URLTestURL:          "https://www.gstatic.com/generate_204",
 		URLTestTimeout:      NewDuration(5 * time.Second),
-		SwitchCooldown:      NewDuration(5 * time.Minute),
-		LatencyThreshold:    NewDuration(50 * time.Millisecond),
+		SwitchCooldown:      NewDuration(20 * time.Minute),
+		LatencyThreshold:    NewDuration(70 * time.Millisecond),
+		AutoProfile:         AutoProfileBalanced,
+		CustomAutoPolicy:    PresetAutoPolicy(AutoProfileBalanced),
 		AutoExcludedNodes:   nil,
 		AutoHideKeywords:    nil,
 		DNS:                 DefaultDNSSettings(),

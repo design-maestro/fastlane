@@ -11,6 +11,8 @@ const defaultHealthyLatencyCeiling = 300 * time.Millisecond
 
 // SwitchPolicy controls anti-flap behavior.
 type SwitchPolicy struct {
+	AllowOptimization     bool
+	CurrentLatencyCeiling time.Duration
 	Cooldown              time.Duration
 	LatencyImprovement    time.Duration
 	RelativeImprovement   float64
@@ -22,10 +24,11 @@ type SwitchPolicy struct {
 // DefaultSwitchPolicy returns conservative switching defaults.
 func DefaultSwitchPolicy() SwitchPolicy {
 	return SwitchPolicy{
-		Cooldown:              5 * time.Minute,
-		LatencyImprovement:    50 * time.Millisecond,
-		RelativeImprovement:   0.20,
-		RequiredLatencyWins:   2,
+		AllowOptimization:     true,
+		Cooldown:              20 * time.Minute,
+		LatencyImprovement:    70 * time.Millisecond,
+		RelativeImprovement:   0.35,
+		RequiredLatencyWins:   4,
 		FailureThreshold:      2,
 		HealthyLatencyCeiling: defaultHealthyLatencyCeiling,
 	}
@@ -33,6 +36,13 @@ func DefaultSwitchPolicy() SwitchPolicy {
 
 // ShouldSwitch decides whether the selector should move to the candidate node.
 func ShouldSwitch(current, candidate domain.NodeHealth, now, lastSwitch time.Time, policy SwitchPolicy) (bool, string) {
+	return ShouldSwitchWithWins(current, candidate, now, lastSwitch, policy, candidate.ConsecutiveSuccesses)
+}
+
+// ShouldSwitchWithWins uses consecutive measurements where this exact candidate
+// beat the current route. It keeps probe success history separate from proof of
+// a switching advantage.
+func ShouldSwitchWithWins(current, candidate domain.NodeHealth, now, lastSwitch time.Time, policy SwitchPolicy, confirmedWins int) (bool, string) {
 	if candidate.NodeID == "" || !candidate.Healthy {
 		return false, ""
 	}
@@ -43,6 +53,12 @@ func ShouldSwitch(current, candidate domain.NodeHealth, now, lastSwitch time.Tim
 
 	if !current.Healthy || current.ConsecutiveFailures >= policy.FailureThreshold {
 		return true, "current node unhealthy"
+	}
+	if !policy.AllowOptimization {
+		return false, "optimization disabled"
+	}
+	if policy.CurrentLatencyCeiling > 0 && current.AverageLatency.Duration() <= policy.CurrentLatencyCeiling {
+		return false, "current node is within profile latency ceiling"
 	}
 
 	// Compare the same latency-equivalent quality cost used by candidate
@@ -55,7 +71,7 @@ func ShouldSwitch(current, candidate domain.NodeHealth, now, lastSwitch time.Tim
 		return false, "cooldown active"
 	}
 
-	if policy.RequiredLatencyWins > 0 && candidate.ConsecutiveSuccesses < policy.RequiredLatencyWins {
+	if policy.RequiredLatencyWins > 0 && confirmedWins < policy.RequiredLatencyWins {
 		return false, "latency improvement is not confirmed"
 	}
 
@@ -77,4 +93,24 @@ func ShouldSwitch(current, candidate domain.NodeHealth, now, lastSwitch time.Tim
 	}
 
 	return false, "current node acceptable"
+}
+
+// IsOptimizationCandidate reports whether a healthy candidate is materially
+// better before cooldown and confirmation checks are applied.
+func IsOptimizationCandidate(current, candidate domain.NodeHealth, policy SwitchPolicy) bool {
+	if !policy.AllowOptimization || !current.Healthy || !candidate.Healthy || current.NodeID == candidate.NodeID {
+		return false
+	}
+	if policy.CurrentLatencyCeiling > 0 && current.AverageLatency.Duration() <= policy.CurrentLatencyCeiling {
+		return false
+	}
+	config := DefaultScoreConfig()
+	currentLatency, candidateLatency := effectiveSelectionLatency(current, config), effectiveSelectionLatency(candidate, config)
+	if currentLatency <= 0 || candidateLatency <= 0 || currentLatency-candidateLatency < policy.LatencyImprovement {
+		return false
+	}
+	if policy.RelativeImprovement > 0 && float64(currentLatency-candidateLatency)/float64(currentLatency) < policy.RelativeImprovement {
+		return false
+	}
+	return true
 }

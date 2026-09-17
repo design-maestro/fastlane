@@ -68,6 +68,7 @@ var css = `
 `;
 
 css += '.fls-update{align-items:flex-start}.fls-update .fls-manage-copy{flex:1}.fls-update-actions{flex-wrap:wrap;justify-content:flex-end;max-width:52%}.fls-update .fls-primary{color:var(--fl-bg)}@media(max-width:850px){.fls-update{align-items:stretch}.fls-update-actions{width:100%;max-width:none;justify-content:flex-start}}';
+css += '.fls-profile-control{display:grid;gap:12px;margin-bottom:14px}.fls-segments{display:flex;gap:6px;flex-wrap:wrap}.fls-segment{min-height:40px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:#050d10;color:var(--muted);font:inherit;font-weight:700;cursor:pointer}.fls-segment-active{background:var(--fl-green-dim);border-color:var(--fl-green-dim);color:var(--fl-bg)}.fls-segment:focus-visible{outline:2px solid var(--fl-green);outline-offset:2px}.fls-profile-copy{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.fls-custom-policy{padding-top:2px}@media(max-width:480px){.fls-segments{display:grid;grid-template-columns:1fr 1fr}.fls-segment{width:100%}}';
 
 return view.extend({
 	load: function() {
@@ -172,6 +173,10 @@ return view.extend({
 		this.draft[key] = !!(ev && ev.target && ev.target.checked);
 		var label = ev && ev.target && ev.target.parentNode ? ev.target.parentNode.querySelector('[data-toggle-label]') : null;
 		if (label) label.textContent = this.draft[key] ? _('On') : _('Off');
+		if (key === 'auto_allow_optimization') {
+			var control = this.settingsRoot && this.settingsRoot.querySelector('.fls-profile-control');
+			if (control) control.replaceWith(this.autoProfileControl());
+		}
 	},
 
 	autoHideKeywords: function() {
@@ -275,6 +280,29 @@ return view.extend({
 		this.draft[key] = durationValue(parts, units);
 	},
 
+	autoProfile: function() { return this.draft.auto_profile || 'balanced'; },
+	handleAutoProfile: function(profile) {
+		this.draft.auto_profile = profile;
+		var control = this.settingsRoot && this.settingsRoot.querySelector('.fls-profile-control');
+		if (control) control.replaceWith(this.autoProfileControl());
+	},
+	autoProfileControl: function() {
+		var profile = this.autoProfile();
+		var options = [ ['games', _('Games')], ['streaming', _('Streaming')], ['balanced', _('Balanced')], ['custom', _('Custom')] ];
+		var descriptions = { games: _('Keep the current server. Switch only after a confirmed connection loss.'), streaming: _('Keep the current server. Switch after sustained connection degradation or a connection loss.'), balanced: _('Choose a stable server and switch after a confirmed improvement.'), custom: _('Configure automatic selection yourself.') };
+		var fields = [ E('div', { class: 'fls-segments', role: 'group', 'aria-label': _('Selection profile') }, options.map(L.bind(function(option) { return E('button', { type: 'button', class: 'fls-segment' + (profile === option[0] ? ' fls-segment-active' : ''), 'aria-pressed': profile === option[0] ? 'true' : 'false', click: L.bind(this.handleAutoProfile, this, option[0]) }, [ option[1] ]); }, this))), E('p', { class: 'fls-profile-copy' }, [ descriptions[profile] ]) ];
+		if (profile === 'custom') fields.push(E('div', { class: 'fls-fields fls-custom-policy' }, [
+			E('div', { class: 'fls-field fls-field-toggle' }, [ E('label', {}, [ _('Allow optimization'), E('span', { class: 'fls-hint' }, [ _('Switch to a measurably better server when the connection is healthy') ]) ]), E('label', { class: 'fls-toggle' }, [ E('input', { type: 'checkbox', 'data-setting-key': 'auto_allow_optimization', checked: this.draft.auto_allow_optimization ? 'checked' : null, change: L.bind(this.handleBool, this, 'auto_allow_optimization') }), E('span', { 'data-toggle-label': 'auto_allow_optimization' }, [ this.draft.auto_allow_optimization ? _('On') : _('Off') ]) ]) ]),
+			this.durationField('auto_current_latency_ceiling', _('Current latency ceiling'), _('Start optimization only above this average latency; 0 disables the ceiling'), [ 'ms' ]),
+			this.durationField('auto_latency_improvement', _('Minimum improvement'), _('Required absolute latency improvement'), [ 'ms' ]),
+			this.field('auto_relative_improvement', _('Relative improvement'), _('Required share of improvement, for example 0.35'), 'number'),
+			this.field('auto_required_candidate_wins', _('Confirmed measurements'), _('Consecutive better measurements from the same candidate'), 'number'),
+			this.durationField('auto_cooldown', _('Pause between switches'), _('Prevents constant server hopping'), [ 'm', 's' ]),
+			this.field('auto_failure_threshold', _('Failure threshold'), _('Consecutive failed checks before emergency switching'), 'number')
+		]));
+		return E('div', { class: 'fls-profile-control' }, fields);
+	},
+
 	handleUninstall: function(ev) {
 		if (ev) ev.preventDefault();
 		if (this.updateRequest || this.updateBusy()) {
@@ -306,10 +334,18 @@ return view.extend({
 			[ 'url_test_timeout', 'url-test-timeout' ],
 			[ 'switch_cooldown', 'switch-cooldown' ],
 			[ 'latency_threshold', 'latency-threshold' ],
+			[ 'auto_profile', 'auto-profile' ],
+			[ 'auto_allow_optimization', 'auto.allow-optimization' ],
+			[ 'auto_current_latency_ceiling', 'auto.current-latency-ceiling' ],
+			[ 'auto_latency_improvement', 'auto.latency-improvement' ],
+			[ 'auto_relative_improvement', 'auto.relative-improvement' ],
+			[ 'auto_required_candidate_wins', 'auto.required-candidate-wins' ],
+			[ 'auto_cooldown', 'auto.cooldown' ],
+			[ 'auto_failure_threshold', 'auto.failure-threshold' ],
 			[ 'strict_egress_check', 'strict-egress-check' ]
 		];
 		var patch = {};
-		var durationSettings = { refresh_interval: true, health_check_interval: true, url_test_timeout: true, switch_cooldown: true, latency_threshold: true };
+		var durationSettings = { refresh_interval: true, health_check_interval: true, url_test_timeout: true, switch_cooldown: true, latency_threshold: true, auto_current_latency_ceiling: true, auto_latency_improvement: true, auto_cooldown: true };
 		for (var i = 0; i < mappings.length; i++) {
 			var key = mappings[i][0];
 			var value = durationSettings[key] ? normalizeDuration(this.draft[key]) : String(this.draft[key]);
@@ -366,6 +402,15 @@ return view.extend({
 	render: function(data) {
 		this.settings = this.settings || data || {};
 		this.draft = this.draft || Object.assign({}, this.settings);
+		if (this.draft.auto_profile == null) this.draft.auto_profile = 'custom';
+		var customPolicy = this.settings.custom_auto_policy || {};
+		if (this.draft.auto_allow_optimization == null) this.draft.auto_allow_optimization = !!customPolicy.allow_optimization;
+		if (this.draft.auto_current_latency_ceiling == null) this.draft.auto_current_latency_ceiling = customPolicy.current_latency_ceiling || '0s';
+		if (this.draft.auto_latency_improvement == null) this.draft.auto_latency_improvement = customPolicy.latency_improvement || '70ms';
+		if (this.draft.auto_relative_improvement == null) this.draft.auto_relative_improvement = customPolicy.relative_improvement || 0.35;
+		if (this.draft.auto_required_candidate_wins == null) this.draft.auto_required_candidate_wins = customPolicy.required_candidate_wins || 4;
+		if (this.draft.auto_cooldown == null) this.draft.auto_cooldown = customPolicy.cooldown || '20m0s';
+		if (this.draft.auto_failure_threshold == null) this.draft.auto_failure_threshold = customPolicy.failure_threshold || 2;
 		this.updateBox = E('section', { class: 'fls-card fls-manage fls-update' }, this.renderUpdateContents());
 		if (!this.updatePoll) {
 			this.updatePoll = L.bind(function() { return this.updateBusy() ? this.refreshUpdate() : Promise.resolve(); }, this);
@@ -385,9 +430,7 @@ return view.extend({
 					this.field('url_test_url', _('URL test address'), _('HTTPS page with a fast 204 response'), 'url'),
 					this.durationField('url_test_timeout', _('URL test timeout'), _('Maximum wait time'), [ 's' ])
 				]) ]),
-				E('section', { class: 'fls-card' }, [ E('h3', {}, [ _('Automatic selection') ]), E('p', {}, [ _('Fast Lane avoids reconnecting for insignificant latency differences.') ]), E('div', { class: 'fls-fields' }, [
-					this.durationField('switch_cooldown', _('Pause between switches'), _('Prevents constant server hopping'), [ 'm', 's' ]),
-					this.durationField('latency_threshold', _('Minimum improvement'), _('How much faster a new server must be'), [ 'ms' ]),
+				E('section', { class: 'fls-card' }, [ E('h3', {}, [ _('Automatic selection') ]), E('p', {}, [ _('Choose how carefully Fast Lane keeps the active server.') ]), this.autoProfileControl(), E('div', { class: 'fls-fields' }, [
 					E('div', { class: 'fls-field fls-field-toggle' }, [ E('label', {}, [ _('Strict internet check'), E('span', { class: 'fls-hint' }, [ _('Restore the previous server if HTTPS does not work after connecting') ]) ]), E('label', { class: 'fls-toggle' }, [ E('input', { type: 'checkbox', 'data-setting-key': 'strict_egress_check', checked: this.draft.strict_egress_check ? 'checked' : null, change: L.bind(this.handleBool, this, 'strict_egress_check') }), E('span', { 'data-toggle-label': 'strict_egress_check' }, [ this.draft.strict_egress_check ? _('On') : _('Off') ]) ]) ]),
 					this.autoHideKeywordField()
 				]) ]),

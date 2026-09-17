@@ -81,6 +81,69 @@ msgstr "Автоматически использует язык LuCI. Для о
 msgid "Automatic selection"
 msgstr "Автовыбор"
 
+msgid "Games"
+msgstr "Игры"
+
+msgid "Streaming"
+msgstr "Стриминг"
+
+msgid "Balanced"
+msgstr "Баланс"
+
+msgid "Custom"
+msgstr "Свой"
+
+msgid "Allow optimization"
+msgstr "Разрешить оптимизацию"
+
+msgid "Switch to a measurably better server when the connection is healthy"
+msgstr "Переключаться на заметно лучший сервер при рабочем соединении"
+
+msgid "Selection profile"
+msgstr "Профиль выбора"
+
+msgid "Choose how carefully Fast Lane keeps the active server."
+msgstr "Выберите, насколько бережно Fast Lane сохраняет текущий сервер."
+
+msgid "Keep the current server. Switch only after a confirmed connection loss."
+msgstr "Сохраняем текущий сервер. Переключаемся только при подтверждённой потере связи."
+
+msgid "Keep the current server. Switch after sustained connection degradation or a connection loss."
+msgstr "Сохраняем текущий сервер. Переключаемся при устойчивом ухудшении соединения или потере связи."
+
+msgid "Choose a stable server and switch after a confirmed improvement."
+msgstr "Выбираем стабильный сервер и переключаемся при подтверждённом улучшении."
+
+msgid "Configure automatic selection yourself."
+msgstr "Настройте автоматический выбор самостоятельно."
+
+msgid "Current latency ceiling"
+msgstr "Порог текущей задержки"
+
+msgid "Start optimization only above this average latency; 0 disables the ceiling"
+msgstr "Начинать оптимизацию только выше этой средней задержки; 0 отключает порог"
+
+msgid "Required absolute latency improvement"
+msgstr "Требуемый выигрыш по задержке в миллисекундах"
+
+msgid "Relative improvement"
+msgstr "Относительный выигрыш"
+
+msgid "Required share of improvement, for example 0.35"
+msgstr "Требуемая доля выигрыша, например 0.35"
+
+msgid "Confirmed measurements"
+msgstr "Подтверждённые замеры"
+
+msgid "Consecutive better measurements from the same candidate"
+msgstr "Последовательные лучшие замеры одного кандидата"
+
+msgid "Failure threshold"
+msgstr "Порог ошибок"
+
+msgid "Consecutive failed checks before emergency switching"
+msgstr "Последовательные неудачные проверки до аварийного переключения"
+
 msgid "Could not update server hide rules."
 msgstr "Не удалось обновить правила скрытия серверов."
 
