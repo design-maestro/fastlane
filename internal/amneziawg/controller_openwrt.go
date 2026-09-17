@@ -198,7 +198,12 @@ func (c *OpenWrtController) Prepare(ctx context.Context, profile Profile) error 
 		return err
 	}
 	if profile.Version == Version31 {
-		if !strings.Contains(compatibility.Tools, "v3.1.") || !strings.Contains(compatibility.Runtime, "v3.1.") {
+		// amneziawg-go v3.1 keeps an upstream legacy build string in its
+		// --version output. The bundled module checksum and the AWG tools
+		// version are the compatibility contract; rejecting a runnable
+		// userspace runtime based on that display string blocks valid 3.1
+		// profiles.
+		if !strings.Contains(compatibility.Tools, "v3.1.") || compatibility.Runtime == "" {
 			return fmt.Errorf("installed Fast Lane AmneziaWG runtime is incompatible with AWG 3.1")
 		}
 		proto, err := os.ReadFile(c.rooted("lib/netifd/proto/amneziawg.sh"))

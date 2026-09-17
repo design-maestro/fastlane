@@ -244,6 +244,41 @@ func TestOpenWrtControllerPreparesAWG31OnlyWithCompatibleBundledChain(t *testing
 	}
 }
 
+func TestOpenWrtControllerPreparesAWG31WithUpstreamLegacyUserspaceVersionString(t *testing.T) {
+	profile, err := Parse([]byte(validProfile("Version = 3.1\nHeaderProtectionKey = " + testPrivateKey + "\nContentPaddingAddition = 10")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := successfulControllerRunner()
+	runner.run = func(call controllerCall) ([]byte, error) {
+		switch call.name + " " + strings.Join(call.args, " ") {
+		case "uname -r":
+			return []byte("6.6.134+\n"), nil
+		case FastLaneAWGTool + " --version":
+			return []byte("amneziawg-tools v3.1.20260812\n"), nil
+		case "amneziawg-go --version":
+			return []byte("amneziawg-go 0.0.20250522\n"), nil
+		default:
+			return nil, nil
+		}
+	}
+	controller := newControllerForTest(t, runner)
+	protoPath := filepath.Join(controller.SysRoot, "lib/netifd/proto/amneziawg.sh")
+	if err := os.WriteFile(protoPath, []byte("#!/bin/sh\nAWG="+FastLaneAWGTool+"\namneziawg-go\nawg_header_protection_key\nawg_random_trailers\nawg_force_userspace\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tunPath := filepath.Join(controller.SysRoot, "dev/net/tun")
+	if err := os.MkdirAll(filepath.Dir(tunPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tunPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Prepare(context.Background(), profile); err != nil {
+		t.Fatalf("prepare AWG 3.1 with upstream legacy version display: %v", err)
+	}
+}
+
 func TestOpenWrtControllerRejectsAWG31WithOldBundledTools(t *testing.T) {
 	profile, err := Parse([]byte(validProfile("Version = 3.1\nHeaderProtectionKey = " + testPrivateKey + "\nContentPaddingAddition = 10\nRekeyAfterTime = 60\nRekeyTimeout = 5\nRejectAfterTime = 120\nKeepaliveTimeout = 9\nMaxHandshakeAttempts = 7\nRandomTrailers = true\nDisableCookies = false")))
 	if err != nil {
