@@ -20,10 +20,10 @@ func TestFastLaneViewsUseEnglishSourceAndCompleteRussianCatalog(t *testing.T) {
 	}
 	paths := []string{
 		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "fastlane", "fastlane-20260906-v4.js"),
-		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-hide-keywords-v29.js"),
+		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260917-awg-v30.js"),
 		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20260906-v5.js"),
 		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "diagnostics-20260904-v3.js"),
-		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260917-v9.js"),
+		filepath.Join(root, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260918-v10.js"),
 	}
 	poPath := filepath.Join(root, "luci-app-fastlane", "po", "ru", "fastlane.po")
 	poData, err := os.ReadFile(poPath)

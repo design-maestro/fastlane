@@ -111,6 +111,10 @@ func (s *Service) RunAutoFailover(ctx context.Context, failureReason string) err
 // RunConnectionFailover recovers either selection mode without changing the
 // user's mode. Auto uses the cached fast path; manual pins the replacement.
 func (s *Service) RunConnectionFailover(ctx context.Context, failureReason string) error {
+	return s.runConnectionFailoverForRoute(ctx, failureReason, "")
+}
+
+func (s *Service) runConnectionFailoverForRoute(ctx context.Context, failureReason, expectedRoute string) error {
 	if current, loadErr := s.store.LoadState(); loadErr == nil && current.ActiveConnectionKind == "amneziawg" && current.OperationalMode == domain.OperationalModeDirect {
 		if _, checkErr := s.CheckAWG(ctx); checkErr == nil {
 			if waitErr := sleepWithContext(ctx, s.managedRecoveryConfirmationDelay()); waitErr == nil {
@@ -125,6 +129,9 @@ func (s *Service) RunConnectionFailover(ctx context.Context, failureReason strin
 	snapshot, err := s.captureAutoSelectionSnapshot()
 	if err != nil {
 		return err
+	}
+	if expectedRoute != "" && expectedRoute != recoveryRouteKey(snapshot.state) {
+		return nil
 	}
 	switch snapshot.state.Mode {
 	case domain.SelectionModeAuto:
@@ -427,12 +434,18 @@ func (s *Service) connectionRecoveryNeeded(ctx context.Context, includeManual bo
 			return true, "AmneziaWG controller is unavailable", nil
 		}
 		iface, statusErr := s.awgController.Status(ctx)
-		if statusErr != nil || !iface.Up || iface.LastHandshake == 0 {
+		if statusErr != nil {
+			return false, "", fmt.Errorf("read AmneziaWG status: %w", statusErr)
+		}
+		if !iface.Up || iface.LastHandshake == 0 {
 			return true, "AmneziaWG interface or handshake is unavailable", nil
 		}
 		if s.backend != nil {
 			status, backendErr := s.backend.Status(ctx)
-			if backendErr != nil || !status.Running {
+			if backendErr != nil {
+				return false, "", fmt.Errorf("read backend status: %w", backendErr)
+			}
+			if !status.Running {
 				return true, "backend is not running", nil
 			}
 		}
@@ -455,7 +468,7 @@ func (s *Service) connectionRecoveryNeeded(ctx context.Context, includeManual bo
 	if s.backend != nil {
 		status, statusErr := s.backend.Status(ctx)
 		if statusErr != nil {
-			return true, "backend status failed", nil
+			return false, "", fmt.Errorf("read backend status: %w", statusErr)
 		}
 		if !status.Running {
 			return true, "backend is not running", nil

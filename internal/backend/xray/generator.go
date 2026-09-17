@@ -125,10 +125,10 @@ func (Generator) Generate(req backend.ConfigRequest) ([]byte, error) {
 		})
 	}
 
-	if rule, err := directDNSRouteRule(req.DNS); err != nil {
+	if rules, err := directDNSRouteRules(req.DNS); err != nil {
 		return nil, err
-	} else if rule != nil {
-		cfg.Routing.Rules = append(cfg.Routing.Rules, *rule)
+	} else {
+		cfg.Routing.Rules = append(cfg.Routing.Rules, rules...)
 	}
 
 	if req.TransparentProxy {
@@ -614,7 +614,7 @@ func buildDNSConfig(settings domain.DNSSettings) (*xrayDNS, error) {
 	return &xrayDNS{Servers: result}, nil
 }
 
-func directDNSRouteRule(settings domain.DNSSettings) (*xrayRouteRule, error) {
+func directDNSRouteRules(settings domain.DNSSettings) ([]xrayRouteRule, error) {
 	mode, err := domain.ParseDNSMode(string(settings.Mode))
 	if err != nil {
 		return nil, err
@@ -642,12 +642,17 @@ func directDNSRouteRule(settings domain.DNSSettings) (*xrayRouteRule, error) {
 		return nil, nil
 	}
 
-	return &xrayRouteRule{
-		Type:        "field",
-		OutboundTag: "direct",
-		Domain:      domains,
-		IP:          ips,
-	}, nil
+	// Different fields in an Xray rule are ANDed. A combined domain+IP
+	// rule misses literal-IP DoH/bootstrap requests and can send DNS into a
+	// removable VPN outbound (or back into a tunnel that needs DNS itself).
+	var rules []xrayRouteRule
+	if len(domains) > 0 {
+		rules = append(rules, xrayRouteRule{Type: "field", OutboundTag: "direct", Domain: domains})
+	}
+	if len(ips) > 0 {
+		rules = append(rules, xrayRouteRule{Type: "field", OutboundTag: "direct", IP: ips})
+	}
+	return rules, nil
 }
 
 func formatDNSServers(servers []string, transport domain.DNSTransport) ([]string, error) {

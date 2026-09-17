@@ -301,7 +301,7 @@ func TestGenerateTransparentConfigRoutesDNSUpstreamsDirect(t *testing.T) {
 	if !ok {
 		t.Fatalf("routing rules missing: %+v", routing)
 	}
-	if len(rules) != 7 {
+	if len(rules) != 8 {
 		t.Fatalf("expected dns direct, transparent tcp/udp, and local inbound rules, got %d rules", len(rules))
 	}
 
@@ -313,7 +313,11 @@ func TestGenerateTransparentConfigRoutesDNSUpstreamsDirect(t *testing.T) {
 		t.Fatalf("expected first routing rule to bypass dns upstreams directly, got %+v", direct)
 	}
 
-	gotIPs := asStringSlice(t, direct["ip"])
+	ipDirect := rules[1].(map[string]any)
+	if direct["ip"] != nil || ipDirect["domain"] != nil || ipDirect["outboundTag"] != "direct" {
+		t.Fatal("DNS IPs and domains must be separate direct rules, not an AND condition")
+	}
+	gotIPs := asStringSlice(t, ipDirect["ip"])
 	if !reflect.DeepEqual(gotIPs, []string{"1.1.1.1", "9.9.9.9"}) {
 		t.Fatalf("unexpected direct-route dns IPs: %v", gotIPs)
 	}
@@ -323,7 +327,7 @@ func TestGenerateTransparentConfigRoutesDNSUpstreamsDirect(t *testing.T) {
 		t.Fatalf("unexpected direct-route dns domains: %v", gotDomains)
 	}
 
-	transparent, ok := rules[1].(map[string]any)
+	transparent, ok := rules[2].(map[string]any)
 	if !ok {
 		t.Fatalf("expected second routing rule object, got %T", rules[1])
 	}
@@ -334,7 +338,7 @@ func TestGenerateTransparentConfigRoutesDNSUpstreamsDirect(t *testing.T) {
 		t.Fatalf("unexpected transparent tcp inbound tags: %+v", transparent["inboundTag"])
 	}
 
-	transparentUDP, ok := rules[2].(map[string]any)
+	transparentUDP, ok := rules[3].(map[string]any)
 	if !ok {
 		t.Fatalf("expected third routing rule object, got %T", rules[2])
 	}
@@ -345,7 +349,7 @@ func TestGenerateTransparentConfigRoutesDNSUpstreamsDirect(t *testing.T) {
 		t.Fatalf("unexpected transparent udp inbound tags: %+v", transparentUDP["inboundTag"])
 	}
 
-	local, ok := rules[3].(map[string]any)
+	local, ok := rules[4].(map[string]any)
 	if !ok {
 		t.Fatalf("expected fourth routing rule object, got %T", rules[3])
 	}

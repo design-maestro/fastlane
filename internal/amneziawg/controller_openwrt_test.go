@@ -57,6 +57,8 @@ func successfulControllerRunner() *controllerRunner {
 			return nil, nil
 		case joined == "amneziawg-go --version":
 			return nil, errors.New("not installed")
+		case strings.HasPrefix(joined, "ubus call network.interface.flawg_probe "):
+			return []byte(`{"up":true,"l3_device":"flawg_probe","ipv4-address":[{"address":"10.8.0.2"}]}`), nil
 		case strings.HasPrefix(joined, "ubus call "):
 			return []byte(`{"up":true,"l3_device":"fastlane_awg","ipv4-address":[{"address":"10.8.0.2"}]}`), nil
 		case strings.HasPrefix(joined, FastLaneAWGTool+" show "):
@@ -104,7 +106,7 @@ func TestOpenWrtControllerPreparesSecretThroughStdinAndConnectsPolicyRoute(t *te
 		t.Fatalf("netifd configuration was not reloaded:\n%s", joined)
 	}
 	if !strings.Contains(joined, "ip -4 route replace default dev fastlane_awg table 51821") ||
-		!strings.Contains(joined, "ip -4 rule add fwmark 0x400 table 51821 priority 10900") {
+		!strings.Contains(joined, "ip -4 rule add oif fastlane_awg table 51821 priority 900") {
 		t.Fatalf("policy route was not installed:\n%s", joined)
 	}
 }
@@ -120,7 +122,7 @@ func TestOpenWrtControllerIsolatedProbeUsesDedicatedInterfaceAndRouteTable(t *te
 	if err != nil {
 		t.Fatalf("prepare isolated probe: %v", err)
 	}
-	if !status.Up || status.Device != DefaultInterfaceName {
+	if !status.Up || status.Device != ProbeInterfaceName {
 		t.Fatalf("isolated status = %+v", status)
 	}
 	if err := cleanup(context.Background()); err != nil {
@@ -129,8 +131,8 @@ func TestOpenWrtControllerIsolatedProbeUsesDedicatedInterfaceAndRouteTable(t *te
 	joined := callsText(runner.calls)
 	for _, want := range []string{
 		"ifup " + ProbeInterfaceName,
-		"ip -4 route replace default dev " + DefaultInterfaceName + " table 51822",
-		"ip -4 rule add from 10.8.0.2 table 51822 priority 10901",
+		"ip -4 route replace default dev " + ProbeInterfaceName + " table 51822",
+		"ip -4 rule add oif flawg_probe table 51822 priority 901",
 		"ifdown " + ProbeInterfaceName,
 	} {
 		if !strings.Contains(joined, want) {

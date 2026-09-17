@@ -58,6 +58,35 @@ func TestDNSBootstrapDomainsAndDirectDestinations(t *testing.T) {
 	}
 }
 
+func TestDNSDirectRoutesDoNotRequireDomainAndIPToMatchTogether(t *testing.T) {
+	rendered, err := NewGenerator().Generate(backend.ConfigRequest{
+		StartDirect: true,
+		DNS: domain.DNSSettings{Mode: domain.DNSModeSplit, Transport: domain.DNSTransportDoH,
+			Servers: []string{"https://1.1.1.1/dns-query", "https://dns.example/dns-query"}, Bootstrap: []string{"8.8.8.8"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config xrayConfig
+	if err := json.Unmarshal(rendered, &config); err != nil {
+		t.Fatal(err)
+	}
+	var hasIP, hasDomain bool
+	for _, rule := range config.Routing.Rules {
+		if rule.OutboundTag != "direct" {
+			continue
+		}
+		if len(rule.IP) > 0 && len(rule.Domain) > 0 {
+			t.Fatal("Xray ANDs domain and IP matchers; DNS destinations need separate rules")
+		}
+		hasIP = hasIP || len(rule.IP) > 0
+		hasDomain = hasDomain || len(rule.Domain) > 0
+	}
+	if !hasIP || !hasDomain {
+		t.Fatal("missing DNS IP or hostname bypass")
+	}
+}
+
 func TestCountryDirectRulesUseVerifiedGeoSiteAndGeoIPBeforeVPNFallback(t *testing.T) {
 	t.Parallel()
 

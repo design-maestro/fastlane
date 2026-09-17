@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,7 +13,9 @@ import (
 const (
 	maxRefreshConfigPollInterval = time.Second
 	maxHealthConfigPollInterval  = time.Second
-	connectionWatchInterval      = 3 * time.Second
+	// Bound synthetic traffic through the selected VPN. Egress failures
+	// require three rounds; explicit runtime failures require two.
+	connectionWatchInterval = 30 * time.Second
 )
 
 // Scheduler periodically refreshes subscriptions using the global settings interval.
@@ -30,6 +33,7 @@ type Scheduler struct {
 	lastRecoveryAt         time.Time
 	recoveryFailures       int
 	recoveryRouteKey       string
+	recoveryFailureClass   string
 	lastOutboundCleanupAt  time.Time
 	lastReserveCheckAt     time.Time
 	recoveryRetryEvery     time.Duration
@@ -209,13 +213,28 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 	var needed bool
 	var reason string
 	var err error
+	checkedRoute := s.currentRecoveryRouteKey()
 	if s.recoveryCheck != nil {
 		needed, reason, err = s.recoveryCheck(ctx)
 	} else if s.service != nil {
 		needed, reason, err = s.service.ConnectionRecoveryNeeded(ctx)
 	}
 	if err != nil {
+		s.recoveryFailures = 0
+		s.recoveryFailureClass = ""
 		s.logWarn("check active route", "error", err.Error())
+		return
+	}
+	if ctx.Err() != nil {
+		s.recoveryFailures = 0
+		s.recoveryFailureClass = ""
+		return
+	}
+	if checkedRoute != s.currentRecoveryRouteKey() {
+		// A manual connect can run in another process while this GET is in
+		// flight. Its late failure belongs to the old route, not the new one.
+		s.recoveryFailures = 0
+		s.recoveryRouteKey = ""
 		return
 	}
 	if !needed {
@@ -225,13 +244,20 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 		return
 	}
 	routeKey := s.currentRecoveryRouteKey()
-	if routeKey != s.recoveryRouteKey {
+	failureClass := "runtime"
+	threshold := 2
+	if strings.HasPrefix(reason, activeGETFailureReasonPrefix) {
+		failureClass = "egress"
+		threshold = 3
+	}
+	if routeKey != s.recoveryRouteKey || failureClass != s.recoveryFailureClass {
 		s.recoveryRouteKey = routeKey
+		s.recoveryFailureClass = failureClass
 		s.recoveryFailures = 0
 	}
 	s.recoveryFailures++
-	if s.recoveryFailures < 2 {
-		s.logWarn("active route check failed; waiting for confirmation", "reason", reason)
+	if s.recoveryFailures < threshold {
+		s.logWarn("active route check failed; waiting for confirmation", "reason", reason, "failed_rounds", s.recoveryFailures, "required_rounds", threshold)
 		return
 	}
 	now := s.now()
@@ -239,14 +265,14 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 		return
 	}
 	s.lastRecoveryAt = now
-	s.logWarn("active route failed; starting failover", "reason", reason)
+	s.logWarn("active route failed; starting failover", "reason", reason, "failed_rounds", s.recoveryFailures, "required_rounds", threshold)
 	failoverAttempted := false
 	if s.recoveryFailover != nil {
 		failoverAttempted = true
 		err = s.recoveryFailover(ctx, reason)
 	} else if s.service != nil {
 		failoverAttempted = true
-		err = s.service.RunConnectionFailover(ctx, reason)
+		err = s.service.runConnectionFailoverForRoute(ctx, reason, checkedRoute)
 	}
 	if err != nil {
 		s.logWarn("connection failover", "error", err.Error())
@@ -269,6 +295,10 @@ func (s *Scheduler) currentRecoveryRouteKey() string {
 		return "unknown"
 	}
 	state := status.State
+	return recoveryRouteKey(state)
+}
+
+func recoveryRouteKey(state domain.RuntimeState) string {
 	return fmt.Sprintf("%s|%s|%s|%s|%s|%d", state.Mode, state.ActiveSubscriptionID, state.ActiveNodeID, state.ActiveTransport, state.LastSwitchAt.UTC().Format(time.RFC3339Nano), state.RuntimeConfigGeneration)
 }
 

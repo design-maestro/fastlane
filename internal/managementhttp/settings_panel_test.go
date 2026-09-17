@@ -74,7 +74,14 @@ func TestSettingsPanelPersistenceAndAtomicErrors(t *testing.T) {
 	if !job.Succeeded {
 		t.Fatal(job)
 	}
+	job = post("/api/v1/settings-panel", "PATCH", `{"url_test_fallback_url":"https://second.example/204"}`)
+	if !job.Succeeded {
+		t.Fatal(job)
+	}
 	saved, err := fs.LoadSettings()
+	if err != nil || saved.URLTestFallbackURL != "https://second.example/204" {
+		t.Fatalf("second address not persisted: %v", err)
+	}
 	if err != nil || saved.RefreshInterval.Duration() != 2*time.Hour+3*time.Minute+4*time.Second || saved.StrictEgressCheck || saved.LatencyThreshold.Duration() != 125*time.Millisecond || saved.HealthCheckInterval.Duration() != 0 || saved.AutoProfile != domain.AutoProfileCustom || saved.CustomAutoPolicy.FailureThreshold != 3 || saved.CustomAutoPolicy.CurrentLatencyCeiling.Duration() != 300*time.Millisecond {
 		t.Fatalf("not persisted: %+v %v", saved, err)
 	}
@@ -449,7 +456,9 @@ func TestSettingsPanelBrowser(t *testing.T) {
 			t.Fatalf("browser assertion: %s: %v", js, err)
 		}
 	}
-	check(`document.querySelectorAll('[data-duration-unit]').length===9 && document.querySelectorAll('.fld-row').length===5 && document.querySelectorAll('.fld-tech-row').length===6 && document.querySelector('.fls-update button').disabled`)
+	check(`document.querySelectorAll('[data-duration-unit]').length===6`)
+	check(`document.querySelectorAll('.fld-row').length===5 && document.querySelectorAll('.fld-tech-row').length===6 && document.querySelector('.fls-update button').disabled`)
+	check(`document.querySelector('[data-setting-key="url_test_fallback_url"]').value==='https://cp.cloudflare.com/generate_204'`)
 	if err := chromedp.Run(ctx, chromedp.Evaluate(`(()=>{const i=document.querySelector('[data-setting-key="url_test_url"]');i.value='https://example.com/unsaved';i.dispatchEvent(new Event('input',{bubbles:true}));i.focus();})()`, nil), chromedp.Sleep(350*time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +471,7 @@ func TestSettingsPanelBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(`document.querySelector('#notice').textContent.includes('saved') || document.querySelector('#notice').textContent.includes('сохранены')`)
-	if err := chromedp.Run(ctx, chromedp.Click(".fld-advanced summary"), chromedp.Sleep(350*time.Millisecond)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.querySelector('.fld-advanced summary').click()`, nil), chromedp.Sleep(350*time.Millisecond)); err != nil {
 		t.Fatal(err)
 	}
 	check(`document.querySelector('.fld-advanced').open`)

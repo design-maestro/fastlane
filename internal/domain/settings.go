@@ -71,6 +71,7 @@ type Settings struct {
 	RefreshInterval     Duration         `json:"refresh_interval"`
 	HealthCheckInterval Duration         `json:"health_check_interval"`
 	URLTestURL          string           `json:"url_test_url"`
+	URLTestFallbackURL  string           `json:"url_test_fallback_url"`
 	URLTestTimeout      Duration         `json:"url_test_timeout"`
 	SwitchCooldown      Duration         `json:"switch_cooldown"`
 	LatencyThreshold    Duration         `json:"latency_threshold"`
@@ -276,6 +277,7 @@ func DefaultSettings() Settings {
 		RefreshInterval:     NewDuration(time.Hour),
 		HealthCheckInterval: NewDuration(30 * time.Minute),
 		URLTestURL:          "https://www.gstatic.com/generate_204",
+		URLTestFallbackURL:  "https://cp.cloudflare.com/generate_204",
 		URLTestTimeout:      NewDuration(5 * time.Second),
 		SwitchCooldown:      NewDuration(20 * time.Minute),
 		LatencyThreshold:    NewDuration(70 * time.Millisecond),

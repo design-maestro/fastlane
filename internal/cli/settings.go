@@ -120,7 +120,8 @@ func decodeOperationalSettingsPatch(input string) (map[string]string, error) {
 	aliases := map[string]string{
 		"refresh_interval": "refresh-interval", "health_check_interval": "health-check-interval",
 		"url_test_url": "url-test-url", "url_test_timeout": "url-test-timeout",
-		"switch_cooldown": "switch-cooldown", "latency_threshold": "latency-threshold",
+		"url_test_fallback_url": "url-test-fallback-url",
+		"switch_cooldown":       "switch-cooldown", "latency_threshold": "latency-threshold",
 		"strict_egress_check": "strict-egress-check",
 		"country_direct":      "country-routing.enabled", "direct_country": "country-routing.country",
 	}

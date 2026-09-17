@@ -35,6 +35,7 @@ type settingsPanelPatch struct {
 	RefreshInterval           *string  `json:"refresh_interval"`
 	HealthCheckInterval       *string  `json:"health_check_interval"`
 	URLTestURL                *string  `json:"url_test_url"`
+	URLTestFallbackURL        *string  `json:"url_test_fallback_url"`
 	URLTestTimeout            *string  `json:"url_test_timeout"`
 	SwitchCooldown            *string  `json:"switch_cooldown"`
 	LatencyThreshold          *string  `json:"latency_threshold"`
@@ -54,7 +55,8 @@ func (p settingsPanelPatch) values() map[string]string {
 	for key, value := range map[string]*string{
 		"refresh-interval": p.RefreshInterval, "health-check-interval": p.HealthCheckInterval,
 		"url-test-url": p.URLTestURL, "url-test-timeout": p.URLTestTimeout,
-		"switch-cooldown": p.SwitchCooldown, "latency-threshold": p.LatencyThreshold,
+		"url-test-fallback-url": p.URLTestFallbackURL,
+		"switch-cooldown":       p.SwitchCooldown, "latency-threshold": p.LatencyThreshold,
 		"auto-profile": p.AutoProfile, "auto.current-latency-ceiling": p.AutoCurrentLatencyCeiling,
 		"auto.latency-improvement": p.AutoLatencyImprovement, "auto.cooldown": p.AutoCooldown,
 	} {

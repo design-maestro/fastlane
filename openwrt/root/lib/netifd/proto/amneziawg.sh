@@ -2,7 +2,8 @@
 # Fast Lane-owned AmneziaWG netifd protocol. Supports amneziawg-go v3.1.
 # Based on the upstream amneziawg-tools protocol handler (Apache-2.0).
 
-AWG=/usr/libexec/fastlane-amneziawg
+SYSTEM_AWG=/usr/bin/awg
+FASTLANE_AWG=/usr/libexec/fastlane-amneziawg
 [ -n "$INCLUDE_ONLY" ] || { . /lib/functions.sh; . ../netifd-proto.sh; init_proto "$@"; }
 
 proto_amneziawg_init_config() {
@@ -59,11 +60,24 @@ proto_amneziawg_emit_bool() {
 
 proto_amneziawg_setup() {
 	local config="$1" private_key addresses mtu force_userspace result awg_cfg="" awg_err="" attempt ready=0
+	local awg_tool nohostroute tunlink
 	config_load network
 	config_get private_key "$config" private_key
 	config_get addresses "$config" addresses
 	config_get mtu "$config" mtu
+	config_get nohostroute "$config" nohostroute
+	config_get tunlink "$config" tunlink
 	config_get_bool force_userspace "$config" awg_force_userspace 0
+	# Keep Legacy and AWG 2.0 on the router's established toolchain. The
+	# bundled 3.1 tool is selected only for profiles that need extended fields.
+	if [ "$force_userspace" = 1 ]; then
+		awg_tool="$FASTLANE_AWG"
+	elif [ -x "$SYSTEM_AWG" ]; then
+		awg_tool="$SYSTEM_AWG"
+	else
+		awg_tool="$FASTLANE_AWG"
+	fi
+	[ -x "$awg_tool" ] || { proto_setup_failed "$config"; return 1; }
 	proto_amneziawg_fail() {
 		logger -t fastlane-awg "interface $config configuration rejected"
 		rm -f "$awg_cfg" "$awg_err"
@@ -92,7 +106,6 @@ proto_amneziawg_setup() {
 		ip link add dev "$config" type amneziawg || { proto_amneziawg_fail; return 1; }
 	elif command -v amneziawg-go >/dev/null; then rm -f "/var/run/amneziawg/$config.sock"; amneziawg-go "$config" >/dev/null 2>&1 || { proto_amneziawg_fail; return 1; }
 	else proto_amneziawg_fail; return 1; fi
-	[ -n "$mtu" ] && ip link set mtu "$mtu" dev "$config"
 	proto_init_update "$config" 1
 	umask 077; mkdir -p /tmp/amneziawg; awg_cfg="/tmp/amneziawg/$config"; awg_err="${awg_cfg}.err"
 	echo '[Interface]' > "$awg_cfg"; echo "PrivateKey=$private_key" >> "$awg_cfg"
@@ -108,11 +121,35 @@ proto_amneziawg_setup() {
 	proto_amneziawg_emit awg_max_handshake_attempts MaxHandshakeAttempts
 	proto_amneziawg_emit_bool awg_random_trailers RandomTrailers; proto_amneziawg_emit_bool awg_disable_cookies DisableCookies
 	config_foreach proto_amneziawg_peer "amneziawg_$config"
-	"$AWG" setconf "$config" "$awg_cfg" >/dev/null 2>"$awg_err"; result=$?; rm -f "$awg_cfg" "$awg_err"
+	"$awg_tool" setconf "$config" "$awg_cfg" >/dev/null 2>"$awg_err"; result=$?; rm -f "$awg_cfg" "$awg_err"
 	[ "$result" -eq 0 ] || { proto_amneziawg_fail; return 1; }
+	# Applying the UAPI configuration can restore the userspace device's
+	# default MTU. Set the profile MTU only after setconf so the value from the
+	# imported profile is the one left on the live interface.
+	[ -n "$mtu" ] && ip link set mtu "$mtu" dev "$config"
 	for address in $addresses; do case "$address" in *:*/*) proto_add_ipv6_address "${address%%/*}" "${address##*/}";; *.*/*) proto_add_ipv4_address "${address%%/*}" "${address##*/}";; esac; done
+	# Keep the encrypted endpoint outside the tunnel. Without this upstream
+	# netifd dependency, a later route reload can capture the outer UDP path.
+	if [ "$nohostroute" != 1 ]; then
+		"$awg_tool" show "$config" endpoints 2>/dev/null | \
+			sed -E 's/\[?([0-9.:a-f]+)\]?:([0-9]+)/\1 \2/' | \
+			while read -r key address port; do
+				[ -n "$port" ] || continue
+				proto_add_host_dependency "$config" "$address" "$tunlink"
+			done
+	fi
 	proto_send_update "$config"
+	# netifd applies the L3 update synchronously here. Reassert the requested
+	# MTU afterwards as well so a device-default update cannot silently return
+	# userspace AWG to 1420.
+	[ -n "$mtu" ] && ip link set mtu "$mtu" dev "$config"
 }
 
-proto_amneziawg_teardown() { local config="$1"; if proto_amneziawg_kernel; then ip link del dev "$config" >/dev/null 2>&1; else rm -f "/var/run/amneziawg/$config.sock"; fi; }
+proto_amneziawg_teardown() {
+	local config="$1"
+	# Deleting TUN closes the userspace device too; removing just the socket
+	# leaves an orphan daemon/interface and breaks the next preparation.
+	ip link del dev "$config" >/dev/null 2>&1 || true
+	rm -f "/var/run/amneziawg/$config.sock"
+}
 [ -n "$INCLUDE_ONLY" ] || add_protocol amneziawg

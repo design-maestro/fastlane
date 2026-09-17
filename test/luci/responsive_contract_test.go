@@ -31,7 +31,7 @@ func TestFastLaneCurrentViewsKeepMobileInteractionContracts(t *testing.T) {
 		},
 		{
 			name: "VPN",
-			path: filepath.Join("view", "fastlane", "vpn-20260910-hide-keywords-v29.js"),
+			path: filepath.Join("view", "fastlane", "vpn-20260917-awg-v30.js"),
 			required: []string{
 				".fl-server-panel{border:1px solid var(--fl-line);border-radius:8px;background:var(--fl-panel);overflow:visible;container-type:inline-size}",
 				".fl-toolbar{display:grid",
@@ -76,7 +76,7 @@ func TestFastLaneCurrentViewsKeepMobileInteractionContracts(t *testing.T) {
 		},
 		{
 			name: "Settings",
-			path: filepath.Join("view", "fastlane", "settings-20260917-v9.js"),
+			path: filepath.Join("view", "fastlane", "settings-20260918-v10.js"),
 			required: []string{
 				"@media(max-width:850px)",
 				".fls-head{align-items:flex-start;flex-direction:column}",

@@ -23,11 +23,9 @@ const (
 	FastLaneAWGTool      = "/usr/libexec/fastlane-amneziawg"
 	RouteTable           = 51821
 	ProbeRouteTable      = 51822
-	ProbeRulePriority    = 10901
-	// RouteMark must not overlap mwan3's 0x100/0x200 policy marks.  The
-	// router may still establish an AWG handshake with an overlapping mark,
-	// while the actual HTTPS traffic is sent through WAN instead of AWG.
-	RouteMark = 0x400
+	ProbeRulePriority    = 901
+	// Outside mwan3's 0x3f00 mask and Fast Lane's transparent-proxy bit.
+	RouteMark = 0x10000
 )
 
 type Compatibility struct {
@@ -273,7 +271,7 @@ func (c *OpenWrtController) connectWithoutPolicy(ctx context.Context) (Interface
 	}
 }
 
-// PrepareIsolatedProbe uses a dedicated netifd interface and a source rule.
+// PrepareIsolatedProbe uses a dedicated netifd interface and an output-device rule.
 // Its route never shares the active AWG mark/table, so candidate checks cannot
 // replace, drain, or reroute the active AWG connection.
 func (c *OpenWrtController) PrepareIsolatedProbe(ctx context.Context, profile Profile) (InterfaceStatus, func(context.Context) error, error) {
@@ -306,8 +304,8 @@ func (c *OpenWrtController) PrepareIsolatedProbe(ctx context.Context, profile Pr
 		_ = cleanup(context.Background())
 		return InterfaceStatus{}, cleanup, fmt.Errorf("install isolated AmneziaWG route: %w: %s", routeErr, strings.TrimSpace(string(output)))
 	}
-	_, _ = probe.run(ctx, nil, "ip", family, "rule", "del", "from", status.Address, "table", strconv.Itoa(ProbeRouteTable), "priority", strconv.Itoa(ProbeRulePriority))
-	if output, ruleErr := probe.run(ctx, nil, "ip", family, "rule", "add", "from", status.Address, "table", strconv.Itoa(ProbeRouteTable), "priority", strconv.Itoa(ProbeRulePriority)); ruleErr != nil {
+	_, _ = probe.run(ctx, nil, "ip", family, "rule", "del", "oif", status.Device, "table", strconv.Itoa(ProbeRouteTable), "priority", strconv.Itoa(ProbeRulePriority))
+	if output, ruleErr := probe.run(ctx, nil, "ip", family, "rule", "add", "oif", status.Device, "table", strconv.Itoa(ProbeRouteTable), "priority", strconv.Itoa(ProbeRulePriority)); ruleErr != nil {
 		_ = cleanup(context.Background())
 		return InterfaceStatus{}, cleanup, fmt.Errorf("install isolated AmneziaWG source rule: %w: %s", ruleErr, strings.TrimSpace(string(output)))
 	}
@@ -316,13 +314,18 @@ func (c *OpenWrtController) PrepareIsolatedProbe(ctx context.Context, profile Pr
 
 func (c *OpenWrtController) removeIsolatedProbe(ctx context.Context) error {
 	name := c.interfaceName()
+	for _, family := range []string{"-4", "-6"} {
+		_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "oif", name, "table", strconv.Itoa(ProbeRouteTable), "priority", strconv.Itoa(ProbeRulePriority))
+		_, _ = c.run(ctx, nil, "ip", family, "route", "flush", "table", strconv.Itoa(ProbeRouteTable))
+	}
 	status, _ := c.Status(ctx)
 	if status.Address != "" {
 		family := "-4"
 		if address, err := netip.ParseAddr(status.Address); err == nil && address.Is6() {
 			family = "-6"
 		}
-		_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "from", status.Address, "table", strconv.Itoa(ProbeRouteTable), "priority", strconv.Itoa(ProbeRulePriority))
+		// Remove the source rule left by 0.1.48 as well.
+		_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "from", status.Address, "table", strconv.Itoa(ProbeRouteTable), "priority", "10901")
 		_, _ = c.run(ctx, nil, "ip", family, "route", "flush", "table", strconv.Itoa(ProbeRouteTable))
 	}
 	_, _ = c.run(ctx, nil, "ifdown", name)
@@ -338,6 +341,12 @@ func (c *OpenWrtController) removeIsolatedProbe(ctx context.Context) error {
 
 func (c *OpenWrtController) Disconnect(ctx context.Context) error {
 	name := c.interfaceName()
+	for _, family := range []string{"-4", "-6"} {
+		_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "oif", name, "table", strconv.Itoa(RouteTable), "priority", "900")
+		for _, mark := range []string{"0x200", "0x400"} {
+			_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "fwmark", mark, "table", strconv.Itoa(RouteTable), "priority", "10900")
+		}
+	}
 	_, _ = c.run(ctx, nil, "ip", "-4", "rule", "del", "fwmark", fmt.Sprintf("0x%x", RouteMark), "table", strconv.Itoa(RouteTable), "priority", "10900")
 	_, _ = c.run(ctx, nil, "ip", "-6", "rule", "del", "fwmark", fmt.Sprintf("0x%x", RouteMark), "table", strconv.Itoa(RouteTable), "priority", "10900")
 	_, _ = c.run(ctx, nil, "ip", "-4", "route", "flush", "table", strconv.Itoa(RouteTable))
@@ -412,11 +421,16 @@ func (c *OpenWrtController) installPolicyRoutes(ctx context.Context, status Inte
 		return fmt.Errorf("install AmneziaWG route table: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	// Delete first so repeated preparation remains idempotent.
-	_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "fwmark", fmt.Sprintf("0x%x", RouteMark), "table", strconv.Itoa(RouteTable), "priority", "10900")
-	if output, err := c.run(ctx, nil, "ip", family, "rule", "add", "fwmark", fmt.Sprintf("0x%x", RouteMark), "table", strconv.Itoa(RouteTable), "priority", "10900"); err != nil {
+	_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "oif", status.Device, "table", strconv.Itoa(RouteTable), "priority", "900")
+	if output, err := c.run(ctx, nil, "ip", family, "rule", "add", "oif", status.Device, "table", strconv.Itoa(RouteTable), "priority", "900"); err != nil {
 		return fmt.Errorf("install AmneziaWG policy rule: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// EnsurePolicyRoutes also repairs policy rules when upgrading an already-up tunnel.
+func (c *OpenWrtController) EnsurePolicyRoutes(ctx context.Context, status InterfaceStatus) error {
+	return c.installPolicyRoutes(ctx, status)
 }
 
 func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {

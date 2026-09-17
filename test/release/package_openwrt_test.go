@@ -59,7 +59,7 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "fastlane", "assets", "fastlane-mark.png"), "png", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "subscriptions.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn.js"), "'use strict';\n", 0o644)
-	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-hide-keywords-v29.js"), "'use strict';\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260917-awg-v30.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20260906-v5.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "firewall.js"), "'use strict';\n", 0o644)
@@ -70,7 +70,7 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "diagnostics-20260904-v3.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "zapret.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings.js"), "'use strict';\n", 0o644)
-	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260917-v9.js"), "'use strict';\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260918-v10.js"), "'use strict';\n", 0o644)
 
 	toolDir := t.TempDir()
 	writeExecutable(t, filepath.Join(toolDir, "po2lmo"), "#!/bin/sh\nprintf 'compiled translation' > \"$2\"\n")
@@ -183,10 +183,10 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 		t.Fatalf("expected settings view in package data: %v", err)
 	}
 	for _, name := range []string{
-		"vpn-20260910-hide-keywords-v29.js",
+		"vpn-20260917-awg-v30.js",
 		"routing-20260906-v5.js",
 		"diagnostics-20260904-v3.js",
-		"settings-20260917-v9.js",
+		"settings-20260918-v10.js",
 	} {
 		path := filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "www", "luci-static", "resources", "view", "fastlane", name)
 		if _, err := os.Stat(path); err != nil {

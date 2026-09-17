@@ -733,7 +733,7 @@ async function smoke(section, name, run) {
 		assert.equal(autoButton.disabled, false);
 		assert.match(autoButton.attrs.title, /select the best again/);
 		await page.handleAuto();
-		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all']);
+		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all', '--select']);
 		assert.ok(toasts.some((toast) => toast.type === 'success' && /Automatic selection started/.test(toast.message)));
 		commands = [];
 		await page.handleConnect('durev', 'nl');
@@ -891,7 +891,7 @@ async function smoke(section, name, run) {
 		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'durev']);
 		commands = [];
 		await page.handleAuto();
-		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all']);
+		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all', '--select']);
 	});
 
 	await smoke('VPN', 'merges partial router-side progress as each GET result finishes', async () => {
@@ -1381,6 +1381,7 @@ async function smoke(section, name, run) {
 		const page = makeSettings();
 		page.draft = {
 			refresh_interval: '2h3m4s', health_check_interval: '45s', url_test_url: 'https://new.example/204',
+			url_test_fallback_url: 'https://second.example/204',
 			url_test_timeout: '12s', switch_cooldown: '2m5s', latency_threshold: '70ms', strict_egress_check: false
 		};
 		await page.handleSaveSettings({ preventDefault() {} });
@@ -1390,6 +1391,7 @@ async function smoke(section, name, run) {
 			'refresh-interval': '2h3m4s',
 			'health-check-interval': '45s',
 			'url-test-url': 'https://new.example/204',
+			'url-test-fallback-url': 'https://second.example/204',
 			'url-test-timeout': '12s',
 			'switch-cooldown': '2m5s',
 			'latency-threshold': '70ms',

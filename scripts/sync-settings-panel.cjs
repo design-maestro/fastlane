@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 let patch = '*** Begin Patch\n';
 for (const [name, source] of [
-  ['settings', 'settings-20260917-v9.js'],
+  ['settings', 'settings-20260918-v10.js'],
   ['diagnostics', 'diagnostics-20260904-v3.js']
 ]) {
   const input = 'luci-app-fastlane/htdocs/luci-static/resources/view/fastlane/' + source;

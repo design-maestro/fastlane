@@ -1,5 +1,5 @@
 'use strict';
-// Keep the filename revisioned so LuCI reloads this module after upgrades.
+// Revisioned so LuCI loads the distinct check/select actions after upgrading.
 'require view';
 'require fs';
 'require ui';
@@ -453,10 +453,14 @@ return view.extend({
 			if (success)
 				fastlaneShell.showToast(success, 'success');
 			return this.refreshView(scrollPosition).then(function() { return result; });
-		}, this)).catch(L.bind(function() {
+		}, this)).catch(L.bind(function(error) {
 			this.awgBusy = '';
 			this.awgBusyProfileID = '';
-			fastlaneShell.showToast(_('Could not complete the AmneziaWG action.'), 'error');
+			var reason = String(error && error.message || error || '');
+			var message = /both HTTPS checks failed/.test(reason)
+				? _('The AWG server did not pass the HTTPS check.')
+				: _('Could not complete the AmneziaWG action.');
+			fastlaneShell.showToast(message, 'error');
 			return this.refreshView(scrollPosition);
 		}, this));
 	},
@@ -939,7 +943,7 @@ return view.extend({
 		if (ev) ev.preventDefault();
 		return this.runAction(
 			_('Selecting the best server…'),
-			this.execJSON([ '--json', 'inspect', 'health-check', '--subscription', 'all' ]),
+			this.execJSON([ '--json', 'inspect', 'health-check', '--subscription', 'all', '--select' ]),
 			_('Automatic selection started in the background. You can close the page.')
 		);
 	},

@@ -45,6 +45,7 @@ type Request struct {
 	SOCKSProxyPort int
 	HTTPProxyPort  int
 	ProbeTimeout   time.Duration
+	FallbackURL    string
 }
 
 type Result struct {
@@ -256,13 +257,13 @@ func (r Runner) URLTest(ctx context.Context, req Request, rawURL string) (URLTes
 	// Establish the candidate tunnel first, then measure a second GET over the
 	// same keep-alive transport. This keeps the result comparable with common
 	// URL-test clients instead of charging the VLESS/TLS handshake to every ping.
-	if _, err := measureSingleLatencyWithTimeout(ctx, client, rawURL, req.ProbeTimeout); err != nil {
+	if _, err := measureURLTestEndpoints(ctx, client, rawURL, req.FallbackURL, req.ProbeTimeout); err != nil {
 		if output := strings.TrimSpace(process.Output()); output != "" {
 			return URLTestResult{}, fmt.Errorf("warm up GET: %w\n%s", err, output)
 		}
 		return URLTestResult{}, fmt.Errorf("warm up GET: %w", err)
 	}
-	latency, err := measureSingleLatencyWithTimeout(ctx, client, rawURL, req.ProbeTimeout)
+	latency, err := measureURLTestEndpoints(ctx, client, rawURL, req.FallbackURL, req.ProbeTimeout)
 	if err != nil {
 		if output := strings.TrimSpace(process.Output()); output != "" {
 			return URLTestResult{}, fmt.Errorf("%w\n%s", err, output)
