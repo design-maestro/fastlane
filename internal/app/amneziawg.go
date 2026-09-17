@@ -321,9 +321,26 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 	if stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID != "" && stateBefore.ActiveAWGProfileID != id {
 		return "", amneziawg.InterfaceStatus{}, fmt.Errorf("disconnect the active AmneziaWG profile before checking another profile")
 	}
-	if prepare {
+	activeProfile := stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID == id
+	isIsolatedProbe := false
+	var isolatedCleanup func(context.Context) error
+	var iface amneziawg.InterfaceStatus
+	if prepare && !activeProfile {
+		if isolated, ok := s.awgController.(amneziawg.IsolatedProbeController); ok {
+			iface, isolatedCleanup, err = isolated.PrepareIsolatedProbe(ctx, profile)
+			if err != nil {
+				return "", iface, err
+			}
+			isIsolatedProbe = true
+			defer func() {
+				if cleanupErr := isolatedCleanup(context.Background()); cleanupErr != nil {
+					s.logWarn("remove isolated AmneziaWG probe", "error", cleanupErr.Error())
+				}
+			}()
+		}
+	}
+	if prepare && !isIsolatedProbe {
 		prepared, statusErr := s.awgController.Status(ctx)
-		activeProfile := stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID == id
 		if activeProfile && (statusErr != nil || !prepared.Up || prepared.Device == "" || prepared.Address == "") {
 			return "", prepared, fmt.Errorf("active AmneziaWG profile is unavailable; refusing to replace it during a check")
 		}
@@ -343,18 +360,27 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 			}
 		}
 	}
-	iface, err := s.awgController.Status(ctx)
-	if err != nil || !iface.Up || iface.Device == "" || iface.Address == "" {
-		iface, err = s.awgController.Connect(ctx)
-	}
-	if err != nil {
-		return "", iface, err
+	if !isIsolatedProbe {
+		iface, err = s.awgController.Status(ctx)
+		if err != nil || !iface.Up || iface.Device == "" || iface.Address == "" {
+			iface, err = s.awgController.Connect(ctx)
+		}
+		if err != nil {
+			return "", iface, err
+		}
 	}
 	managed, err := s.ensureAWGManagedRuntime(ctx)
 	if err != nil {
 		return "", iface, err
 	}
-	tag, err := managed.PrepareInterfaceOutbound(ctx, iface.Device, iface.Address, amneziawg.RouteMark)
+	mark := amneziawg.RouteMark
+	if isIsolatedProbe {
+		// The isolated interface is selected by its source-address rule; using
+		// the active AWG mark here would send this candidate through the live
+		// tunnel instead.
+		mark = 0
+	}
+	tag, err := managed.PrepareInterfaceOutbound(ctx, iface.Device, iface.Address, mark)
 	latency := time.Duration(0)
 	egressIP := ""
 	countryCode := ""

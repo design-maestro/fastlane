@@ -109,6 +109,39 @@ func TestOpenWrtControllerPreparesSecretThroughStdinAndConnectsPolicyRoute(t *te
 	}
 }
 
+func TestOpenWrtControllerIsolatedProbeUsesDedicatedInterfaceAndRouteTable(t *testing.T) {
+	profile, err := Parse([]byte(validProfile("")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := successfulControllerRunner()
+	controller := newControllerForTest(t, runner)
+	status, cleanup, err := controller.PrepareIsolatedProbe(context.Background(), profile)
+	if err != nil {
+		t.Fatalf("prepare isolated probe: %v", err)
+	}
+	if !status.Up || status.Device != DefaultInterfaceName {
+		t.Fatalf("isolated status = %+v", status)
+	}
+	if err := cleanup(context.Background()); err != nil {
+		t.Fatalf("cleanup isolated probe: %v", err)
+	}
+	joined := callsText(runner.calls)
+	for _, want := range []string{
+		"ifup " + ProbeInterfaceName,
+		"ip -4 route replace default dev " + DefaultInterfaceName + " table 51822",
+		"ip -4 rule add from 10.8.0.2 table 51822 priority 10901",
+		"ifdown " + ProbeInterfaceName,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("isolated probe missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "ifdown "+DefaultInterfaceName) || strings.Contains(joined, "table 51821") {
+		t.Fatalf("isolated probe touched active interface or route table:\n%s", joined)
+	}
+}
+
 func TestOpenWrtControllerPreparesLegacyWithoutS3S4(t *testing.T) {
 	profile, err := Parse([]byte(legacyProfile("")))
 	if err != nil {
