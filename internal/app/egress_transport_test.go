@@ -187,3 +187,45 @@ func TestAWGEgressProbeForcesFreshConnectionEveryFiveMinutes(t *testing.T) {
 		t.Fatalf("healthy pool was rotated early: %s", service.awgEgressFreshAt)
 	}
 }
+
+type egressTestConnectionIDKey struct{}
+
+func TestAWGEgressProbeRetriesStalledKeepAliveOnFreshConnection(t *testing.T) {
+	var connectionCount atomic.Int32
+	var stallExisting atomic.Bool
+	var existingConnections atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connectionID, _ := r.Context().Value(egressTestConnectionIDKey{}).(int32)
+		if stallExisting.Load() && connectionID <= existingConnections.Load() {
+			<-r.Context().Done()
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	server.Config.ConnContext = func(ctx context.Context, _ net.Conn) context.Context {
+		return context.WithValue(ctx, egressTestConnectionIDKey{}, connectionCount.Add(1))
+	}
+	server.Start()
+	defer server.Close()
+
+	client := server.Client()
+	transport := client.Transport.(*http.Transport)
+	if err := probeEgressEndpoints(context.Background(), client, []string{server.URL}); err != nil {
+		t.Fatalf("prime keep-alive connection: %v", err)
+	}
+	existingConnections.Store(connectionCount.Load())
+	stallExisting.Store(true)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	retried, err := probeAWGEgressEndpoints(ctx, client, transport, []string{server.URL}, 50*time.Millisecond)
+	if err != nil {
+		t.Fatalf("fresh retry did not recover stalled keep-alive: %v", err)
+	}
+	if !retried {
+		t.Fatal("stalled keep-alive did not trigger a fresh retry")
+	}
+	if connectionCount.Load() <= existingConnections.Load() {
+		t.Fatalf("fresh retry reused stalled connection: connections=%d", connectionCount.Load())
+	}
+}

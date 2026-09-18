@@ -46,7 +46,7 @@ func (t *egressEndpointTrace) summary(index int) string {
 func (t *egressEndpointTrace) clientTrace() *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		DNSStart:     func(httptrace.DNSStartInfo) { t.setPhase("dns") },
-		ConnectStart: func(string, string) { t.setPhase("proxy_tcp") },
+		ConnectStart: func(string, string) { t.setPhase("tcp") },
 		ConnectDone: func(_, _ string, err error) {
 			if err == nil {
 				t.setPhase("proxy_connect")
