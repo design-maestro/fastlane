@@ -421,7 +421,10 @@ func TestSchedulerHealthLoopPicksUpDisabledToEnabledWithoutOldWait(t *testing.T)
 	}
 
 	checkedAt := waitForHealthCheck(t, checks)
-	if elapsed := checkedAt.Sub(enabledAt); elapsed > 250*time.Millisecond {
+	// Loaded CI runners can pause this goroutine for several hundred
+	// milliseconds. The regression guarded here is the old disabled/5-second
+	// wait, so 750ms still distinguishes a prompt config reload from that bug.
+	if elapsed := checkedAt.Sub(enabledAt); elapsed > 750*time.Millisecond {
 		t.Fatalf("enabled health loop kept the disabled timer for %s", elapsed)
 	}
 }
@@ -453,7 +456,7 @@ func TestSchedulerHealthLoopPicksUpShorterIntervalWithoutOldWait(t *testing.T) {
 	}
 
 	checkedAt := waitForHealthCheck(t, checks)
-	if elapsed := checkedAt.Sub(shortenedAt); elapsed > 250*time.Millisecond {
+	if elapsed := checkedAt.Sub(shortenedAt); elapsed > 750*time.Millisecond {
 		t.Fatalf("health loop kept the old long timer for %s", elapsed)
 	}
 }
