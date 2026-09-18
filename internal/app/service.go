@@ -206,6 +206,7 @@ const (
 	backendEgressProbeTimeout             = 12 * time.Second
 	backendEgressProbeRetryDelay          = 250 * time.Millisecond
 	awgEgressFreshConnectionInterval      = 5 * time.Minute
+	awgEgressPooledAttemptTimeout         = 2500 * time.Millisecond
 	localDNSListen                        = "127.0.0.1"
 	localDNSPort                          = 1053
 	// Bit 0 is reserved by Fast Lane TPROXY policy routing (fwmark 0x1/0x1).
@@ -5737,7 +5738,35 @@ func (s *Service) defaultAWGEgressProbe(ctx context.Context, device string) erro
 
 	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return probeEgressEndpoints(probeCtx, client, endpoints)
+	retriedFresh, probeErr := probeAWGEgressEndpoints(probeCtx, client, s.awgEgressTransport, endpoints, awgEgressPooledAttemptTimeout)
+	if retriedFresh {
+		s.awgEgressMu.Lock()
+		s.awgEgressFreshAt = s.currentTime()
+		s.awgEgressMu.Unlock()
+		if probeErr == nil {
+			s.logInfo("AmneziaWG egress recovered on fresh HTTPS connection", "device", device)
+		}
+	}
+	return probeErr
+}
+
+// probeAWGEgressEndpoints gives a reused HTTPS connection a bounded chance.
+// If it stalls, retry once after dropping idle connections. A fresh success is
+// part of the same watchdog round and must not count as an active-route failure.
+func probeAWGEgressEndpoints(ctx context.Context, client *http.Client, transport *http.Transport, endpoints []string, pooledTimeout time.Duration) (bool, error) {
+	pooledCtx, cancelPooled := context.WithTimeout(ctx, pooledTimeout)
+	pooledErr := probeEgressEndpoints(pooledCtx, client, endpoints)
+	cancelPooled()
+	if pooledErr == nil || ctx.Err() != nil {
+		return false, pooledErr
+	}
+
+	transport.CloseIdleConnections()
+	freshErr := probeEgressEndpoints(ctx, client, endpoints)
+	if freshErr == nil {
+		return true, nil
+	}
+	return true, fmt.Errorf("pooled connection failed: %v; fresh connection failed: %w", pooledErr, freshErr)
 }
 
 func backendStateMayStillBeStarting(serviceState string) bool {
