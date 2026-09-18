@@ -17,6 +17,8 @@ type ScoreConfig struct {
 	AverageLatencyWeight          float64
 	LatencyVariationPenaltyWeight float64
 	FailureRatePenalty            time.Duration
+	MinimumConfidenceSuccesses    int
+	MissingSuccessPenalty         time.Duration
 	ConsecutiveFailurePenalty     time.Duration
 	InstabilityUnitPenalty        time.Duration
 	MaxLatencyBaseline            time.Duration
@@ -32,6 +34,8 @@ func DefaultScoreConfig() ScoreConfig {
 		AverageLatencyWeight:          0.8,
 		LatencyVariationPenaltyWeight: 1.5,
 		FailureRatePenalty:            2500 * time.Millisecond,
+		MinimumConfidenceSuccesses:    4,
+		MissingSuccessPenalty:         15 * time.Millisecond,
 		ConsecutiveFailurePenalty:     3 * time.Second,
 		InstabilityUnitPenalty:        500 * time.Millisecond,
 		MaxLatencyBaseline:            2 * time.Second,
@@ -78,11 +82,18 @@ func effectiveSelectionLatency(health domain.NodeHealth, cfg ScoreConfig) time.D
 	if variation := health.LatencyVariation.Duration(); variation > 0 && cfg.LatencyVariationPenaltyWeight > 0 {
 		latency += time.Duration(float64(variation) * cfg.LatencyVariationPenaltyWeight)
 	}
+	if health.Healthy && health.SuccessCount > 0 && health.SuccessCount < cfg.MinimumConfidenceSuccesses && cfg.MissingSuccessPenalty > 0 {
+		latency += time.Duration(cfg.MinimumConfidenceSuccesses-health.SuccessCount) * cfg.MissingSuccessPenalty
+	}
 
 	attempts := health.SuccessCount + health.FailureCount
 	if attempts > 0 && cfg.FailureRatePenalty > 0 {
 		failureRate := float64(health.FailureCount) / float64(attempts)
-		recoveryFactor := 1 + float64(min(health.ConsecutiveSuccesses, 20))/5
+		// Cumulative counters describe the whole lifetime of a node, while a long
+		// current success streak is stronger evidence of its present condition.
+		// Keep old failures relevant, but let every confirmed recovery sample
+		// progressively age their penalty out instead of capping recovery early.
+		recoveryFactor := 1 + float64(max(health.ConsecutiveSuccesses, 0))
 		latency += time.Duration(failureRate * float64(cfg.FailureRatePenalty) / recoveryFactor)
 	}
 	if health.ConsecutiveFailures > 0 && cfg.ConsecutiveFailurePenalty > 0 {
