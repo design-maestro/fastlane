@@ -67,7 +67,9 @@ making a missing country-specific tag a requirement.
 3. Check candidates with bounded parallel HTTPS GET requests.
 4. Publish each finished result and select the best healthy candidate using a
    stability-first score: rolling latency, jitter, failure history, recent
-   instability, and the fresh GET latency.
+   instability, sample confidence, and the fresh GET latency. A single success
+   carries a temporary low-confidence penalty, while a sustained success streak
+   progressively ages out old lifetime failures.
 5. Respect failure thresholds, stability-adjusted improvement, switch cooldown,
    and anti-flap policy.
 6. Validate and activate the selected Xray configuration.

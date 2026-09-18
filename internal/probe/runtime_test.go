@@ -239,6 +239,43 @@ func TestSelectBestNodePrefersEstablishedHistoryOverOneFastProbe(t *testing.T) {
 	}
 }
 
+func TestSelectBestNodePrefersRecoveredLowLatencyHistoryOverOneFreshSample(t *testing.T) {
+	t.Parallel()
+
+	nodes := []domain.Node{
+		{ID: "recovered-awg", Name: "Recovered AWG"},
+		{ID: "fresh-xray", Name: "Fresh Xray"},
+	}
+	health := map[string]domain.NodeHealth{
+		"recovered-awg": {
+			NodeID:               "recovered-awg",
+			Healthy:              true,
+			LastLatency:          domain.NewDuration(24_314_645 * time.Nanosecond),
+			AverageLatency:       domain.NewDuration(23_727_973 * time.Nanosecond),
+			LatencyVariation:     domain.NewDuration(1_539_101 * time.Nanosecond),
+			SuccessCount:         189,
+			FailureCount:         7,
+			ConsecutiveSuccesses: 24,
+		},
+		"fresh-xray": {
+			NodeID:               "fresh-xray",
+			Healthy:              true,
+			LastLatency:          domain.NewDuration(30_150_000 * time.Nanosecond),
+			AverageLatency:       domain.NewDuration(30_150_000 * time.Nanosecond),
+			SuccessCount:         1,
+			ConsecutiveSuccesses: 1,
+		},
+	}
+
+	best, _, err := probe.SelectBestNode(nodes, health, probe.DefaultScoreConfig())
+	if err != nil {
+		t.Fatalf("select best node: %v", err)
+	}
+	if best.ID != "recovered-awg" {
+		t.Fatalf("expected recovered AWG history to outrank one fresh sample, got %s", best.ID)
+	}
+}
+
 func TestSelectBestNodePrefersStableHistoryOverFastFlakyProbe(t *testing.T) {
 	t.Parallel()
 
