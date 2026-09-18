@@ -70,6 +70,8 @@ var css = `
 css += '.fls-update{align-items:flex-start}.fls-update .fls-manage-copy{flex:1}.fls-update-actions{flex-wrap:wrap;justify-content:flex-end;max-width:52%}.fls-update .fls-primary{color:var(--fl-bg)}@media(max-width:850px){.fls-update{align-items:stretch}.fls-update-actions{width:100%;max-width:none;justify-content:flex-start}}';
 css += '.fls-profile-control{display:grid;gap:12px;margin-bottom:14px}.fls-segments{display:flex;gap:6px;flex-wrap:wrap}.fls-segment{min-height:40px;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:#050d10;color:var(--muted);font:inherit;font-weight:700;cursor:pointer}.fls-segment-active{background:var(--fl-green-dim);border-color:var(--fl-green-dim);color:var(--fl-bg)}.fls-segment:focus-visible{outline:2px solid var(--fl-green);outline-offset:2px}.fls-profile-copy{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.fls-custom-policy{padding-top:2px}@media(max-width:480px){.fls-segments{display:grid;grid-template-columns:1fr 1fr}.fls-segment{width:100%}}';
 
+css += '.fls-profile-control{grid-template-columns:minmax(0,1fr);min-width:0}.fls-profile-control>*{min-width:0}.fls-profile-copy{overflow-wrap:anywhere}@media(max-width:480px){.fls-segments{grid-template-columns:repeat(2,minmax(0,1fr))}.fls-segment{min-width:0;white-space:normal;overflow-wrap:anywhere}}';
+
 return view.extend({
 	load: function() {
 		return Promise.all([ this.execJSON([ '--json', 'settings', 'get' ]), uci.load('luci') ]).then(L.bind(function(result) {
@@ -331,6 +333,7 @@ return view.extend({
 			[ 'refresh_interval', 'refresh-interval' ],
 			[ 'health_check_interval', 'health-check-interval' ],
 			[ 'url_test_url', 'url-test-url' ],
+			[ 'url_test_fallback_url', 'url-test-fallback-url' ],
 			[ 'url_test_timeout', 'url-test-timeout' ],
 			[ 'switch_cooldown', 'switch-cooldown' ],
 			[ 'latency_threshold', 'latency-threshold' ],
@@ -428,6 +431,7 @@ return view.extend({
 					this.durationField('refresh_interval', _('Subscription update'), _('Background update interval'), [ 'h', 'm', 's' ]),
 					this.durationField('health_check_interval', _('Automatic server check'), _('0 min 0 s disables automatic checks'), [ 'm', 's' ]),
 					this.field('url_test_url', _('URL test address'), _('HTTPS page with a fast 204 response'), 'url'),
+					this.field('url_test_fallback_url', _('Second check address'), _('Use another HTTPS site with a 204 response. A response from either address confirms connectivity.'), 'url'),
 					this.durationField('url_test_timeout', _('URL test timeout'), _('Maximum wait time'), [ 's' ])
 				]) ]),
 				E('section', { class: 'fls-card' }, [ E('h3', {}, [ _('Automatic selection') ]), E('p', {}, [ _('Choose how carefully Fast Lane keeps the active server.') ]), this.autoProfileControl(), E('div', { class: 'fls-fields' }, [

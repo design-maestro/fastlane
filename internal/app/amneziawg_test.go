@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -85,6 +86,7 @@ type awgControllerFake struct {
 	disconnected int
 	removed      int
 	status       amneziawg.InterfaceStatus
+	statusErr    error
 }
 
 func (c *awgControllerFake) Preflight(context.Context) (amneziawg.Compatibility, error) {
@@ -110,10 +112,111 @@ func (c *awgControllerFake) Remove(context.Context) error {
 	return nil
 }
 func (c *awgControllerFake) Status(context.Context) (amneziawg.InterfaceStatus, error) {
-	return c.status, nil
+	return c.status, c.statusErr
 }
 
 type awgManagedBackend struct{ *managedRecordingBackend }
+
+type isolatedAWGControllerFake struct {
+	awgControllerFake
+	probes, cleaned int
+	probeErr        error
+}
+
+func (c *isolatedAWGControllerFake) PrepareIsolatedProbe(context.Context, amneziawg.Profile) (amneziawg.InterfaceStatus, func(context.Context) error, error) {
+	c.probes++
+	return amneziawg.InterfaceStatus{Up: true, Device: amneziawg.ProbeInterfaceName, Address: "10.8.0.2"}, func(context.Context) error { c.cleaned++; return nil }, c.probeErr
+}
+
+func TestAWGConnectKeepsPermanentTunnelWithIsolatedController(t *testing.T) {
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: domain.DefaultRuntimeState()}
+	controller := &isolatedAWGControllerFake{}
+	managed := &awgManagedBackend{&managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: "fastlane-direct"}}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: &awgProfileMemoryStore{raw: []byte(validAWGProfile)}, AWGController: controller, Backend: managed})
+	service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error { return nil }
+	if _, err := service.CheckAWG(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if controller.probes != 1 || controller.cleaned != 1 || controller.prepared != 0 {
+		t.Fatal("check must own only a temporary tunnel")
+	}
+	if err := service.ConnectAWG(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if controller.prepared != 1 || controller.connected != 1 || !controller.status.Up || controller.probes != 1 {
+		t.Fatal("connect selected a temporary or missing tunnel")
+	}
+}
+
+func TestAWGFailedReplacementRestoresPreviousTunnelAndMode(t *testing.T) {
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: domain.DefaultRuntimeState()}
+	controller := &isolatedAWGControllerFake{}
+	managed := &awgManagedBackend{&managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: "fastlane-direct"}}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: &awgProfileMemoryStore{}, AWGController: controller, Backend: managed})
+	first, err := service.ImportAWGProfile("first", []byte(validAWGProfile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.ImportAWGProfile("second", []byte(strings.ReplaceAll(validAWGProfile, "198.51.100.1", "198.51.100.2")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error { return nil }
+	if err := service.ConnectAWGProfile(context.Background(), first.ID); err != nil {
+		t.Fatal(err)
+	}
+	originalTag := stateStore.state.SelectedOutboundTag
+	probes := 0
+	service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error {
+		probes++
+		if probes == 2 {
+			return errors.New("new permanent tunnel failed")
+		}
+		return nil
+	}
+	if err := service.ConnectAWGProfile(context.Background(), second.ID); err == nil {
+		t.Fatal("expected replacement failure")
+	}
+	if !controller.status.Up || !stateStore.state.Connected || stateStore.state.ActiveAWGProfileID != first.ID || stateStore.state.PreparedAWGProfileID != first.ID {
+		t.Fatal("previous tunnel was not restored")
+	}
+	if managed.selected != originalTag || stateStore.state.Mode != domain.SelectionModeManual || stateStore.settings.Mode != domain.SelectionModeManual {
+		t.Fatal("previous selection mode was not restored")
+	}
+}
+
+func TestAWGFailedIsolatedCandidatePreservesActiveTunnel(t *testing.T) {
+	for _, setupFailure := range []bool{false, true} {
+		t.Run(fmt.Sprint(setupFailure), func(t *testing.T) {
+			state := domain.DefaultRuntimeState()
+			state.ActiveConnectionKind, state.ActiveAWGProfileID, state.PreparedAWGProfileID = "amneziawg", "existing", "existing"
+			state.Connected, state.SelectedOutboundTag = true, "fastlane-node-existing"
+			stateStore := &memoryStore{settings: domain.DefaultSettings(), state: state}
+			controller := &isolatedAWGControllerFake{awgControllerFake: awgControllerFake{status: amneziawg.InterfaceStatus{Up: true, Device: "awg0", Address: "10.8.0.2"}}}
+			if setupFailure {
+				controller.probeErr = errors.New("setup failed")
+			}
+			managed := &awgManagedBackend{&managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: state.SelectedOutboundTag}}
+			service := NewService(Dependencies{Store: stateStore, AWGStore: &awgProfileMemoryStore{raw: []byte(validAWGProfile)}, AWGController: controller, Backend: managed})
+			service.managedOutboundProbe = func(context.Context, backend.ManagedBackend, int, string) error {
+				return errors.New("candidate timeout")
+			}
+			profile, parseErr := amneziawg.Parse([]byte(validAWGProfile))
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			if _, err := service.CheckAWGProfile(context.Background(), profile.StableID()); err == nil {
+				t.Fatal("expected failed candidate")
+			}
+			if controller.probes != 1 || controller.cleaned != 1 || controller.removed != 0 || controller.disconnected != 0 || controller.prepared != 0 {
+				t.Fatal("candidate changed live tunnel or leaked resources")
+			}
+			if !stateStore.state.Connected || stateStore.state.ActiveAWGProfileID != "existing" || managed.selected != state.SelectedOutboundTag {
+				t.Fatal("candidate changed selected connection")
+			}
+		})
+	}
+}
 
 func (b *awgManagedBackend) PrepareInterfaceOutbound(context.Context, string, string, int) (string, error) {
 	return "fastlane-node-awg-test", nil
@@ -190,6 +293,37 @@ func TestAWGFailedCheckDoesNotChangeUserRoute(t *testing.T) {
 	}
 	if stateStore.state.AWGLastProbe == nil || stateStore.state.AWGLastProbe.Success {
 		t.Fatalf("probe state = %+v", stateStore.state.AWGLastProbe)
+	}
+}
+
+func TestAWGCheckDoesNotReplaceUnavailableActiveProfile(t *testing.T) {
+	profile, err := amneziawg.Parse([]byte(validAWGProfile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := profile.StableID()
+	state := domain.DefaultRuntimeState()
+	state.ActiveConnectionKind = "amneziawg"
+	state.ActiveAWGProfileID = id
+	state.PreparedAWGProfileID = id
+	state.ActiveSubscriptionID = awgSubscriptionID
+	state.ActiveNodeID = id
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	state.SelectedOutboundTag = "fastlane-node-awg-test"
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: state}
+	profileStore := &awgProfileMemoryStore{raw: []byte(validAWGProfile)}
+	controller := &awgControllerFake{statusErr: errors.New("interface is down")}
+	service := NewService(Dependencies{Store: stateStore, AWGStore: profileStore, AWGController: controller})
+
+	if _, err := service.CheckAWGProfile(context.Background(), id); err == nil || !strings.Contains(err.Error(), "refusing to replace") {
+		t.Fatalf("CheckAWGProfile error = %v", err)
+	}
+	if controller.prepared != 0 || controller.removed != 0 || controller.connected != 0 {
+		t.Fatalf("active profile was changed: prepare/remove/connect=%d/%d/%d", controller.prepared, controller.removed, controller.connected)
+	}
+	if stateStore.state.ActiveAWGProfileID != id || !stateStore.state.Connected || stateStore.state.SelectedOutboundTag != "fastlane-node-awg-test" {
+		t.Fatalf("active route changed: %+v", stateStore.state)
 	}
 }
 
@@ -430,6 +564,118 @@ func TestAWGFailureUsesVLESSReserveAndKeepsManualMode(t *testing.T) {
 	}
 	if stateStore.state.Mode != domain.SelectionModeManual || !stateStore.state.Connected {
 		t.Fatalf("manual mode not preserved: %+v", stateStore.state)
+	}
+}
+
+func TestManualAWGRecoveryDetectsHTTPFailureDespiteLiveInterface(t *testing.T) {
+	state := domain.DefaultRuntimeState()
+	state.ActiveConnectionKind = "amneziawg"
+	state.ActiveSubscriptionID = awgSubscriptionID
+	state.ActiveNodeID = awgNodeID
+	state.Mode = domain.SelectionModeManual
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: state}
+	controller := &awgControllerFake{status: amneziawg.InterfaceStatus{Up: true, Device: "awg0", Address: "10.8.0.2", LastHandshake: 1}}
+	service := NewService(Dependencies{Store: stateStore, AWGController: controller, Backend: &recordingBackend{status: backend.RuntimeStatus{Running: true}}})
+	probeCalls := 0
+	service.backendEgressProbe = func(context.Context) error {
+		probeCalls++
+		return errors.New("temporary timeout")
+	}
+
+	needed, reason, err := service.ConnectionRecoveryNeeded(context.Background())
+	if err != nil {
+		t.Fatalf("ConnectionRecoveryNeeded: %v", err)
+	}
+	if !needed || reason == "" {
+		t.Fatalf("live interface masked internet failure: needed=%t reason=%q", needed, reason)
+	}
+	if probeCalls != 1 {
+		t.Fatalf("manual AWG recovery ran %d probes, want 1", probeCalls)
+	}
+}
+
+func TestAWGRecoveryUsesInterfaceBoundProbe(t *testing.T) {
+	state := domain.DefaultRuntimeState()
+	state.ActiveConnectionKind = "amneziawg"
+	state.ActiveSubscriptionID = awgSubscriptionID
+	state.ActiveNodeID = awgNodeID
+	state.Mode = domain.SelectionModeManual
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: state}
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	controller := &awgControllerFake{status: amneziawg.InterfaceStatus{Up: true, Device: "awg0", LastHandshake: now.Unix()}}
+	service := NewService(Dependencies{Store: stateStore, AWGController: controller, Backend: &recordingBackend{status: backend.RuntimeStatus{Running: true}}})
+	service.now = func() time.Time { return now }
+	service.backendEgressProbe = func(context.Context) error { return errors.New("Xray probe must not run") }
+	calledDevice := ""
+	service.awgEgressProbe = func(_ context.Context, device string) error {
+		calledDevice = device
+		return nil
+	}
+
+	needed, reason, err := service.ConnectionRecoveryNeeded(context.Background())
+	if err != nil || needed || reason != "" {
+		t.Fatalf("recovery result needed=%t reason=%q err=%v", needed, reason, err)
+	}
+	if calledDevice != "awg0" {
+		t.Fatalf("AWG probe device = %q", calledDevice)
+	}
+}
+
+func TestAWGRecoverySeparatesFreshAndStaleHandshakeFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		age  time.Duration
+		soft bool
+	}{
+		{"fresh", 30 * time.Second, true},
+		{"stale", 3 * time.Minute, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := domain.DefaultRuntimeState()
+			state.ActiveConnectionKind = "amneziawg"
+			state.ActiveSubscriptionID = awgSubscriptionID
+			state.ActiveNodeID = awgNodeID
+			state.Mode = domain.SelectionModeManual
+			state.Connected = true
+			state.OperationalMode = domain.OperationalModeVPN
+			now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+			controller := &awgControllerFake{status: amneziawg.InterfaceStatus{Up: true, Device: "awg0", LastHandshake: now.Add(-tc.age).Unix()}}
+			service := NewService(Dependencies{Store: &memoryStore{settings: domain.DefaultSettings(), state: state}, AWGController: controller, Backend: &recordingBackend{status: backend.RuntimeStatus{Running: true}}})
+			service.now = func() time.Time { return now }
+			service.awgEgressProbe = func(context.Context, string) error { return errors.New("control endpoints unavailable") }
+
+			needed, reason, err := service.ConnectionRecoveryNeeded(context.Background())
+			if err != nil || !needed {
+				t.Fatalf("recovery result needed=%t reason=%q err=%v", needed, reason, err)
+			}
+			if gotSoft := strings.HasPrefix(reason, activeGETFailureReasonPrefix); gotSoft != tc.soft {
+				t.Fatalf("reason %q soft=%t, want %t", reason, gotSoft, tc.soft)
+			}
+		})
+	}
+}
+
+func TestManualAWGRecoveryStillDetectsDeadTunnel(t *testing.T) {
+	state := domain.DefaultRuntimeState()
+	state.ActiveConnectionKind = "amneziawg"
+	state.ActiveSubscriptionID = awgSubscriptionID
+	state.ActiveNodeID = awgNodeID
+	state.Mode = domain.SelectionModeManual
+	state.Connected = true
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: state}
+	controller := &awgControllerFake{status: amneziawg.InterfaceStatus{Up: false}}
+	service := NewService(Dependencies{Store: stateStore, AWGController: controller, Backend: &recordingBackend{status: backend.RuntimeStatus{Running: true}}})
+
+	needed, reason, err := service.ConnectionRecoveryNeeded(context.Background())
+	if err != nil {
+		t.Fatalf("ConnectionRecoveryNeeded: %v", err)
+	}
+	if !needed || reason != "AmneziaWG interface or handshake is unavailable" {
+		t.Fatalf("dead manually pinned AWG was not detected: needed=%t reason=%q", needed, reason)
 	}
 }
 

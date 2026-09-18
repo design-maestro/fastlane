@@ -16,6 +16,7 @@ import (
 )
 
 const (
+	probeOnlyScopePrefix    = "probe-only:"
 	healthCheckRequestFile  = "health-check.request"
 	healthCheckProgressFile = "health-check-progress.json"
 	healthCheckCancelFile   = "health-check.cancel"
@@ -75,7 +76,7 @@ func queueHealthCheck(opts *rootOptions, scope string) (healthCheckProgress, err
 		return current, nil
 	}
 	_ = os.Remove(healthCheckCancelPath(opts))
-	progress := healthCheckProgress{Status: "queued", Scope: scope}
+	progress := healthCheckProgress{Status: "queued", Scope: strings.TrimPrefix(scope, probeOnlyScopePrefix)}
 	if err := writeHealthCheckProgress(progressPath, progress); err != nil {
 		return healthCheckProgress{}, err
 	}
@@ -192,6 +193,8 @@ func runManagementHealthCheck(ctx context.Context, opts *rootOptions, scope stri
 }
 
 func runTrackedHealthCheckResult(ctx context.Context, opts *rootOptions, scope string, connect, reportCancellation bool) error {
+	probeOnly := strings.HasPrefix(scope, probeOnlyScopePrefix)
+	scope = strings.TrimPrefix(scope, probeOnlyScopePrefix)
 	if !connect {
 		// A cancelled queued request can leave a marker behind when the daemon
 		// never consumed it. It must not cancel an unrelated scheduled pass.
@@ -219,7 +222,9 @@ func runTrackedHealthCheckResult(ctx context.Context, opts *rootOptions, scope s
 	})
 
 	var runErr error
-	if connect {
+	if probeOnly {
+		runErr = opts.service.CheckHealth(runCtx, scope)
+	} else if connect {
 		_, runErr = opts.service.ConnectAuto(runCtx, scope)
 	} else {
 		runErr = opts.service.RunAutoHealthCheck(runCtx)

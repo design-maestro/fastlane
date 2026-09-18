@@ -90,9 +90,6 @@ func parseINI(data []byte) (rawProfile, error) {
 		if _, unsafe := unsafeDirectives[normalizedKey]; unsafe {
 			return rawProfile{}, fmt.Errorf("line %d: %w %q; lifecycle hooks are forbidden", lineNumber, ErrUnsafeDirective, canonicalKey)
 		}
-		if _, newer := awg3Parameters[normalizedKey]; newer {
-			return rawProfile{}, fmt.Errorf("line %d: %w: parameter %q requires AWG 3.x; only 2.0 is supported", lineNumber, ErrUnsupportedVersion, canonicalKey)
-		}
 		if currentSection == "interface" && (normalizedKey == "version" || normalizedKey == "protocolversion") {
 			if raw.seen[currentSection][normalizedKey] || raw.declaredVersion != "" {
 				return rawProfile{}, fmt.Errorf("line %d: duplicate parameter %q in [Interface]", lineNumber, canonicalKey)
@@ -102,6 +99,8 @@ func parseINI(data []byte) (rawProfile, error) {
 				raw.declaredVersion = VersionLegacy
 			case "2", Version20:
 				raw.declaredVersion = Version20
+			case "3", "3.0", Version31:
+				raw.declaredVersion = Version31
 			default:
 				return rawProfile{}, fmt.Errorf("line %d: %w %q; Legacy and 2.0 are supported", lineNumber, ErrUnsupportedVersion, value)
 			}
@@ -137,7 +136,8 @@ func acceptParameter(raw rawProfile, section, key, displayKey, value string, lin
 		switch key {
 		case "privatekey", "address", "mtu", "jc", "jmin", "jmax",
 			"s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4",
-			"i1", "i2", "i3", "i4", "i5":
+			"i1", "i2", "i3", "i4", "i5",
+			"headerprotectionkey", "contentpaddingaddition", "rekeyaftertime", "rekeytimeout", "rejectaftertime", "keepalivetimeout", "maxhandshakeattempts", "randomtrailers", "disablecookies":
 			raw.sections[section][key] = value
 			return nil
 		case "dns", "table":

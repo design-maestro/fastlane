@@ -56,6 +56,7 @@ fastlane_binary_path() {
 
 fastlane_awg_runtime_path() {
 	scope_path "/usr/bin/amneziawg-go"
+	scope_path "/usr/libexec/fastlane-amneziawg"
 }
 
 fastlane_service_path() {

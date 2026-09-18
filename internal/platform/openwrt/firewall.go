@@ -25,7 +25,8 @@ const (
 	udpTProxyTable    = "100"
 	udpTProxyPriority = "1000"
 	probeBypassMark   = "0x100"
-	awgBypassMark     = "0x200"
+	// Keep in sync with amneziawg.RouteMark, outside mwan3's 0x3f00 mask.
+	awgBypassMark = "0x10000"
 
 	minConntrackMax = 16384
 	maxConntrackMax = 131072

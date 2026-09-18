@@ -17,7 +17,7 @@ const settingsPath = path.join(
 	'resources',
 	'view',
 	'fastlane',
-	'settings-20260917-v9.js'
+	'settings-20260918-v10.js'
 );
 const source = fs.readFileSync(settingsPath, 'utf8');
 const helpersStart = source.indexOf('function trim(value)');

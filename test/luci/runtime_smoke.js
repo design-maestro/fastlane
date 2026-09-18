@@ -443,6 +443,21 @@ async function smoke(section, name, run) {
 		assert.match(text, /Add your first subscription/);
 	});
 
+	await smoke('VPN', 'retains measured country through newer reserve checks and failures', async () => {
+		const page = makeVPN();
+		page.readPings = () => ({});
+		for (const healthy of [true, false]) {
+			page.mergePersistedPings({ state: { health: { nl: { node_id: 'nl', healthy, last_latency: '45ms', last_checked_at: healthy ? '2026-09-03T18:04:00Z' : '2026-09-03T18:04:30Z' } } } }, page.pageData[1]);
+			assert.equal(page.pings['durev:nl'].country_code, 'NL');
+			assert.equal(page.pings['durev:nl'].healthy, healthy);
+		}
+		page.applyURLTestResult('durev', 'nl', { latency_ms: 40, checked_at: '2026-09-03T18:05:00Z' });
+		assert.equal(page.pings['durev:nl'].country_code, 'NL');
+		page.applyURLTestResult('durev', 'nl', { latency_ms: 41, checked_at: '2026-09-03T18:06:00Z', country_code: 'SE', egress_ip: '192.0.2.4' });
+		assert.equal(page.pings['durev:nl'].country_code, 'SE');
+		assert.equal(page.pings['durev:nl'].egress_ip, '192.0.2.4');
+	});
+
 	await smoke('VPN', 'renders recovering mode without claiming an active VPN server', async () => {
 		const page = makeVPN();
 		page.pageData[0].state.operational_mode = 'recovering';
@@ -733,7 +748,7 @@ async function smoke(section, name, run) {
 		assert.equal(autoButton.disabled, false);
 		assert.match(autoButton.attrs.title, /select the best again/);
 		await page.handleAuto();
-		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all']);
+		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all', '--select']);
 		assert.ok(toasts.some((toast) => toast.type === 'success' && /Automatic selection started/.test(toast.message)));
 		commands = [];
 		await page.handleConnect('durev', 'nl');
@@ -891,7 +906,7 @@ async function smoke(section, name, run) {
 		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'durev']);
 		commands = [];
 		await page.handleAuto();
-		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all']);
+		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'all', '--select']);
 	});
 
 	await smoke('VPN', 'merges partial router-side progress as each GET result finishes', async () => {
@@ -1381,6 +1396,7 @@ async function smoke(section, name, run) {
 		const page = makeSettings();
 		page.draft = {
 			refresh_interval: '2h3m4s', health_check_interval: '45s', url_test_url: 'https://new.example/204',
+			url_test_fallback_url: 'https://second.example/204',
 			url_test_timeout: '12s', switch_cooldown: '2m5s', latency_threshold: '70ms', strict_egress_check: false
 		};
 		await page.handleSaveSettings({ preventDefault() {} });
@@ -1390,6 +1406,7 @@ async function smoke(section, name, run) {
 			'refresh-interval': '2h3m4s',
 			'health-check-interval': '45s',
 			'url-test-url': 'https://new.example/204',
+			'url-test-fallback-url': 'https://second.example/204',
 			'url-test-timeout': '12s',
 			'switch-cooldown': '2m5s',
 			'latency-threshold': '70ms',

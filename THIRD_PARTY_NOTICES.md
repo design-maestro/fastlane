@@ -19,3 +19,11 @@ by OpenWrt LuCI's `po2lmo` tool. The compatible reference implementation is:
 - License: <https://www.apache.org/licenses/LICENSE-2.0>
 
 The command is a build-time tool and is not installed on the router.
+
+## AmneziaWG tools
+
+The packaged `fastlane-amneziawg` binary is built from
+[amnezia-vpn/amneziawg-tools](https://github.com/amnezia-vpn/amneziawg-tools)
+at `v3.1.20260812` (commit `ee0f0a9aa34ff0a0da4b3433b9512781cfe02843`).
+It is distributed under GPL-2.0; the complete license is included in release
+packages as `AMNEZIAWG-TOOLS-GPL-2.0.txt`.

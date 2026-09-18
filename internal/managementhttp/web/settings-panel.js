@@ -1,4 +1,4 @@
-/* Faithful port of settings-20260917-v9.js. Screen renderers,
+/* Faithful port of settings-20260918-v10.js. Screen renderers,
  * duration controls, chips and CSS are retained from LuCI; transport is typed HTTP.
  * mount(container,{api,operation,notice,confirmAction,getSnapshot}) -> controller.
  * Call controller.refresh(snapshot) on EVERY root reload. mount only after login.
@@ -46,6 +46,8 @@ const translations = {
   "Automatic server check": "Автопроверка серверов",
   "0 min 0 s disables automatic checks": "0 мин 0 с отключает автоматические проверки",
   "URL test address": "Адрес URL-теста",
+  "Second check address": "Второй адрес проверки",
+  "Use another HTTPS site with a 204 response. A response from either address confirms connectivity.": "Другой HTTPS-сайт с ответом 204. Для подтверждения связи достаточно ответа любого адреса.",
   "HTTPS page with a fast 204 response": "HTTPS-страница с быстрым ответом 204",
   "URL test timeout": "Тайм-аут URL-теста",
   "Maximum wait time": "Максимальное время ожидания",
@@ -413,6 +415,7 @@ function create(container, shared) {
 					this.durationField('refresh_interval', _('Subscription update'), _('Background update interval'), [ 'h', 'm', 's' ]),
 					this.durationField('health_check_interval', _('Automatic server check'), _('0 min 0 s disables automatic checks'), [ 'm', 's' ]),
 					this.field('url_test_url', _('URL test address'), _('HTTPS page with a fast 204 response'), 'url'),
+					this.field('url_test_fallback_url', _('Second check address'), _('Use another HTTPS site with a 204 response. A response from either address confirms connectivity.'), 'url'),
 					this.durationField('url_test_timeout', _('URL test timeout'), _('Maximum wait time'), [ 's' ])
 				]) ]),
 				E('section', { class: 'fls-card' }, [ E('h3', {}, [ _('Automatic selection') ]), E('p', {}, [ _('Choose how carefully Fast Lane keeps the active server.') ]), this.autoProfileControl(), E('div', { class: 'fls-fields' }, [
@@ -576,7 +579,7 @@ function create(container, shared) {
 			const savedPolicy = this.settings.custom_auto_policy || {};
 			const saved = { ...this.settings, auto_allow_optimization: !!savedPolicy.allow_optimization, auto_current_latency_ceiling: savedPolicy.current_latency_ceiling || '0s', auto_latency_improvement: savedPolicy.latency_improvement || '70ms', auto_relative_improvement: savedPolicy.relative_improvement == null ? 0.35 : savedPolicy.relative_improvement, auto_required_candidate_wins: savedPolicy.required_candidate_wins || 4, auto_cooldown: savedPolicy.cooldown || '20m0s', auto_failure_threshold: savedPolicy.failure_threshold || 2 };
 			const numeric = new Set(['auto_relative_improvement','auto_required_candidate_wins','auto_failure_threshold']);
-			for (const key of ['refresh_interval','health_check_interval','url_test_url','url_test_timeout','switch_cooldown','latency_threshold','strict_egress_check','auto_profile','auto_allow_optimization','auto_current_latency_ceiling','auto_latency_improvement','auto_relative_improvement','auto_required_candidate_wins','auto_cooldown','auto_failure_threshold']) {
+			for (const key of ['refresh_interval','health_check_interval','url_test_url','url_test_fallback_url','url_test_timeout','switch_cooldown','latency_threshold','strict_egress_check','auto_profile','auto_allow_optimization','auto_current_latency_ceiling','auto_latency_improvement','auto_relative_improvement','auto_required_candidate_wins','auto_cooldown','auto_failure_threshold']) {
         if (this.draft[key] === saved[key]) continue;
 				patch[key] = numeric.has(key) ? Number(this.draft[key]) : this.draft[key];
       }

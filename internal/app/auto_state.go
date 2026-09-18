@@ -59,7 +59,9 @@ func (s *Service) mergeAutoHealthState(state domain.RuntimeState) domain.Runtime
 		return state
 	}
 
-	state.Health = cloneHealthMap(s.autoHealthState.health)
+	// CLI row checks can persist fresher observations without changing the
+	// selected route, so a matching route key does not make this cache newer.
+	state.Health = mergeProbeHealth(state.Health, s.autoHealthState.health, "")
 	state.LastFailureReason = s.autoHealthState.lastFailureReason
 	return state
 }

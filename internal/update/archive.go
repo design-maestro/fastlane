@@ -50,6 +50,7 @@ func ValidateArchive(data []byte) error {
 			name == "etc/uci-defaults/luci-i18n-fastlane-ru" ||
 			name == "usr/lib/lua/luci/i18n/fastlane.ru.lmo" ||
 			strings.HasPrefix(name, "usr/libexec/fastlane-") ||
+			name == "lib/netifd/proto/amneziawg.sh" ||
 			strings.HasPrefix(name, "usr/share/licenses/fastlane/") ||
 			strings.HasPrefix(name, "www/luci-static/resources/fastlane/") ||
 			strings.HasPrefix(name, "www/luci-static/resources/view/fastlane/") ||

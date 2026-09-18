@@ -32,14 +32,23 @@ build_release_asset() {
 			"${ROOT_DIR}/scripts/build-openwrt.sh"
 		OUTPUT_DIR="${output_dir}" GOARCH="${goarch}" GOMIPS="${gomips}" \
 			"${ROOT_DIR}/scripts/build-amneziawg-go.sh"
+		OUTPUT_DIR="${output_dir}" AWG_CC="${AWG_CC_MIPSEL:-mipsel-linux-gnu-gcc}" \
+			"${ROOT_DIR}/scripts/build-amneziawg-tools.sh"
 	else
 		OUTPUT_DIR="${output_dir}" GOARCH="${goarch}" \
 			"${ROOT_DIR}/scripts/build-openwrt.sh"
 		OUTPUT_DIR="${output_dir}" GOARCH="${goarch}" \
 			"${ROOT_DIR}/scripts/build-amneziawg-go.sh"
+		if [ "${package_arch}" = "aarch64_cortex-a53" ]; then
+			awg_cc="${AWG_CC_AARCH64:-aarch64-linux-gnu-gcc}"
+		else
+			awg_cc="${AWG_CC_X86_64:-cc}"
+		fi
+		OUTPUT_DIR="${output_dir}" AWG_CC="${awg_cc}" \
+			"${ROOT_DIR}/scripts/build-amneziawg-tools.sh"
 	fi
 
-	VERSION="${RELEASE_VERSION}" ARCH="${package_arch}" BINARY_PATH="${output_dir}/fastlane" AWG_BINARY_PATH="${output_dir}/amneziawg-go" \
+	VERSION="${RELEASE_VERSION}" ARCH="${package_arch}" BINARY_PATH="${output_dir}/fastlane" AWG_BINARY_PATH="${output_dir}/amneziawg-go" AWG_TOOL_BINARY_PATH="${output_dir}/amneziawg" \
 		"${ROOT_DIR}/scripts/package-openwrt.sh"
 }
 

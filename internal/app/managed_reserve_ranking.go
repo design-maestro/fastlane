@@ -175,12 +175,18 @@ func managedReserveProbeOrder(existing, ranked []managedReserveCandidate, health
 }
 
 func selectManagedReserveStates(successful []managedReserveCandidate, health map[string]domain.NodeHealth, previous []domain.RuntimeOutboundState, now time.Time) []domain.RuntimeOutboundState {
-	if len(successful) == 0 {
+	confirmed := make([]managedReserveCandidate, 0, len(successful))
+	for _, candidate := range successful {
+		if health[candidate.node.ID].ConsecutiveSuccesses >= managedReserveHealthyConfirmations {
+			confirmed = append(confirmed, candidate)
+		}
+	}
+	if len(confirmed) == 0 {
 		return nil
 	}
-	ranked := rankManagedReserveCandidates(successful, health)
-	byTag := make(map[string]managedReserveCandidate, len(successful))
-	for _, candidate := range successful {
+	ranked := rankManagedReserveCandidates(confirmed, health)
+	byTag := make(map[string]managedReserveCandidate, len(confirmed))
+	for _, candidate := range confirmed {
 		byTag[candidate.tag] = candidate
 	}
 	oldByTag := make(map[string]domain.RuntimeOutboundState)

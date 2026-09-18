@@ -18,10 +18,10 @@ import (
 	storepkg "github.com/design-maestro/fastlane/internal/store"
 )
 
-func TestConnectionWatchIntervalSupportsFastFailover(t *testing.T) {
+func TestConnectionWatchIntervalDoesNotFloodActiveVPN(t *testing.T) {
 	t.Parallel()
 
-	if connectionWatchInterval != 3*time.Second {
+	if connectionWatchInterval != 30*time.Second {
 		t.Fatalf("unexpected active route watch interval: %s", connectionWatchInterval)
 	}
 }
@@ -514,6 +514,36 @@ func TestSchedulerConnectionWatchBacksOffRepeatedRecoveryScans(t *testing.T) {
 	}
 }
 
+func TestSchedulerDiscardsFailureFromConnectionReplacedDuringGET(t *testing.T) {
+	store := &memoryStore{settings: domain.DefaultSettings(), state: domain.DefaultRuntimeState()}
+	store.state.Mode = domain.SelectionModeManual
+	store.state.ActiveNodeID = "old"
+	scheduler := NewScheduler(NewService(Dependencies{Store: store}))
+	scheduler.lastOutboundCleanupAt = time.Now()
+	scheduler.lastReserveCheckAt = time.Now()
+	scheduler.recoveryFailures = 1
+	scheduler.recoveryRouteKey = scheduler.currentRecoveryRouteKey()
+	scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
+		store.state.ActiveNodeID = "new"
+		store.state.LastSwitchAt = time.Now()
+		return true, "late timeout from old connection", nil
+	}
+	scheduler.recoveryFailover = func(context.Context, string) error {
+		t.Fatal("stale timeout switched the new connection")
+		return nil
+	}
+	scheduler.runConnectionWatchOnce(context.Background())
+	if scheduler.recoveryFailures != 0 {
+		t.Fatal("stale failure retained confirmation count")
+	}
+	if err := scheduler.service.runConnectionFailoverForRoute(context.Background(), "stale", "old-route-key"); err != nil {
+		t.Fatal(err)
+	}
+	if store.state.ActiveNodeID != "new" {
+		t.Fatal("failover applied to a different route")
+	}
+}
+
 func TestSchedulerConnectionWatchFailsOverBeforeFullScan(t *testing.T) {
 	t.Parallel()
 
@@ -531,6 +561,14 @@ func TestSchedulerConnectionWatchFailsOverBeforeFullScan(t *testing.T) {
 	scheduler.runConnectionWatchOnce(context.Background())
 	if len(steps) != 0 {
 		t.Fatalf("first failed cycle triggered recovery: %v", steps)
+	}
+	scheduler.runConnectionWatchOnce(context.Background())
+	if len(steps) != 0 {
+		t.Fatalf("second failed cycle triggered recovery: %v", steps)
+	}
+	scheduler.runConnectionWatchOnce(context.Background())
+	if len(steps) != 0 {
+		t.Fatalf("third failed cycle triggered recovery: %v", steps)
 	}
 	scheduler.runConnectionWatchOnce(context.Background())
 	if !reflect.DeepEqual(steps, []string{"cached failover"}) {
@@ -585,8 +623,71 @@ func TestSchedulerConnectionWatchDoesNotThrottleASecondFailedRouteAfterSuccessfu
 	scheduler.runConnectionWatchOnce(context.Background())
 	now = now.Add(connectionWatchInterval)
 	scheduler.runConnectionWatchOnce(context.Background())
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
 	if failoverCalls != 2 {
 		t.Fatalf("expected two confirmed recovery attempts, got %d", failoverCalls)
+	}
+}
+
+func TestConnectionWatchRequiresConsecutiveSameClassFailures(t *testing.T) {
+	for _, interruption := range []string{"success", "error", "runtime"} {
+		t.Run(interruption, func(t *testing.T) {
+			scheduler := NewScheduler(nil)
+			checks, switches := 0, 0
+			scheduler.recoveryCheck = func(context.Context) (bool, string, error) {
+				checks++
+				if checks == 3 {
+					switch interruption {
+					case "success":
+						return false, "", nil
+					case "error":
+						return false, "", errors.New("status unavailable")
+					case "runtime":
+						return true, "backend is not running", nil
+					}
+				}
+				return true, activeGETFailureReasonPrefix + "both endpoints failed", nil
+			}
+			scheduler.recoveryFailover = func(context.Context, string) error { switches++; return nil }
+			for i := 0; i < 5; i++ {
+				scheduler.runConnectionWatchOnce(context.Background())
+			}
+			if switches != 0 {
+				t.Fatalf("nonconsecutive failures caused %d switches", switches)
+			}
+			scheduler.runConnectionWatchOnce(context.Background())
+			if switches != 0 {
+				t.Fatalf("three post-reset failures caused %d switches", switches)
+			}
+			scheduler.runConnectionWatchOnce(context.Background())
+			if switches != 1 {
+				t.Fatalf("confirmed failure caused %d switches, want 1", switches)
+			}
+		})
+	}
+}
+
+func TestManagedReserveCheckUsesTenMinuteCadenceAndJitter(t *testing.T) {
+	now := time.Date(2026, 9, 18, 10, 0, 0, 0, time.UTC)
+	scheduler := NewScheduler(nil)
+	scheduler.now = func() time.Time { return now }
+	scheduler.lastReserveCheckAt = now
+	scheduler.reserveCheckJitter = 17 * time.Second
+
+	now = now.Add(10*time.Minute + 16*time.Second)
+	if scheduler.managedReserveCheckDue() {
+		t.Fatal("reserve check ignored jitter")
+	}
+	now = now.Add(time.Second)
+	if !scheduler.managedReserveCheckDue() {
+		t.Fatal("reserve check did not become due")
 	}
 }
 

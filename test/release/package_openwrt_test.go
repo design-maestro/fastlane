@@ -38,7 +38,10 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	writeExecutable(t, filepath.Join(repoDir, "scripts", "package-openwrt.sh"), string(scriptSource))
 	writeExecutable(t, filepath.Join(repoDir, "bin", "openwrt", "x86_64", "fastlane"), "#!/bin/sh\nprintf 'fastlane test binary\\n'\n")
 	writeExecutable(t, filepath.Join(repoDir, "bin", "openwrt", "x86_64", "amneziawg-go"), "#!/bin/sh\nprintf 'amneziawg-go test binary\\n'\n")
+	writeExecutable(t, filepath.Join(repoDir, "bin", "openwrt", "x86_64", "amneziawg"), "#!/bin/sh\nprintf 'amneziawg test binary\\n'\n")
+	writeFile(t, filepath.Join(repoDir, "bin", "openwrt", "x86_64", "amneziawg-tools-COPYING"), "GPL-2.0\n", 0o644)
 	writeExecutable(t, filepath.Join(repoDir, "openwrt", "root", "etc", "init.d", "fastlane"), "#!/bin/sh\nexit 0\n")
+	writeExecutable(t, filepath.Join(repoDir, "openwrt", "root", "lib", "netifd", "proto", "amneziawg.sh"), "#!/bin/sh\nexit 0\n")
 	writeExecutable(t, filepath.Join(repoDir, "openwrt", "root", "usr", "libexec", "fastlane-cron"), "#!/bin/sh\nexit 0\n")
 	writeExecutable(t, filepath.Join(repoDir, "openwrt", "root", "usr", "libexec", "fastlane-self-update"), "#!/bin/sh\nexit 0\n")
 	writeExecutable(t, filepath.Join(repoDir, "openwrt", "root", "usr", "libexec", "fastlane-xray-update"), "#!/bin/sh\nexit 0\n")
@@ -56,7 +59,7 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "fastlane", "assets", "fastlane-mark.png"), "png", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "subscriptions.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn.js"), "'use strict';\n", 0o644)
-	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260910-hide-keywords-v29.js"), "'use strict';\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260918-country-v31.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20260906-v5.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "firewall.js"), "'use strict';\n", 0o644)
@@ -67,7 +70,7 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "diagnostics-20260904-v3.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "zapret.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings.js"), "'use strict';\n", 0o644)
-	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260917-v9.js"), "'use strict';\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "settings-20260918-v10.js"), "'use strict';\n", 0o644)
 
 	toolDir := t.TempDir()
 	writeExecutable(t, filepath.Join(toolDir, "po2lmo"), "#!/bin/sh\nprintf 'compiled translation' > \"$2\"\n")
@@ -140,7 +143,7 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "www", "luci-static", "resources", "fastlane", "ui.js")); err != nil {
 		t.Fatalf("expected shared fastlane ui helper in package data: %v", err)
 	}
-	for _, name := range []string{"LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "UPSTREAM-MIT.txt", "AMNEZIAWG-GO-MIT.txt"} {
+	for _, name := range []string{"LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "UPSTREAM-MIT.txt", "AMNEZIAWG-GO-MIT.txt", "AMNEZIAWG-TOOLS-GPL-2.0.txt"} {
 		path := filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "usr", "share", "licenses", "fastlane", name)
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected packaged license file %s: %v", name, err)
@@ -148,6 +151,9 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "usr", "libexec", "fastlane-amneziawg-go")); err != nil {
 		t.Fatalf("expected packaged AmneziaWG userspace runtime: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "usr", "libexec", "fastlane-amneziawg")); err != nil {
+		t.Fatalf("expected packaged Fast Lane AmneziaWG tools: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "www", "luci-static", "resources", "fastlane", "assets", "fastlane-mark.png")); err != nil {
 		t.Fatalf("expected Fast Lane visual assets in package data: %v", err)
@@ -177,10 +183,10 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 		t.Fatalf("expected settings view in package data: %v", err)
 	}
 	for _, name := range []string{
-		"vpn-20260910-hide-keywords-v29.js",
+		"vpn-20260918-country-v31.js",
 		"routing-20260906-v5.js",
 		"diagnostics-20260904-v3.js",
-		"settings-20260917-v9.js",
+		"settings-20260918-v10.js",
 	} {
 		path := filepath.Join(repoDir, "dist", "fastlane-ipk", "data", "www", "luci-static", "resources", "view", "fastlane", name)
 		if _, err := os.Stat(path); err != nil {

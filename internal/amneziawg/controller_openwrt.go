@@ -19,8 +19,13 @@ import (
 
 const (
 	DefaultInterfaceName = "fastlane_awg"
+	ProbeInterfaceName   = "flawg_probe"
+	FastLaneAWGTool      = "/usr/libexec/fastlane-amneziawg"
 	RouteTable           = 51821
-	RouteMark            = 0x200
+	ProbeRouteTable      = 51822
+	ProbeRulePriority    = 901
+	// Outside mwan3's 0x3f00 mask and Fast Lane's transparent-proxy bit.
+	RouteMark = 0x10000
 )
 
 type Compatibility struct {
@@ -47,6 +52,12 @@ type Controller interface {
 	Disconnect(context.Context) error
 	Remove(context.Context) error
 	Status(context.Context) (InterfaceStatus, error)
+}
+
+// IsolatedProbeController can measure a candidate without changing the
+// interface that carries an already selected AmneziaWG connection.
+type IsolatedProbeController interface {
+	PrepareIsolatedProbe(context.Context, Profile) (InterfaceStatus, func(context.Context) error, error)
 }
 
 type processRunner interface {
@@ -87,9 +98,9 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 		return result, errors.New(result.FailureReason)
 	}
 	result.Netifd = true
-	tools, err := c.run(ctx, nil, "awg", "--version")
+	tools, err := c.run(ctx, nil, FastLaneAWGTool, "--version")
 	if err != nil {
-		result.FailureReason = "amneziawg-tools are not installed"
+		result.FailureReason = "Fast Lane AmneziaWG tools are not installed"
 		return result, errors.New(result.FailureReason)
 	}
 	result.Tools = strings.TrimSpace(string(tools))
@@ -101,7 +112,7 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 			return false
 		}
 		protoScript, readErr := os.ReadFile(protoPath)
-		if readErr != nil || !bytes.Contains(protoScript, []byte("amneziawg-go")) {
+		if readErr != nil || !bytes.Contains(protoScript, []byte("amneziawg-go")) || !bytes.Contains(protoScript, []byte(FastLaneAWGTool)) {
 			userspaceFailure = "installed AmneziaWG netifd protocol does not support amneziawg-go"
 			return false
 		}
@@ -112,6 +123,12 @@ func (c *OpenWrtController) Preflight(ctx context.Context) (Compatibility, error
 		result.Runtime = strings.TrimSpace(string(version))
 		result.Compatible = true
 		return true
+	}
+	// Fast Lane ships and owns the userspace chain. Prefer it to probing a
+	// possibly absent kernel module: some BusyBox builds print diagnostics for
+	// an unsupported modinfo invocation on every health check.
+	if userspaceAvailable() {
+		return result, nil
 	}
 	fallbackFailure := func(primary string) string {
 		if userspaceFailure != "" {
@@ -186,8 +203,23 @@ func packageField(control, name string) string {
 }
 
 func (c *OpenWrtController) Prepare(ctx context.Context, profile Profile) error {
-	if _, err := c.Preflight(ctx); err != nil {
+	compatibility, err := c.Preflight(ctx)
+	if err != nil {
 		return err
+	}
+	if profile.Version == Version31 {
+		// amneziawg-go v3.1 keeps an upstream legacy build string in its
+		// --version output. The bundled module checksum and the AWG tools
+		// version are the compatibility contract; rejecting a runnable
+		// userspace runtime based on that display string blocks valid 3.1
+		// profiles.
+		if !strings.Contains(compatibility.Tools, "v3.1.") || compatibility.Runtime == "" {
+			return fmt.Errorf("installed Fast Lane AmneziaWG runtime is incompatible with AWG 3.1")
+		}
+		proto, err := os.ReadFile(c.rooted("lib/netifd/proto/amneziawg.sh"))
+		if err != nil || !bytes.Contains(proto, []byte("awg_header_protection_key")) || !bytes.Contains(proto, []byte("awg_random_trailers")) || !bytes.Contains(proto, []byte("awg_force_userspace")) {
+			return fmt.Errorf("installed AmneziaWG netifd protocol does not support AWG 3.1")
+		}
 	}
 	batch, err := c.uciBatch(profile)
 	if err != nil {
@@ -206,6 +238,18 @@ func (c *OpenWrtController) Prepare(ctx context.Context, profile Profile) error 
 }
 
 func (c *OpenWrtController) Connect(ctx context.Context) (InterfaceStatus, error) {
+	status, err := c.connectWithoutPolicy(ctx)
+	if err != nil {
+		return InterfaceStatus{}, err
+	}
+	if err := c.installPolicyRoutes(ctx, status); err != nil {
+		_ = c.Disconnect(ctx)
+		return InterfaceStatus{}, err
+	}
+	return status, nil
+}
+
+func (c *OpenWrtController) connectWithoutPolicy(ctx context.Context) (InterfaceStatus, error) {
 	name := c.interfaceName()
 	if output, err := c.run(ctx, nil, "ifup", name); err != nil {
 		return InterfaceStatus{}, fmt.Errorf("bring up AmneziaWG interface: %w: %s", err, strings.TrimSpace(string(output)))
@@ -214,10 +258,6 @@ func (c *OpenWrtController) Connect(ctx context.Context) (InterfaceStatus, error
 	for {
 		status, err := c.Status(ctx)
 		if err == nil && status.Up && status.Device != "" && status.Address != "" {
-			if err := c.installPolicyRoutes(ctx, status); err != nil {
-				_ = c.Disconnect(ctx)
-				return InterfaceStatus{}, err
-			}
 			return status, nil
 		}
 		if time.Now().After(deadline) {
@@ -231,8 +271,82 @@ func (c *OpenWrtController) Connect(ctx context.Context) (InterfaceStatus, error
 	}
 }
 
+// PrepareIsolatedProbe uses a dedicated netifd interface and an output-device rule.
+// Its route never shares the active AWG mark/table, so candidate checks cannot
+// replace, drain, or reroute the active AWG connection.
+func (c *OpenWrtController) PrepareIsolatedProbe(ctx context.Context, profile Profile) (InterfaceStatus, func(context.Context) error, error) {
+	probe := *c
+	probe.InterfaceName = ProbeInterfaceName
+	cleanup := func(cleanupCtx context.Context) error {
+		return probe.removeIsolatedProbe(cleanupCtx)
+	}
+	if err := cleanup(ctx); err != nil {
+		return InterfaceStatus{}, cleanup, err
+	}
+	if err := probe.Prepare(ctx, profile); err != nil {
+		return InterfaceStatus{}, cleanup, err
+	}
+	status, err := probe.connectWithoutPolicy(ctx)
+	if err != nil {
+		_ = cleanup(context.Background())
+		return InterfaceStatus{}, cleanup, err
+	}
+	address, parseErr := netip.ParseAddr(status.Address)
+	if parseErr != nil {
+		_ = cleanup(context.Background())
+		return InterfaceStatus{}, cleanup, fmt.Errorf("invalid isolated AmneziaWG address %q", status.Address)
+	}
+	family := "-4"
+	if address.Is6() {
+		family = "-6"
+	}
+	if output, routeErr := probe.run(ctx, nil, "ip", family, "route", "replace", "default", "dev", status.Device, "table", strconv.Itoa(ProbeRouteTable)); routeErr != nil {
+		_ = cleanup(context.Background())
+		return InterfaceStatus{}, cleanup, fmt.Errorf("install isolated AmneziaWG route: %w: %s", routeErr, strings.TrimSpace(string(output)))
+	}
+	_, _ = probe.run(ctx, nil, "ip", family, "rule", "del", "oif", status.Device, "table", strconv.Itoa(ProbeRouteTable), "priority", strconv.Itoa(ProbeRulePriority))
+	if output, ruleErr := probe.run(ctx, nil, "ip", family, "rule", "add", "oif", status.Device, "table", strconv.Itoa(ProbeRouteTable), "priority", strconv.Itoa(ProbeRulePriority)); ruleErr != nil {
+		_ = cleanup(context.Background())
+		return InterfaceStatus{}, cleanup, fmt.Errorf("install isolated AmneziaWG source rule: %w: %s", ruleErr, strings.TrimSpace(string(output)))
+	}
+	return status, cleanup, nil
+}
+
+func (c *OpenWrtController) removeIsolatedProbe(ctx context.Context) error {
+	name := c.interfaceName()
+	for _, family := range []string{"-4", "-6"} {
+		_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "oif", name, "table", strconv.Itoa(ProbeRouteTable), "priority", strconv.Itoa(ProbeRulePriority))
+		_, _ = c.run(ctx, nil, "ip", family, "route", "flush", "table", strconv.Itoa(ProbeRouteTable))
+	}
+	status, _ := c.Status(ctx)
+	if status.Address != "" {
+		family := "-4"
+		if address, err := netip.ParseAddr(status.Address); err == nil && address.Is6() {
+			family = "-6"
+		}
+		// Remove the source rule left by 0.1.48 as well.
+		_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "from", status.Address, "table", strconv.Itoa(ProbeRouteTable), "priority", "10901")
+		_, _ = c.run(ctx, nil, "ip", family, "route", "flush", "table", strconv.Itoa(ProbeRouteTable))
+	}
+	_, _ = c.run(ctx, nil, "ifdown", name)
+	batch := []byte("delete network." + name + "\ndelete network.amneziawg_" + name + "\n")
+	if output, err := c.run(ctx, batch, "uci", "-q", "batch"); err != nil {
+		return fmt.Errorf("remove isolated AmneziaWG config: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	if _, err := c.run(ctx, nil, "uci", "commit", "network"); err != nil {
+		return fmt.Errorf("commit removed isolated AmneziaWG config: %w", err)
+	}
+	return nil
+}
+
 func (c *OpenWrtController) Disconnect(ctx context.Context) error {
 	name := c.interfaceName()
+	for _, family := range []string{"-4", "-6"} {
+		_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "oif", name, "table", strconv.Itoa(RouteTable), "priority", "900")
+		for _, mark := range []string{"0x200", "0x400"} {
+			_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "fwmark", mark, "table", strconv.Itoa(RouteTable), "priority", "10900")
+		}
+	}
 	_, _ = c.run(ctx, nil, "ip", "-4", "rule", "del", "fwmark", fmt.Sprintf("0x%x", RouteMark), "table", strconv.Itoa(RouteTable), "priority", "10900")
 	_, _ = c.run(ctx, nil, "ip", "-6", "rule", "del", "fwmark", fmt.Sprintf("0x%x", RouteMark), "table", strconv.Itoa(RouteTable), "priority", "10900")
 	_, _ = c.run(ctx, nil, "ip", "-4", "route", "flush", "table", strconv.Itoa(RouteTable))
@@ -283,7 +397,7 @@ func (c *OpenWrtController) Status(ctx context.Context) (InterfaceStatus, error)
 		status.Address = raw.IPv6[0].Address
 	}
 	if raw.Up {
-		if handshakes, showErr := c.run(ctx, nil, "awg", "show", c.interfaceName(), "latest-handshakes"); showErr == nil {
+		if handshakes, showErr := c.run(ctx, nil, FastLaneAWGTool, "show", c.interfaceName(), "latest-handshakes"); showErr == nil {
 			for _, field := range strings.Fields(string(handshakes)) {
 				if value, parseErr := strconv.ParseInt(field, 10, 64); parseErr == nil && value > status.LastHandshake {
 					status.LastHandshake = value
@@ -307,15 +421,20 @@ func (c *OpenWrtController) installPolicyRoutes(ctx context.Context, status Inte
 		return fmt.Errorf("install AmneziaWG route table: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	// Delete first so repeated preparation remains idempotent.
-	_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "fwmark", fmt.Sprintf("0x%x", RouteMark), "table", strconv.Itoa(RouteTable), "priority", "10900")
-	if output, err := c.run(ctx, nil, "ip", family, "rule", "add", "fwmark", fmt.Sprintf("0x%x", RouteMark), "table", strconv.Itoa(RouteTable), "priority", "10900"); err != nil {
+	_, _ = c.run(ctx, nil, "ip", family, "rule", "del", "oif", status.Device, "table", strconv.Itoa(RouteTable), "priority", "900")
+	if output, err := c.run(ctx, nil, "ip", family, "rule", "add", "oif", status.Device, "table", strconv.Itoa(RouteTable), "priority", "900"); err != nil {
 		return fmt.Errorf("install AmneziaWG policy rule: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
 
+// EnsurePolicyRoutes also repairs policy rules when upgrading an already-up tunnel.
+func (c *OpenWrtController) EnsurePolicyRoutes(ctx context.Context, status InterfaceStatus) error {
+	return c.installPolicyRoutes(ctx, status)
+}
+
 func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
-	if (profile.Version != VersionLegacy && profile.Version != Version20) || len(profile.Interface.Addresses) == 0 {
+	if (profile.Version != VersionLegacy && profile.Version != Version20 && profile.Version != Version31) || len(profile.Interface.Addresses) == 0 {
 		return nil, fmt.Errorf("invalid AmneziaWG runtime profile")
 	}
 	host, port, err := net.SplitHostPort(profile.Peer.Endpoint)
@@ -346,7 +465,7 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 	set(name, "awg_jmin", strconv.Itoa(int(o.JunkPacketMinSize)))
 	set(name, "awg_jmax", strconv.Itoa(int(o.JunkPacketMaxSize)))
 	packetJunkCount := 2
-	if profile.Version == Version20 {
+	if profile.Version == Version20 || profile.Version == Version31 {
 		packetJunkCount = len(o.PacketJunkSizes)
 	}
 	for index := 0; index < packetJunkCount; index++ {
@@ -356,12 +475,27 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 	for index, value := range o.MagicHeaders {
 		set(name, fmt.Sprintf("awg_h%d", index+1), formatRange(value))
 	}
-	if profile.Version == Version20 {
+	if profile.Version == Version20 || profile.Version == Version31 {
 		for index, value := range o.SpecialJunk {
 			if value != "" {
 				set(name, fmt.Sprintf("awg_i%d", index+1), value)
 			}
 		}
+	}
+	if profile.Version == Version31 {
+		set(name, "awg_force_userspace", "1")
+		v := profile.Interface.V31
+		if v.HeaderProtectionKey.present() {
+			set(name, "awg_header_protection_key", v.HeaderProtectionKey.base64())
+		}
+		set(name, "awg_content_padding_addition", formatRange(v.ContentPaddingAddition))
+		set(name, "awg_rekey_after_time", formatRange(v.RekeyAfterTime))
+		set(name, "awg_rekey_timeout", formatRange(v.RekeyTimeout))
+		set(name, "awg_reject_after_time", formatRange(v.RejectAfterTime))
+		set(name, "awg_keepalive_timeout", formatRange(v.KeepaliveTimeout))
+		set(name, "awg_max_handshake_attempts", formatRange(v.MaxHandshakeAttempts))
+		set(name, "awg_random_trailers", strconv.FormatBool(v.RandomTrailers))
+		set(name, "awg_disable_cookies", strconv.FormatBool(v.DisableCookies))
 	}
 	lines = append(lines, "set network."+peerSection+"="+peerSection)
 	set(peerSection, "public_key", profile.Peer.PublicKey.String())
@@ -375,8 +509,8 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 	if hasIPv6Address(profile.Interface.Addresses) {
 		addList(peerSection, "allowed_ips", "::/0")
 	}
-	if profile.Peer.PersistentKeepalive > 0 {
-		set(peerSection, "persistent_keepalive", strconv.Itoa(int(profile.Peer.PersistentKeepalive)))
+	if profile.Peer.PersistentKeepalive.Max > 0 {
+		set(peerSection, "persistent_keepalive", formatRange(profile.Peer.PersistentKeepalive))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n"), nil
 }

@@ -82,8 +82,8 @@ func TestParseAcceptsExplicitLegacyVersion(t *testing.T) {
 func TestParseRejectsExplicitUnsupportedVersion(t *testing.T) {
 	t.Parallel()
 
-	_, err := Parse([]byte(validProfile("ProtocolVersion = 3.0")))
-	if !errors.Is(err, ErrUnsupportedVersion) || !strings.Contains(err.Error(), "3.0") {
+	_, err := Parse([]byte(validProfile("ProtocolVersion = 4.0")))
+	if !errors.Is(err, ErrUnsupportedVersion) || !strings.Contains(err.Error(), "4.0") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -158,22 +158,23 @@ func TestParseRejectsUnsafeMTU(t *testing.T) {
 	}
 }
 
-func TestParseRejectsAWG3ParametersAsUnsupportedVersion(t *testing.T) {
+func TestParseAcceptsAWG31Parameters(t *testing.T) {
 	t.Parallel()
+	input := validProfile("Version = 3.1\nHeaderProtectionKey = " + testPrivateKey + "\nContentPaddingAddition = 10-23\nRekeyAfterTime = 60-61\nRekeyTimeout = 5\nRejectAfterTime = 120\nKeepaliveTimeout = 9\nMaxHandshakeAttempts = 7\nRandomTrailers = true\nDisableCookies = false")
+	profile, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if profile.Version != Version31 || profile.Interface.V31.ContentPaddingAddition != (Uint32Range{Min: 10, Max: 23}) || !profile.Interface.V31.RandomTrailers {
+		t.Fatalf("profile v3.1 settings = %#v", profile.Interface.V31)
+	}
+}
 
-	for _, parameter := range []string{
-		"HeaderProtectionKey", "ContentPaddingAddition", "RekeyAfterTime",
-		"RekeyTimeout", "RejectAfterTime", "KeepaliveTimeout",
-		"MaxHandshakeAttempts", "RandomTrailers", "DisableCookies",
-	} {
-		parameter := parameter
-		t.Run(parameter, func(t *testing.T) {
-			t.Parallel()
-			_, err := Parse([]byte(validProfile(parameter + " = 1")))
-			if !errors.Is(err, ErrUnsupportedVersion) || !strings.Contains(err.Error(), parameter) || !strings.Contains(err.Error(), "3.x") {
-				t.Fatalf("error = %v", err)
-			}
-		})
+func TestParseInfersAWG31FromItsParameters(t *testing.T) {
+	t.Parallel()
+	profile, err := Parse([]byte(validProfile("RandomTrailers = true")))
+	if err != nil || profile.Version != Version31 {
+		t.Fatalf("profile=%+v err=%v", profile.Status(), err)
 	}
 }
 

@@ -17,7 +17,7 @@
 		"order": 10,
 		"action": {
 			"type": "view",
-			"path": "fastlane/vpn-20260910-hide-keywords-v29"
+			"path": "fastlane/vpn-20260918-country-v31"
 		}
 	},
 	"admin/services/fastlane/diagnostics": {
@@ -41,7 +41,7 @@
 		"order": 40,
 		"action": {
 			"type": "view",
-			"path": "fastlane/settings-20260917-v9"
+			"path": "fastlane/settings-20260918-v10"
 		}
 	}
 }

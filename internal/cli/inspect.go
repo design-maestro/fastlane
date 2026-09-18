@@ -87,13 +87,18 @@ func newInspectHealthCheckCancelCmd(opts *rootOptions) *cobra.Command {
 
 func newInspectHealthCheckCmd(opts *rootOptions) *cobra.Command {
 	var subscriptionID string
+	var selectAfter bool
 	cmd := &cobra.Command{
 		Use:          "health-check",
 		Short:        "Queue a router-side GET health check",
 		Hidden:       true,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			progress, err := queueHealthCheck(opts, subscriptionID)
+			scope := subscriptionID
+			if !selectAfter {
+				scope = probeOnlyScopePrefix + normalizeHealthScope(scope)
+			}
+			progress, err := queueHealthCheck(opts, scope)
 			if err != nil {
 				return err
 			}
@@ -101,6 +106,7 @@ func newInspectHealthCheckCmd(opts *rootOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&subscriptionID, "subscription", "all", "Subscription ID or all")
+	cmd.Flags().BoolVar(&selectAfter, "select", false, "Select the best server after checking")
 	return cmd
 }
 

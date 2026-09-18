@@ -144,6 +144,7 @@ type Service struct {
 	backendReadyChecks      int
 	backendReadyDelay       time.Duration
 	backendEgressProbe      func(ctx context.Context) error
+	awgEgressProbe          func(ctx context.Context, device string) error
 	managedOutboundProbe    func(context.Context, backend.ManagedBackend, int, string) error
 	managedRecoveryDelay    time.Duration
 	backendEgressTimeout    time.Duration
@@ -155,6 +156,11 @@ type Service struct {
 	autoHealthState         *autoHealthStateCache
 	awgStore                AWGProfileStore
 	awgController           amneziawg.Controller
+	awgEgressMu             sync.Mutex
+	awgEgressDevice         string
+	awgEgressTransport      *http.Transport
+	awgEgressClient         *http.Client
+	awgEgressFreshAt        time.Time
 }
 
 // Dependencies groups the service construction inputs.
@@ -199,6 +205,7 @@ const (
 	backendReadyCheckDelay                = 250 * time.Millisecond
 	backendEgressProbeTimeout             = 12 * time.Second
 	backendEgressProbeRetryDelay          = 250 * time.Millisecond
+	awgEgressFreshConnectionInterval      = 5 * time.Minute
 	localDNSListen                        = "127.0.0.1"
 	localDNSPort                          = 1053
 	// Bit 0 is reserved by Fast Lane TPROXY policy routing (fwmark 0x1/0x1).
@@ -210,10 +217,6 @@ var subscriptionShareLinkPattern = regexp.MustCompile(`(?i)(vless|vmess|trojan|s
 var htmlTitlePattern = regexp.MustCompile(`(?is)<title[^>]*>\s*(.*?)\s*</title>`)
 var htmlH1Pattern = regexp.MustCompile(`(?is)<h1[^>]*>\s*(.*?)\s*</h1>`)
 var htmlTagPattern = regexp.MustCompile(`(?s)<[^>]+>`)
-var backendEgressProbeURLs = []string{
-	"https://cp.cloudflare.com/generate_204",
-	"https://www.gstatic.com/generate_204",
-}
 
 // NewService creates an application service with sensible defaults.
 func NewService(deps Dependencies) *Service {
@@ -258,6 +261,7 @@ func NewService(deps Dependencies) *Service {
 
 	if deps.RuntimeEgressProbe && deps.Backend != nil && deps.HTTPClient != nil {
 		service.backendEgressProbe = service.defaultBackendEgressProbe
+		service.awgEgressProbe = service.defaultAWGEgressProbe
 	}
 
 	return service
@@ -751,7 +755,14 @@ func (s *Service) InspectURLTest(ctx context.Context, subscriptionID, nodeID str
 	if err != nil {
 		return speedtest.URLTestResult{}, err
 	}
-	return s.inspectURLTestNode(ctx, subscriptionID, node, settings, runtimeSettings)
+	result, err := s.inspectURLTestNode(ctx, subscriptionID, node, settings, runtimeSettings)
+	if err != nil {
+		return result, err
+	}
+	// A row-level check must survive a page reload and daemon restart too.
+	// Do not change connection state or count an invocation error as node failure.
+	err = s.persistInspectedHealth(subscriptionID, node, result, settings)
+	return result, err
 }
 
 func (s *Service) inspectURLTestNode(ctx context.Context, subscriptionID string, node domain.Node, settings, runtimeSettings domain.Settings) (speedtest.URLTestResult, error) {
@@ -787,6 +798,7 @@ func (s *Service) inspectURLTestNode(ctx context.Context, subscriptionID string,
 			SOCKSProxyPort: socksPort,
 			HTTPProxyPort:  httpPort,
 			ProbeTimeout:   effectiveURLTestTimeout(settings),
+			FallbackURL:    settings.URLTestFallbackURL,
 		}, settings.URLTestURL)
 		if err == nil {
 			return result, nil
@@ -2629,7 +2641,7 @@ func (s *Service) PatchSettings(values map[string]string) (domain.Settings, erro
 
 		previousSettings := settings
 		allowed := map[string]struct{}{
-			"refresh-interval": {}, "health-check-interval": {}, "url-test-url": {},
+			"refresh-interval": {}, "health-check-interval": {}, "url-test-url": {}, "url-test-fallback-url": {},
 			"url-test-timeout": {}, "switch-cooldown": {}, "latency-threshold": {},
 			"strict-egress-check": {}, "country-routing.enabled": {}, "country-routing.country": {},
 			"auto-profile": {}, "auto.allow-optimization": {}, "auto.current-latency-ceiling": {},
@@ -2662,15 +2674,13 @@ func (s *Service) PatchSettings(values map[string]string) (domain.Settings, erro
 			}
 			settings.HealthCheckInterval = d
 		}
-		if raw, ok := values["url-test-url"]; ok {
-			parsedURL, err := url.ParseRequestURI(strings.TrimSpace(raw))
-			if err != nil {
-				return domain.Settings{}, fmt.Errorf("invalid URL test URL: %w", err)
+		for key, target := range map[string]*string{"url-test-url": &settings.URLTestURL, "url-test-fallback-url": &settings.URLTestFallbackURL} {
+			if raw, ok := values[key]; ok {
+				if err := validateProbeURL(raw); err != nil {
+					return domain.Settings{}, err
+				}
+				*target = strings.TrimSpace(raw)
 			}
-			if !strings.EqualFold(parsedURL.Scheme, "https") || strings.TrimSpace(parsedURL.Host) == "" {
-				return domain.Settings{}, fmt.Errorf("invalid URL test URL: absolute HTTPS URL is required")
-			}
-			settings.URLTestURL = strings.TrimSpace(raw)
 		}
 		for _, entry := range []struct {
 			key       string
@@ -2887,15 +2897,15 @@ func (s *Service) setSetting(key, value string) (domain.Settings, error) {
 			return domain.Settings{}, err
 		}
 		settings.HealthCheckInterval = d
-	case "url-test-url":
-		parsedURL, err := url.ParseRequestURI(strings.TrimSpace(value))
-		if err != nil {
-			return domain.Settings{}, fmt.Errorf("invalid URL test URL: %w", err)
+	case "url-test-url", "url-test-fallback-url":
+		if err := validateProbeURL(value); err != nil {
+			return domain.Settings{}, err
 		}
-		if !strings.EqualFold(parsedURL.Scheme, "https") || strings.TrimSpace(parsedURL.Host) == "" {
-			return domain.Settings{}, fmt.Errorf("invalid URL test URL: absolute HTTPS URL is required")
+		if key == "url-test-url" {
+			settings.URLTestURL = strings.TrimSpace(value)
+		} else {
+			settings.URLTestFallbackURL = strings.TrimSpace(value)
 		}
-		settings.URLTestURL = strings.TrimSpace(value)
 	case "url-test-timeout":
 		d, err := domain.ParseDurationValue(value)
 		if err != nil {
@@ -4499,6 +4509,10 @@ type managedProbeObservation struct {
 }
 
 func (s *Service) probeManagedOutboundObservation(ctx context.Context, managed backend.ManagedBackend, slot int, tag string, warmup bool) (managedProbeObservation, error) {
+	endpoints, err := s.configuredProbeURLs()
+	if err != nil {
+		return managedProbeObservation{}, err
+	}
 	port, err := managed.ProbeHTTPPort(slot)
 	if err != nil {
 		return managedProbeObservation{}, err
@@ -4516,6 +4530,7 @@ func (s *Service) probeManagedOutboundObservation(ctx context.Context, managed b
 	if !ok {
 		return managedProbeObservation{}, fmt.Errorf("HTTP transport cannot be cloned for managed probe")
 	}
+	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 	runRound := func() (time.Duration, error) {
 		probeCtx, cancel := context.WithCancel(ctx)
@@ -4524,8 +4539,8 @@ func (s *Service) probeManagedOutboundObservation(ctx context.Context, managed b
 			latency time.Duration
 			err     error
 		}
-		results := make(chan outcome, len(backendEgressProbeURLs))
-		for _, endpoint := range backendEgressProbeURLs {
+		results := make(chan outcome, len(endpoints))
+		for _, endpoint := range endpoints {
 			endpoint := endpoint
 			go func() {
 				requestCtx, requestCancel := context.WithTimeout(probeCtx, 5*time.Second)
@@ -4547,7 +4562,7 @@ func (s *Service) probeManagedOutboundObservation(ctx context.Context, managed b
 			}()
 		}
 		var failures []string
-		for range backendEgressProbeURLs {
+		for range endpoints {
 			result := <-results
 			if result.err == nil {
 				cancel()
@@ -5637,6 +5652,10 @@ func (s *Service) waitForBackendRunning(ctx context.Context, subscriptionID, nod
 }
 
 func (s *Service) defaultBackendEgressProbe(ctx context.Context) error {
+	endpoints, err := s.configuredProbeURLs()
+	if err != nil {
+		return err
+	}
 	timeout := s.backendEgressTimeout
 	if timeout <= 0 {
 		timeout = backendEgressProbeTimeout
@@ -5655,6 +5674,9 @@ func (s *Service) defaultBackendEgressProbe(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("unsupported HTTP transport %T", client.Transport)
 	}
+	// A pass owns this clone. Leaving its pool open accumulates idle proxy
+	// and VPN connections until IdleConnTimeout after every watchdog tick.
+	defer transport.CloseIdleConnections()
 
 	reqTimeout := 5 * time.Second
 	if timeout < reqTimeout {
@@ -5665,67 +5687,57 @@ func (s *Service) defaultBackendEgressProbe(ctx context.Context) error {
 	clientCopy.Transport = transport
 	clientCopy.Timeout = reqTimeout
 
-	type result struct {
-		err error
+	return probeEgressEndpoints(probeCtx, &clientCopy, endpoints)
+}
+
+// defaultAWGEgressProbe bypasses Xray and binds health traffic to the active
+// AWG interface. That keeps Xray's internal dial retries from multiplying one
+// watchdog round. The retained transport reuses healthy HTTPS connections.
+func (s *Service) defaultAWGEgressProbe(ctx context.Context, device string) error {
+	device = strings.TrimSpace(device)
+	if device == "" {
+		return errors.New("AmneziaWG interface is unavailable")
+	}
+	endpoints, err := s.configuredProbeURLs()
+	if err != nil {
+		return err
 	}
 
-	resCh := make(chan result, len(backendEgressProbeURLs))
-	successCtx, cancelSuccess := context.WithCancel(probeCtx)
-	defer cancelSuccess()
-
-	for _, rawURL := range backendEgressProbeURLs {
-		go func(urlStr string) {
-			req, err := http.NewRequestWithContext(successCtx, http.MethodGet, urlStr, nil)
-			if err != nil {
-				resCh <- result{err: err}
-				return
-			}
-
-			resp, err := clientCopy.Do(req)
-			if err != nil {
-				resCh <- result{err: err}
-				return
-			}
-
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-			_ = resp.Body.Close()
-
-			if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusInternalServerError {
-				resCh <- result{err: nil}
-				return
-			}
-			resCh <- result{err: fmt.Errorf("%s returned status %d", urlStr, resp.StatusCode)}
-		}(rawURL)
-	}
-
-	var lastErr error
-	success := false
-	for i := 0; i < len(backendEgressProbeURLs); i++ {
-		select {
-		case <-probeCtx.Done():
-			if lastErr == nil {
-				lastErr = probeCtx.Err()
-			}
-			return lastErr
-		case res := <-resCh:
-			if res.err == nil {
-				success = true
-				cancelSuccess()
-				return nil
-			}
-			lastErr = res.err
+	s.awgEgressMu.Lock()
+	now := s.currentTime()
+	if s.awgEgressClient == nil || s.awgEgressDevice != device {
+		if s.awgEgressTransport != nil {
+			s.awgEgressTransport.CloseIdleConnections()
 		}
+		base := ensureSubscriptionHTTPClient(s.httpClient)
+		var transport *http.Transport
+		if base.Transport == nil {
+			transport = http.DefaultTransport.(*http.Transport).Clone()
+		} else {
+			var ok bool
+			transport, ok = base.Transport.(*http.Transport)
+			if !ok {
+				s.awgEgressMu.Unlock()
+				return fmt.Errorf("unsupported HTTP transport %T", base.Transport)
+			}
+			transport = transport.Clone()
+		}
+		transport.Proxy = nil
+		transport.DialContext = interfaceBoundDialContext(device)
+		s.awgEgressTransport = transport
+		s.awgEgressClient = &http.Client{Transport: transport, Timeout: 5 * time.Second}
+		s.awgEgressDevice = device
+		s.awgEgressFreshAt = now
+	} else if !now.Before(s.awgEgressFreshAt.Add(awgEgressFreshConnectionInterval)) {
+		s.awgEgressTransport.CloseIdleConnections()
+		s.awgEgressFreshAt = now
 	}
+	client := s.awgEgressClient
+	s.awgEgressMu.Unlock()
 
-	if success {
-		return nil
-	}
-
-	if lastErr == nil {
-		lastErr = errors.New("no egress probe endpoints configured")
-	}
-
-	return lastErr
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return probeEgressEndpoints(probeCtx, client, endpoints)
 }
 
 func backendStateMayStillBeStarting(serviceState string) bool {

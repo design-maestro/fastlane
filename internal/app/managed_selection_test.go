@@ -241,6 +241,11 @@ func TestMaintainManagedReservesChecksTwoCandidatesWithoutSwitching(t *testing.T
 	state.Mode = domain.SelectionModeManual
 	state.ActiveSubscriptionID = "sub"
 	state.ActiveNodeID = "active"
+	state.Health = map[string]domain.NodeHealth{
+		"reserve-1": {ConsecutiveSuccesses: 1},
+		"reserve-2": {ConsecutiveSuccesses: 1},
+		"reserve-3": {ConsecutiveSuccesses: 1},
+	}
 	store := &memoryStore{settings: domain.DefaultSettings(), state: state, subs: []domain.Subscription{{ID: "sub", Nodes: nodes}}}
 	managed := &managedRecordingBackend{recordingBackend: &recordingBackend{}, selected: "fastlane-node-active"}
 	service := NewService(Dependencies{Store: store, Backend: managed})
@@ -409,7 +414,7 @@ func TestManagedFailoverUsesHighestRankedReserveAndKeepsManualMode(t *testing.T)
 	}
 }
 
-func TestMaintainManagedReservesLimitsCycleToFourProbes(t *testing.T) {
+func TestMaintainManagedReservesLimitsCycleToTwoProbes(t *testing.T) {
 	nodes := []domain.Node{{ID: "active", Protocol: domain.ProtocolSocks, Address: "192.0.2.1", Port: 1080}}
 	for index := 2; index <= 8; index++ {
 		nodes = append(nodes, domain.Node{ID: fmt.Sprintf("node-%d", index), Protocol: domain.ProtocolSocks, Address: fmt.Sprintf("192.0.2.%d", index), Port: 1080})

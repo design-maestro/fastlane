@@ -23,6 +23,9 @@ func buildProfile(raw rawProfile) (Profile, error) {
 	if hasS3 {
 		version = Version20
 	}
+	if raw.declaredVersion == Version31 || hasV31Parameter(interfaceValues) {
+		version = Version31
+	}
 	if raw.declaredVersion != "" && raw.declaredVersion != version {
 		return Profile{}, fmt.Errorf("invalid AmneziaWG profile: declared version %s does not match its obfuscation parameters", raw.declaredVersion)
 	}
@@ -63,6 +66,10 @@ func buildProfile(raw rawProfile) (Profile, error) {
 	if err != nil {
 		return Profile{}, err
 	}
+	v31, err := parseV31(interfaceValues, version)
+	if err != nil {
+		return Profile{}, err
+	}
 	publicRaw, err := required(peerValues, "publickey", "[Peer].PublicKey")
 	if err != nil {
 		return Profile{}, err
@@ -88,11 +95,11 @@ func buildProfile(raw rawProfile) (Profile, error) {
 		}
 	}
 	if keepaliveRaw := strings.TrimSpace(peerValues["persistentkeepalive"]); keepaliveRaw != "" {
-		keepalive, parseErr := strconv.ParseUint(keepaliveRaw, 10, 16)
-		if parseErr != nil {
-			return Profile{}, fmt.Errorf("invalid [Peer].PersistentKeepalive: expected an integer from 0 to 65535")
+		keepalive, parseErr := parseUint32Range(keepaliveRaw, "[Peer].PersistentKeepalive")
+		if parseErr != nil || keepalive.Max > 65535 {
+			return Profile{}, fmt.Errorf("invalid [Peer].PersistentKeepalive: expected an integer or range from 0 to 65535")
 		}
-		peer.PersistentKeepalive = uint16(keepalive)
+		peer.PersistentKeepalive = keepalive
 	}
 
 	ignored := make([]string, 0, len(raw.ignored))
@@ -107,6 +114,7 @@ func buildProfile(raw rawProfile) (Profile, error) {
 			Addresses:   addresses,
 			MTU:         mtu,
 			Obfuscation: obfuscation,
+			V31:         v31,
 		},
 		Peer:              peer,
 		IgnoredParameters: ignored,
@@ -122,8 +130,8 @@ func Validate(profile Profile) error { return profile.Validate() }
 
 // Validate checks a profile's domain invariants without exposing key material.
 func (p Profile) Validate() error {
-	if p.Version != VersionLegacy && p.Version != Version20 {
-		return fmt.Errorf("%w %q; Legacy and 2.0 are supported", ErrUnsupportedVersion, p.Version)
+	if p.Version != VersionLegacy && p.Version != Version20 && p.Version != Version31 {
+		return fmt.Errorf("%w %q; Legacy, 2.0 and 3.1 are supported", ErrUnsupportedVersion, p.Version)
 	}
 	if !p.Interface.PrivateKey.present() || allZero(p.Interface.PrivateKey.value[:]) {
 		return fmt.Errorf("invalid [Interface].PrivateKey: expected a non-zero 32-byte base64 key")
@@ -184,7 +192,7 @@ func parseObfuscation(values map[string]string, version string) (Obfuscation, er
 		return result, fmt.Errorf("invalid AmneziaWG obfuscation: Jmin must not exceed Jmax")
 	}
 	packetJunkCount := 2
-	if version == Version20 {
+	if version == Version20 || version == Version31 {
 		packetJunkCount = len(result.PacketJunkSizes)
 	}
 	for i := 0; i < packetJunkCount; i++ {
@@ -218,6 +226,67 @@ func parseObfuscation(values map[string]string, version string) (Obfuscation, er
 		result.SpecialJunk[i] = value
 	}
 	return result, nil
+}
+
+func parseV31(values map[string]string, version string) (V31Parameters, error) {
+	var result V31Parameters
+	keys := []string{"headerprotectionkey", "contentpaddingaddition", "rekeyaftertime", "rekeytimeout", "rejectaftertime", "keepalivetimeout", "maxhandshakeattempts", "randomtrailers", "disablecookies"}
+	has := false
+	for _, key := range keys {
+		if strings.TrimSpace(values[key]) != "" {
+			has = true
+			break
+		}
+	}
+	if !has {
+		return result, nil
+	}
+	if version != Version31 {
+		return result, fmt.Errorf("invalid AmneziaWG profile: AWG 3.1 parameters require AWG 3.1")
+	}
+	var err error
+	if raw := strings.TrimSpace(values["headerprotectionkey"]); raw != "" {
+		result.HeaderProtectionKey, err = parsePrivateKey(raw, "[Interface].HeaderProtectionKey")
+		if err != nil {
+			return result, err
+		}
+	}
+	for _, item := range []struct {
+		key, label string
+		target     *Uint32Range
+	}{
+		{"contentpaddingaddition", "ContentPaddingAddition", &result.ContentPaddingAddition}, {"rekeyaftertime", "RekeyAfterTime", &result.RekeyAfterTime}, {"rekeytimeout", "RekeyTimeout", &result.RekeyTimeout}, {"rejectaftertime", "RejectAfterTime", &result.RejectAfterTime}, {"keepalivetimeout", "KeepaliveTimeout", &result.KeepaliveTimeout}, {"maxhandshakeattempts", "MaxHandshakeAttempts", &result.MaxHandshakeAttempts},
+	} {
+		if raw := strings.TrimSpace(values[item.key]); raw != "" {
+			n, e := parseUint32Range(raw, "[Interface]."+item.label)
+			if e != nil {
+				return result, e
+			}
+			*item.target = n
+		}
+	}
+	for _, item := range []struct {
+		key, label string
+		target     *bool
+	}{{"randomtrailers", "RandomTrailers", &result.RandomTrailers}, {"disablecookies", "DisableCookies", &result.DisableCookies}} {
+		if raw := strings.TrimSpace(values[item.key]); raw != "" {
+			value, e := strconv.ParseBool(raw)
+			if e != nil {
+				return result, fmt.Errorf("invalid [Interface].%s: expected true or false", item.label)
+			}
+			*item.target = value
+		}
+	}
+	return result, nil
+}
+
+func hasV31Parameter(values map[string]string) bool {
+	for _, key := range []string{"headerprotectionkey", "contentpaddingaddition", "rekeyaftertime", "rekeytimeout", "rejectaftertime", "keepalivetimeout", "maxhandshakeattempts", "randomtrailers", "disablecookies"} {
+		if strings.TrimSpace(values[key]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func parsePrivateKey(raw, field string) (PrivateKey, error) {

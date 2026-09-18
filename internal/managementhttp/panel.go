@@ -15,6 +15,13 @@ import (
 //go:embed web/*
 var panelFiles embed.FS
 
+func publicAWGError(err error) error {
+	if err != nil && strings.Contains(err.Error(), "both HTTPS checks failed") {
+		return panelJobError("awg_https_failed")
+	}
+	return err
+}
+
 // Only fixed, public codes may cross the asynchronous job boundary. In
 // particular, parser errors may contain unexpected text from an imported file.
 type panelJobError string
@@ -214,10 +221,10 @@ func (h *Handler) panelAPI(w http.ResponseWriter, r *http.Request) bool {
 		if len(parts) == 2 && r.Method == http.MethodPost {
 			switch parts[1] {
 			case "connect":
-				h.startJob(w, "awg-connect", func(ctx context.Context) error { return s.ConnectAWGProfile(ctx, id) })
+				h.startJob(w, "awg-connect", func(ctx context.Context) error { return publicAWGError(s.ConnectAWGProfile(ctx, id)) })
 				return true
 			case "check":
-				h.startJob(w, "awg-check", func(ctx context.Context) error { _, err := s.CheckAWGProfile(ctx, id); return err })
+				h.startJob(w, "awg-check", func(ctx context.Context) error { _, err := s.CheckAWGProfile(ctx, id); return publicAWGError(err) })
 				return true
 			}
 		}
@@ -227,13 +234,13 @@ func (h *Handler) panelAPI(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method == http.MethodPost {
 		switch r.URL.Path {
 		case "/api/v1/awg/connect":
-			h.startJob(w, "awg-connect", s.ConnectAWG)
+			h.startJob(w, "awg-connect", func(ctx context.Context) error { return publicAWGError(s.ConnectAWG(ctx)) })
 			return true
 		case "/api/v1/awg/disconnect":
 			h.startJob(w, "awg-disconnect", s.DisconnectAWG)
 			return true
 		case "/api/v1/awg/check":
-			h.startJob(w, "awg-check", func(ctx context.Context) error { _, err := s.CheckAWG(ctx); return err })
+			h.startJob(w, "awg-check", func(ctx context.Context) error { _, err := s.CheckAWG(ctx); return publicAWGError(err) })
 			return true
 		case "/api/v1/routing":
 			var input struct {

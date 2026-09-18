@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/design-maestro/fastlane/internal/backend"
@@ -110,6 +111,10 @@ func (s *Service) RunAutoFailover(ctx context.Context, failureReason string) err
 // RunConnectionFailover recovers either selection mode without changing the
 // user's mode. Auto uses the cached fast path; manual pins the replacement.
 func (s *Service) RunConnectionFailover(ctx context.Context, failureReason string) error {
+	return s.runConnectionFailoverForRoute(ctx, failureReason, "")
+}
+
+func (s *Service) runConnectionFailoverForRoute(ctx context.Context, failureReason, expectedRoute string) error {
 	if current, loadErr := s.store.LoadState(); loadErr == nil && current.ActiveConnectionKind == "amneziawg" && current.OperationalMode == domain.OperationalModeDirect {
 		if _, checkErr := s.CheckAWG(ctx); checkErr == nil {
 			if waitErr := sleepWithContext(ctx, s.managedRecoveryConfirmationDelay()); waitErr == nil {
@@ -124,6 +129,9 @@ func (s *Service) RunConnectionFailover(ctx context.Context, failureReason strin
 	snapshot, err := s.captureAutoSelectionSnapshot()
 	if err != nil {
 		return err
+	}
+	if expectedRoute != "" && expectedRoute != recoveryRouteKey(snapshot.state) {
+		return nil
 	}
 	switch snapshot.state.Mode {
 	case domain.SelectionModeAuto:
@@ -383,11 +391,12 @@ func (s *Service) runManualFailoverWithSnapshot(ctx context.Context, failureReas
 		updated.Mode = domain.SelectionModeManual
 		updated.AutoScope = ""
 		updated.LastSwitchAt = s.currentTime().UTC()
-		updated.LastSwitchReason = "manual emergency failover"
+		updated.LastSwitchReason = switchReason("manual emergency failover", activeNodeLabel(snapshot.subscriptions, snapshot.state), prepared.decision.SelectedNode, "verified HTTPS GET; "+failureReason)
 		updated.LastFailureReason = failureReason
 		if err := s.saveState(updated); err != nil {
 			return fmt.Errorf("save manual failover state: %w", err)
 		}
+		s.logInfo("manual emergency failover applied", "from_node", activeNodeLabel(snapshot.subscriptions, snapshot.state), "to_node", nodeLabel(prepared.decision.SelectedNode), "result", "verified HTTPS GET", "trigger", failureReason)
 		return nil
 	})
 }
@@ -425,19 +434,38 @@ func (s *Service) connectionRecoveryNeeded(ctx context.Context, includeManual bo
 			return true, "AmneziaWG controller is unavailable", nil
 		}
 		iface, statusErr := s.awgController.Status(ctx)
-		if statusErr != nil || !iface.Up || iface.LastHandshake == 0 {
+		if statusErr != nil {
+			return false, "", fmt.Errorf("read AmneziaWG status: %w", statusErr)
+		}
+		if !iface.Up || iface.LastHandshake == 0 {
 			return true, "AmneziaWG interface or handshake is unavailable", nil
 		}
 		if s.backend != nil {
 			status, backendErr := s.backend.Status(ctx)
-			if backendErr != nil || !status.Running {
+			if backendErr != nil {
+				return false, "", fmt.Errorf("read backend status: %w", backendErr)
+			}
+			if !status.Running {
 				return true, "backend is not running", nil
 			}
 		}
-		if s.backendEgressProbe != nil {
+		probe := s.backendEgressProbe
+		if s.awgEgressProbe != nil {
+			probe = func(probeCtx context.Context) error {
+				return s.awgEgressProbe(probeCtx, iface.Device)
+			}
+		}
+		if probe != nil {
 			probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			if probeErr := s.backendEgressProbe(probeCtx); probeErr != nil {
+			if probeErr := probe(probeCtx); probeErr != nil {
+				freshStatus := iface
+				if latest, latestErr := s.awgController.Status(ctx); latestErr == nil {
+					freshStatus = latest
+				}
+				if freshStatus.LastHandshake == 0 || s.currentTime().Sub(time.Unix(freshStatus.LastHandshake, 0)) > 2*time.Minute {
+					return true, "AmneziaWG handshake is stale and egress is unavailable", nil
+				}
 				return true, fmt.Sprintf("%s%v", activeGETFailureReasonPrefix, probeErr), nil
 			}
 		}
@@ -453,7 +481,7 @@ func (s *Service) connectionRecoveryNeeded(ctx context.Context, includeManual bo
 	if s.backend != nil {
 		status, statusErr := s.backend.Status(ctx)
 		if statusErr != nil {
-			return true, "backend status failed", nil
+			return false, "", fmt.Errorf("read backend status: %w", statusErr)
 		}
 		if !status.Running {
 			return true, "backend is not running", nil
@@ -866,7 +894,12 @@ func (s *Service) commitAutoSelection(ctx context.Context, sub domain.Subscripti
 	state.LastTransportFailureReason = ""
 	if decision.Switch {
 		state.LastSwitchAt = s.currentTime().UTC()
-		state.LastSwitchReason = decision.Reason
+		previous := currentState.ActiveNodeID
+		if node, ok := sub.NodeByID(currentState.ActiveNodeID); ok {
+			previous = nodeLabel(node)
+		}
+		state.LastSwitchReason = switchReason("automatic optimization", previous, decision.SelectedNode, decision.Reason)
+		s.logInfo("automatic server switch applied", "from_node", previous, "to_node", nodeLabel(decision.SelectedNode), "reason", decision.Reason)
 	}
 
 	if err := s.saveState(state); err != nil {
@@ -874,6 +907,41 @@ func (s *Service) commitAutoSelection(ctx context.Context, sub domain.Subscripti
 	}
 
 	return decision.SelectedNode, nil
+}
+
+func switchReason(kind, previousID string, next domain.Node, details string) string {
+	previousID = strings.TrimSpace(previousID)
+	if previousID == "" {
+		previousID = "none"
+	}
+	return fmt.Sprintf("%s: %s -> %s; %s", kind, previousID, nodeLabel(next), strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(details), "\n", " "), "\r", " "))
+}
+
+func activeNodeLabel(subscriptions []domain.Subscription, state domain.RuntimeState) string {
+	for _, sub := range subscriptions {
+		if sub.ID != state.ActiveSubscriptionID {
+			continue
+		}
+		if node, ok := sub.NodeByID(state.ActiveNodeID); ok {
+			return nodeLabel(node)
+		}
+	}
+	return state.ActiveNodeID
+}
+
+func nodeLabel(node domain.Node) string {
+	name := strings.TrimSpace(node.Name)
+	id := strings.TrimSpace(node.ID)
+	if name == "" {
+		if id == "" {
+			return "unknown"
+		}
+		return id
+	}
+	if id == "" || id == name {
+		return name
+	}
+	return name + " [" + id + "]"
 }
 
 func (s *Service) persistAutoFailure(ctx context.Context, sub domain.Subscription, state domain.RuntimeState, decision autoSelectionDecision) error {

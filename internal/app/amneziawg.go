@@ -198,7 +198,8 @@ func (s *Service) probeAWGProfilesForAuto(ctx context.Context, scope string) {
 		if node.Protocol != domain.ProtocolAmneziaWG || domain.IsNodeExcludedFromAuto(settings, awgSubscriptionID, node) {
 			continue
 		}
-		if state.ActiveConnectionKind == "amneziawg" && state.ActiveAWGProfileID != "" && state.ActiveAWGProfileID != node.ID {
+		_, isolated := s.awgController.(amneziawg.IsolatedProbeController)
+		if !isolated && state.ActiveConnectionKind == "amneziawg" && state.ActiveAWGProfileID != "" && state.ActiveAWGProfileID != node.ID {
 			continue
 		}
 		if _, checkErr := s.CheckAWGProfile(ctx, node.ID); checkErr != nil && ctx.Err() != nil {
@@ -234,6 +235,8 @@ func (s *Service) awgStatusLocked(ctx context.Context, id string) (AWGStatus, er
 	result.Profile = &redacted
 	if profile.Version == amneziawg.VersionLegacy {
 		result.Protocol = "AmneziaWG Legacy"
+	} else if profile.Version == amneziawg.Version31 {
+		result.Protocol = "AmneziaWG 3.1"
 	} else {
 		result.Protocol = "AmneziaWG 2.0"
 	}
@@ -305,6 +308,12 @@ func (s *Service) CheckAWGProfile(ctx context.Context, id string) (AWGStatus, er
 }
 
 func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (string, amneziawg.InterfaceStatus, error) {
+	return s.verifyAWGLocked(ctx, id, prepare, true)
+}
+
+// A candidate probe owns a temporary tunnel. Connecting must instead verify
+// the permanent tunnel that will remain alive after this function returns.
+func (s *Service) verifyAWGLocked(ctx context.Context, id string, prepare, isolatedProbe bool) (string, amneziawg.InterfaceStatus, error) {
 	profile, err := s.loadAWGProfile(id)
 	if err != nil {
 		return "", amneziawg.InterfaceStatus{}, err
@@ -316,12 +325,38 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 	if err != nil {
 		return "", amneziawg.InterfaceStatus{}, fmt.Errorf("load state: %w", err)
 	}
-	if stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID != "" && stateBefore.ActiveAWGProfileID != id {
+	_, supportsIsolation := s.awgController.(amneziawg.IsolatedProbeController)
+	if stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID != "" && stateBefore.ActiveAWGProfileID != id && !(isolatedProbe && supportsIsolation) {
 		return "", amneziawg.InterfaceStatus{}, fmt.Errorf("disconnect the active AmneziaWG profile before checking another profile")
 	}
-	if prepare {
+	activeProfile := stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID == id
+	isIsolatedProbe := false
+	var isolatedCleanup func(context.Context) error
+	var iface amneziawg.InterfaceStatus
+	if prepare && !activeProfile && isolatedProbe {
+		if isolated, ok := s.awgController.(amneziawg.IsolatedProbeController); ok {
+			iface, isolatedCleanup, err = isolated.PrepareIsolatedProbe(ctx, profile)
+			if isolatedCleanup != nil {
+				defer func() {
+					cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+					defer cancel()
+					if cleanupErr := isolatedCleanup(cleanupCtx); cleanupErr != nil {
+						s.logWarn("remove isolated AmneziaWG probe", "error", cleanupErr.Error())
+					}
+				}()
+			}
+			if err != nil {
+				return "", iface, err
+			}
+			isIsolatedProbe = true
+		}
+	}
+	if prepare && !isIsolatedProbe {
 		prepared, statusErr := s.awgController.Status(ctx)
-		if stateBefore.PreparedAWGProfileID != id {
+		if activeProfile && (statusErr != nil || !prepared.Up || prepared.Device == "" || prepared.Address == "") {
+			return "", prepared, fmt.Errorf("active AmneziaWG profile is unavailable; refusing to replace it during a check")
+		}
+		if stateBefore.PreparedAWGProfileID != id && !activeProfile {
 			if err := s.awgController.Remove(ctx); err != nil {
 				return "", amneziawg.InterfaceStatus{}, fmt.Errorf("remove prepared AmneziaWG profile: %w", err)
 			}
@@ -337,18 +372,34 @@ func (s *Service) checkAWGLocked(ctx context.Context, id string, prepare bool) (
 			}
 		}
 	}
-	iface, err := s.awgController.Status(ctx)
-	if err != nil || !iface.Up || iface.Device == "" || iface.Address == "" {
-		iface, err = s.awgController.Connect(ctx)
-	}
-	if err != nil {
-		return "", iface, err
+	if !isIsolatedProbe {
+		iface, err = s.awgController.Status(ctx)
+		if err != nil || !iface.Up || iface.Device == "" || iface.Address == "" {
+			iface, err = s.awgController.Connect(ctx)
+		}
+		if err != nil {
+			return "", iface, err
+		}
+		if routes, ok := s.awgController.(interface {
+			EnsurePolicyRoutes(context.Context, amneziawg.InterfaceStatus) error
+		}); ok {
+			if err := routes.EnsurePolicyRoutes(ctx, iface); err != nil {
+				return "", iface, err
+			}
+		}
 	}
 	managed, err := s.ensureAWGManagedRuntime(ctx)
 	if err != nil {
 		return "", iface, err
 	}
-	tag, err := managed.PrepareInterfaceOutbound(ctx, iface.Device, iface.Address, amneziawg.RouteMark)
+	mark := amneziawg.RouteMark
+	if isIsolatedProbe {
+		// The isolated interface is selected by its output-device rule; using
+		// the active AWG mark here would send this candidate through the live
+		// tunnel instead.
+		mark = 0
+	}
+	tag, err := managed.PrepareInterfaceOutbound(ctx, iface.Device, iface.Address, mark)
 	latency := time.Duration(0)
 	egressIP := ""
 	countryCode := ""
@@ -433,10 +484,29 @@ func (s *Service) connectAWGLocked(ctx context.Context, id string) error {
 	return s.connectAWGWithModeLocked(ctx, id, mode, autoScope)
 }
 
-func (s *Service) connectAWGWithModeLocked(ctx context.Context, id string, mode domain.SelectionMode, autoScope string) error {
+func (s *Service) connectAWGWithModeLocked(ctx context.Context, id string, mode domain.SelectionMode, autoScope string) (resultErr error) {
 	var tag string
 	stateBefore, stateErr := s.store.LoadState()
+	if stateErr != nil {
+		return stateErr
+	}
 	if stateErr == nil && stateBefore.ActiveConnectionKind == "amneziawg" && stateBefore.Connected && stateBefore.ActiveAWGProfileID != "" && stateBefore.ActiveAWGProfileID != id {
+		if _, isolated := s.awgController.(amneziawg.IsolatedProbeController); isolated {
+			if _, _, err := s.checkAWGLocked(ctx, id, true); err != nil {
+				return fmt.Errorf("verify AmneziaWG candidate: %w", err)
+			}
+		}
+		original := stateBefore
+		defer func() {
+			if resultErr == nil {
+				return
+			}
+			recoveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if restoreErr := s.restoreAWGConnectionLocked(recoveryCtx, original); restoreErr != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("restore previous AmneziaWG connection: %w", restoreErr))
+			}
+		}()
 		if err := s.disconnectAWGLocked(ctx); err != nil {
 			return fmt.Errorf("disconnect active AmneziaWG profile: %w", err)
 		}
@@ -445,6 +515,13 @@ func (s *Service) connectAWGWithModeLocked(ctx context.Context, id string, mode 
 	probe, hasProbe := stateBefore.AWGProfileProbes[id]
 	if stateErr == nil && hasProbe && stateBefore.PreparedAWGProfileID == id && awgProbeIsFresh(&probe, s.currentTime().UTC(), time.Minute) && s.awgController != nil {
 		if iface, statusErr := s.awgController.Status(ctx); statusErr == nil && iface.Up && iface.Device != "" && iface.Address != "" {
+			if routes, ok := s.awgController.(interface {
+				EnsurePolicyRoutes(context.Context, amneziawg.InterfaceStatus) error
+			}); ok {
+				if err := routes.EnsurePolicyRoutes(ctx, iface); err != nil {
+					return err
+				}
+			}
 			if managed, runtimeErr := s.ensureAWGManagedRuntime(ctx); runtimeErr == nil {
 				tag, _ = managed.PrepareInterfaceOutbound(ctx, iface.Device, iface.Address, amneziawg.RouteMark)
 			}
@@ -452,7 +529,7 @@ func (s *Service) connectAWGWithModeLocked(ctx context.Context, id string, mode 
 	}
 	if tag == "" {
 		var err error
-		tag, _, err = s.checkAWGLocked(ctx, id, true)
+		tag, _, err = s.verifyAWGLocked(ctx, id, true, false)
 		if err != nil {
 			return fmt.Errorf("verify AmneziaWG route: %w", err)
 		}
@@ -542,6 +619,49 @@ func (s *Service) connectAWGWithModeLocked(ctx context.Context, id string, mode 
 	settings.Mode = mode
 	_ = s.store.SaveSettings(settings)
 	return nil
+}
+
+func (s *Service) restoreAWGConnectionLocked(ctx context.Context, original domain.RuntimeState) error {
+	profile, err := s.loadAWGProfile(original.ActiveAWGProfileID)
+	if err != nil {
+		return err
+	}
+	if err := s.awgController.Remove(ctx); err != nil {
+		return err
+	}
+	if err := s.awgController.Prepare(ctx, profile); err != nil {
+		return err
+	}
+	iface, err := s.awgController.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	managed, err := s.ensureAWGManagedRuntime(ctx)
+	if err != nil {
+		return err
+	}
+	tag, err := managed.PrepareInterfaceOutbound(ctx, iface.Device, iface.Address, amneziawg.RouteMark)
+	if err != nil {
+		return err
+	}
+	if err := managed.SelectOutbound(ctx, tag); err != nil {
+		return err
+	}
+	settings, err := s.store.LoadSettings()
+	if err != nil {
+		return err
+	}
+	if reason, err := s.ensureBackendEgress(ctx, settings, awgSubscriptionID, original.ActiveAWGProfileID, original.Mode); err != nil {
+		return fmt.Errorf("%s: %w", reason, err)
+	}
+	original.SelectedOutboundTag = tag
+	original.PreparedAWGProfileID = original.ActiveAWGProfileID
+	if err := s.saveState(original); err != nil {
+		return err
+	}
+	settings.Mode = original.Mode
+	settings.AutoMode = original.Mode == domain.SelectionModeAuto
+	return s.store.SaveSettings(settings)
 }
 
 func awgProbeIsFresh(probe *domain.AWGProbeState, now time.Time, maxAge time.Duration) bool {

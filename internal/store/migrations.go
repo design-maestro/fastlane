@@ -90,6 +90,7 @@ func decodeSettings(data []byte, path string) (domain.Settings, error) {
 		RefreshInterval     *domain.Duration      `json:"refresh_interval"`
 		HealthCheckInterval *domain.Duration      `json:"health_check_interval"`
 		URLTestURL          *string               `json:"url_test_url"`
+		URLTestFallbackURL  *string               `json:"url_test_fallback_url"`
 		URLTestTimeout      *domain.Duration      `json:"url_test_timeout"`
 		SwitchCooldown      *domain.Duration      `json:"switch_cooldown"`
 		LatencyThreshold    *domain.Duration      `json:"latency_threshold"`
@@ -132,6 +133,9 @@ func decodeSettings(data []byte, path string) (domain.Settings, error) {
 	}
 	if raw.URLTestURL != nil {
 		settings.URLTestURL = *raw.URLTestURL
+	}
+	if raw.URLTestFallbackURL != nil {
+		settings.URLTestFallbackURL = *raw.URLTestFallbackURL
 	}
 	if raw.URLTestTimeout != nil {
 		settings.URLTestTimeout = *raw.URLTestTimeout

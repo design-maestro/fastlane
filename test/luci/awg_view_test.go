@@ -56,6 +56,19 @@ func TestFastLaneVPNViewRendersAllAWGStatesAndActions(t *testing.T) {
 	}
 }
 
+func TestFastLaneVPNViewDoesNotCallFailedAWGProbeReady(t *testing.T) {
+	t.Parallel()
+	source := readVPNViewSource(t)
+	for _, want := range []string{
+		"var awgProbeFailed = isAWG && checked && row.observed.healthy === false;",
+		"awgProbeFailed ? _('Unavailable')",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("VPN view must present a failed AWG GET probe as unavailable: missing %q", want)
+		}
+	}
+}
+
 func TestFastLaneVPNViewOnlyRendersSafeAWGProfileFields(t *testing.T) {
 	t.Parallel()
 	source := readVPNViewSource(t)

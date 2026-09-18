@@ -906,6 +906,12 @@ msgstr "Выключаю правило…"
 msgid "URL test address"
 msgstr "Адрес URL-теста"
 
+msgid "Second check address"
+msgstr "Второй адрес проверки"
+
+msgid "Use another HTTPS site with a 204 response. A response from either address confirms connectivity."
+msgstr "Другой HTTPS-сайт с ответом 204. Для подтверждения связи достаточно ответа любого адреса."
+
 msgid "URL test timeout"
 msgstr "Тайм-аут URL-теста"
 
@@ -1245,6 +1251,9 @@ msgstr "Проверка соединения не пройдена"
 msgid "Could not complete the AmneziaWG action."
 msgstr "Не удалось выполнить действие AmneziaWG."
 
+msgid "The AWG server did not pass the HTTPS check."
+msgstr "AWG-сервер не прошёл HTTPS-проверку."
+
 msgid "Could not import the AmneziaWG profile. Check the configuration."
 msgstr "Не удалось импортировать профиль AmneziaWG. Проверьте конфигурацию."
 
@@ -1265,6 +1274,9 @@ msgstr "Точка подключения"
 
 msgid "AWG 2.0"
 msgstr "AWG 2.0"
+
+msgid "AWG profiles"
+msgstr "Профили AWG"
 
 msgid "Experimental. It does not participate in automatic selection."
 msgstr "Экспериментально. Не участвует в автовыборе."
@@ -1332,8 +1344,8 @@ msgstr "Импортируйте конфигурацию AmneziaWG."
 msgid "Traffic is using the AmneziaWG tunnel."
 msgstr "Трафик идёт через туннель AmneziaWG."
 
-msgid "Use Clash/Mihomo YAML, a provider file, or an AmneziaWG Legacy/2.0 .conf profile."
-msgstr "Используйте Clash/Mihomo YAML, provider-файл или профиль AmneziaWG Legacy/2.0 в формате .conf."
+msgid "Use Clash/Mihomo YAML, a provider file, or an AmneziaWG Legacy/2.0/3.1 .conf profile."
+msgstr "Используйте Clash/Mihomo YAML, provider-файл или профиль AmneziaWG Legacy/2.0/3.1 в формате .conf."
 
 msgid "AmneziaWG profile"
 msgstr "Профиль AmneziaWG"

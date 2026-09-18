@@ -217,6 +217,20 @@ func TestManagedReserveProbeOrderEventuallyMeasuresUnknownCandidates(t *testing.
 	}
 }
 
+func TestSelectManagedReserveStatesRequiresTwoHealthyObservations(t *testing.T) {
+	candidate := reserveCandidate("sub", "candidate")
+	health := map[string]domain.NodeHealth{
+		candidate.node.ID: {Healthy: true, ConsecutiveSuccesses: 1, AverageLatency: domain.NewDuration(50 * time.Millisecond)},
+	}
+	if got := selectManagedReserveStates([]managedReserveCandidate{candidate}, health, nil, time.Now()); len(got) != 0 {
+		t.Fatalf("single observation created reserve: %+v", got)
+	}
+	health[candidate.node.ID] = domain.NodeHealth{Healthy: true, ConsecutiveSuccesses: 2, AverageLatency: domain.NewDuration(50 * time.Millisecond)}
+	if got := selectManagedReserveStates([]managedReserveCandidate{candidate}, health, nil, time.Now()); !hasRuntimeRole(got, candidate.tag, "reserve") {
+		t.Fatalf("confirmed candidate was not retained: %+v", got)
+	}
+}
+
 func TestSelectManagedReserveStatesConfirmsProviderDiversityUpgrade(t *testing.T) {
 	now := time.Date(2026, 9, 14, 18, 0, 0, 0, time.UTC)
 	first := reserveCandidate("sub-a", "first")
@@ -247,10 +261,15 @@ func reserveCandidate(subscriptionID, nodeID string) managedReserveCandidate {
 }
 
 func reserveHealth(healthy bool, latency time.Duration) domain.NodeHealth {
+	successes := 0
+	if healthy {
+		successes = managedReserveHealthyConfirmations
+	}
 	return domain.NodeHealth{
-		Healthy:        healthy,
-		LastLatency:    domain.Duration(latency),
-		AverageLatency: domain.Duration(latency),
+		Healthy:              healthy,
+		ConsecutiveSuccesses: successes,
+		LastLatency:          domain.Duration(latency),
+		AverageLatency:       domain.Duration(latency),
 	}
 }
 
