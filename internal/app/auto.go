@@ -449,10 +449,23 @@ func (s *Service) connectionRecoveryNeeded(ctx context.Context, includeManual bo
 				return true, "backend is not running", nil
 			}
 		}
-		if s.backendEgressProbe != nil {
+		probe := s.backendEgressProbe
+		if s.awgEgressProbe != nil {
+			probe = func(probeCtx context.Context) error {
+				return s.awgEgressProbe(probeCtx, iface.Device)
+			}
+		}
+		if probe != nil {
 			probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			if probeErr := s.backendEgressProbe(probeCtx); probeErr != nil {
+			if probeErr := probe(probeCtx); probeErr != nil {
+				freshStatus := iface
+				if latest, latestErr := s.awgController.Status(ctx); latestErr == nil {
+					freshStatus = latest
+				}
+				if freshStatus.LastHandshake == 0 || s.currentTime().Sub(time.Unix(freshStatus.LastHandshake, 0)) > 2*time.Minute {
+					return true, "AmneziaWG handshake is stale and egress is unavailable", nil
+				}
 				return true, fmt.Sprintf("%s%v", activeGETFailureReasonPrefix, probeErr), nil
 			}
 		}

@@ -596,6 +596,69 @@ func TestManualAWGRecoveryDetectsHTTPFailureDespiteLiveInterface(t *testing.T) {
 	}
 }
 
+func TestAWGRecoveryUsesInterfaceBoundProbe(t *testing.T) {
+	state := domain.DefaultRuntimeState()
+	state.ActiveConnectionKind = "amneziawg"
+	state.ActiveSubscriptionID = awgSubscriptionID
+	state.ActiveNodeID = awgNodeID
+	state.Mode = domain.SelectionModeManual
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	stateStore := &memoryStore{settings: domain.DefaultSettings(), state: state}
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	controller := &awgControllerFake{status: amneziawg.InterfaceStatus{Up: true, Device: "awg0", LastHandshake: now.Unix()}}
+	service := NewService(Dependencies{Store: stateStore, AWGController: controller, Backend: &recordingBackend{status: backend.RuntimeStatus{Running: true}}})
+	service.now = func() time.Time { return now }
+	service.backendEgressProbe = func(context.Context) error { return errors.New("Xray probe must not run") }
+	calledDevice := ""
+	service.awgEgressProbe = func(_ context.Context, device string) error {
+		calledDevice = device
+		return nil
+	}
+
+	needed, reason, err := service.ConnectionRecoveryNeeded(context.Background())
+	if err != nil || needed || reason != "" {
+		t.Fatalf("recovery result needed=%t reason=%q err=%v", needed, reason, err)
+	}
+	if calledDevice != "awg0" {
+		t.Fatalf("AWG probe device = %q", calledDevice)
+	}
+}
+
+func TestAWGRecoverySeparatesFreshAndStaleHandshakeFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		age  time.Duration
+		soft bool
+	}{
+		{"fresh", 30 * time.Second, true},
+		{"stale", 3 * time.Minute, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := domain.DefaultRuntimeState()
+			state.ActiveConnectionKind = "amneziawg"
+			state.ActiveSubscriptionID = awgSubscriptionID
+			state.ActiveNodeID = awgNodeID
+			state.Mode = domain.SelectionModeManual
+			state.Connected = true
+			state.OperationalMode = domain.OperationalModeVPN
+			now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+			controller := &awgControllerFake{status: amneziawg.InterfaceStatus{Up: true, Device: "awg0", LastHandshake: now.Add(-tc.age).Unix()}}
+			service := NewService(Dependencies{Store: &memoryStore{settings: domain.DefaultSettings(), state: state}, AWGController: controller, Backend: &recordingBackend{status: backend.RuntimeStatus{Running: true}}})
+			service.now = func() time.Time { return now }
+			service.awgEgressProbe = func(context.Context, string) error { return errors.New("control endpoints unavailable") }
+
+			needed, reason, err := service.ConnectionRecoveryNeeded(context.Background())
+			if err != nil || !needed {
+				t.Fatalf("recovery result needed=%t reason=%q err=%v", needed, reason, err)
+			}
+			if gotSoft := strings.HasPrefix(reason, activeGETFailureReasonPrefix); gotSoft != tc.soft {
+				t.Fatalf("reason %q soft=%t, want %t", reason, gotSoft, tc.soft)
+			}
+		})
+	}
+}
+
 func TestManualAWGRecoveryStillDetectsDeadTunnel(t *testing.T) {
 	state := domain.DefaultRuntimeState()
 	state.ActiveConnectionKind = "amneziawg"

@@ -1,5 +1,5 @@
 'use strict';
-// Revisioned so LuCI loads the distinct check/select actions after upgrading.
+// Revisioned so LuCI loads country-preserving observations after upgrading.
 'require view';
 'require fs';
 'require ui';
@@ -211,9 +211,13 @@ function fresherObservation(persisted, session) {
 		return session || {};
 	if (!session)
 		return persisted;
-	return observationTime(session) >= observationTime(persisted)
-		? session
-		: persisted;
+	var newer = observationTime(session) >= observationTime(persisted) ? session : persisted;
+	var older = newer === session ? persisted : session;
+	// Connectivity and optional country lookup have independent freshness.
+	// Keep the newest ping/failure, but do not erase a confirmed location.
+	if (!trim(newer.country_code) && trim(older.country_code))
+		return Object.assign({}, newer, { country_code: older.country_code, egress_ip: older.egress_ip });
+	return newer;
 }
 
 function nodeLocation(node, observed) {
@@ -1061,7 +1065,7 @@ return view.extend({
 		if (latency == null)
 			throw new Error(_('GET did not return a positive latency.'));
 		this.pings = this.pings || {};
-		this.pings[subID + ':' + nodeID] = {
+		this.pings[subID + ':' + nodeID] = fresherObservation(this.pings[subID + ':' + nodeID], {
 			node_id: nodeID,
 			healthy: true,
 			latency_ms: latency,
@@ -1070,7 +1074,7 @@ return view.extend({
 			egress_ip: trim(result.egress_ip),
 			country_code: trim(result.country_code).toUpperCase(),
 			url_test: true
-		};
+		});
 		this.writePings();
 		this.update();
 	},

@@ -32,20 +32,9 @@ function date(value) { return value && !value.startsWith('0001-') ? new Date(val
 function expired(sub) { return sub.expires_at && new Date(sub.expires_at).getTime() <= Date.now(); }
 function hidden(node) { const settings = snapshot.status.settings, excluded = settings.auto_excluded_nodes || []; return excluded.includes(node.id) || excluded.includes(node.subscription_id+'/'+node.id) || (settings.auto_hide_keywords || []).some(word => (node.name+' '+(node.remark || '')).toLocaleLowerCase().includes(word.toLocaleLowerCase())); }
 function keywordHidden(node) {return (snapshot.status.settings.auto_hide_keywords || []).some(word=>(node.name+' '+(node.remark||'')).toLocaleLowerCase().includes(word.toLocaleLowerCase()));}
-const countryCache=new Map();
 function countryCode(node) {
-  const key=node.name+' '+(node.remark||'');if(countryCache.has(key))return countryCache.get(key);
-  const code=detectCountryCode(node);countryCache.set(key,code);return code;
-}
-function detectCountryCode(node) {
-  const text=node.name+' '+(node.remark||''),flag=text.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u)?.[0];
-  if(flag)return [...flag].map(c=>String.fromCharCode(c.codePointAt(0)-0x1f1e6+65)).join('');
-  const normalized=' '+text.toLocaleLowerCase().replace(/[.,()|—·]/g,' ')+' ';
-  for(const code of window.FastLaneCountries?.codes||[])for(const lang of ['ru','en']){
-    const name=new Intl.DisplayNames([lang],{type:'region'}).of(code).toLocaleLowerCase();
-    if(normalized.includes(' '+name+' ')||normalized.includes(' '+code.toLowerCase()+' '))return code;
-  }
-  return '';
+  const code=String(nodeHealth(node)?.country_code||'').toUpperCase();
+  return /^[A-Z]{2}$/.test(code)?code:'';
 }
 function awgByID(id){return awgs.find(profile=>profile.id===id);}
 function activeAWG(){const state=snapshot?.status?.state||{};return awgByID(state.active_awg_profile_id||state.active_node_id)||awgs.find(profile=>profile.active);}
@@ -73,9 +62,12 @@ function subscriptions() {
 	return result;
 }
 function nodeHealth(node) {
-	if(node.kind==='awg'){const profile=awgByID(node.id);return profile?.last_probe?{healthy:profile.last_probe.success,last_latency:profile.last_probe.latency_ms+'ms',last_checked_at:profile.last_probe.checked_at}:null;}
+	if(node.kind==='awg'){const profile=awgByID(node.id);return profile?.last_probe?{healthy:profile.last_probe.success,last_latency:profile.last_probe.latency_ms+'ms',last_checked_at:profile.last_probe.checked_at,country_code:profile.last_probe.country_code,egress_ip:profile.last_probe.egress_ip}:null;}
   const measured=probeResults[node.subscription_id+'/'+node.id],stored=snapshot.status.state.health?.[node.id];
-  return measured&&(!stored||new Date(measured.checked_at)>new Date(stored.last_checked_at))?{healthy:measured.success,last_latency:measured.success?measured.latency_ms+'ms':'',last_checked_at:measured.checked_at}:stored;
+  const fresh=measured&&(!stored||new Date(measured.checked_at)>new Date(stored.last_checked_at));
+  const identity=fresh?(measured.country_code?measured:stored):(stored?.country_code?stored:measured);
+  const health=fresh?{healthy:measured.success,last_latency:measured.success?measured.latency_ms+'ms':'',last_checked_at:measured.checked_at}:stored;
+  return health?{...health,country_code:identity?.country_code,egress_ip:identity?.egress_ip}:health;
 }
 function connectNode(node) {
   if(hidden(node)){notice(tr('Сервер скрыт правилом. Измените правила скрытия в настройках.'),true);return;}
@@ -148,7 +140,7 @@ function renderServers() {
       row.onkeydown=event=>{if(event.target===row&&(event.key==='Enter'||event.key===' ')){event.preventDefault();if(!row.flUnavailable)connectNode(row.flNode);}};
     }
     existing.delete(key);row.flNode=node;row.flUnavailable=unavailable;row.tabIndex=unavailable?-1:0;row.className=(isActive?'fl-active-row ':'')+(isHidden?'fl-hidden-row ':'');row.setAttribute('aria-label',node.name+(node.kind==='awg'?' · AmneziaWG':''));
-    const cells=row.children,mark=row.querySelector('.fl-server-mark'),flag=node.name.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u)?.[0];
+    const cells=row.children,mark=row.querySelector('.fl-server-mark'),code=countryCode(node),flag=code?String.fromCodePoint(...Array.from(code,c=>c.charCodeAt(0)+0x1f1e6-65)):'';
     mark.replaceChildren(flag?document.createTextNode(flag):window.fastlaneIcon(isActive?'bolt':'server'));mark.classList.toggle('fl-server-flag-glyph',!!flag);
     row.querySelector('.fl-server-name').textContent=node.name || node.address;row.querySelector('.fl-server-address').textContent=node.kind==='awg'?node.address:(node.remark!==node.name?node.remark:node.address);
     cells[1].textContent=sub.display_name || sub.id;cells[1].hidden=!!selected;cells[2].firstChild.textContent=node.kind==='awg'?'AmneziaWG':node.protocol.toUpperCase();

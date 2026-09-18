@@ -567,6 +567,10 @@ func TestSchedulerConnectionWatchFailsOverBeforeFullScan(t *testing.T) {
 		t.Fatalf("second failed cycle triggered recovery: %v", steps)
 	}
 	scheduler.runConnectionWatchOnce(context.Background())
+	if len(steps) != 0 {
+		t.Fatalf("third failed cycle triggered recovery: %v", steps)
+	}
+	scheduler.runConnectionWatchOnce(context.Background())
 	if !reflect.DeepEqual(steps, []string{"cached failover"}) {
 		t.Fatalf("expected confirmed failover without an immediate optimization scan, got %v", steps)
 	}
@@ -623,6 +627,10 @@ func TestSchedulerConnectionWatchDoesNotThrottleASecondFailedRouteAfterSuccessfu
 	scheduler.runConnectionWatchOnce(context.Background())
 	now = now.Add(connectionWatchInterval)
 	scheduler.runConnectionWatchOnce(context.Background())
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
+	now = now.Add(connectionWatchInterval)
+	scheduler.runConnectionWatchOnce(context.Background())
 	if failoverCalls != 2 {
 		t.Fatalf("expected two confirmed recovery attempts, got %d", failoverCalls)
 	}
@@ -655,10 +663,31 @@ func TestConnectionWatchRequiresConsecutiveSameClassFailures(t *testing.T) {
 				t.Fatalf("nonconsecutive failures caused %d switches", switches)
 			}
 			scheduler.runConnectionWatchOnce(context.Background())
+			if switches != 0 {
+				t.Fatalf("three post-reset failures caused %d switches", switches)
+			}
+			scheduler.runConnectionWatchOnce(context.Background())
 			if switches != 1 {
 				t.Fatalf("confirmed failure caused %d switches, want 1", switches)
 			}
 		})
+	}
+}
+
+func TestManagedReserveCheckUsesTenMinuteCadenceAndJitter(t *testing.T) {
+	now := time.Date(2026, 9, 18, 10, 0, 0, 0, time.UTC)
+	scheduler := NewScheduler(nil)
+	scheduler.now = func() time.Time { return now }
+	scheduler.lastReserveCheckAt = now
+	scheduler.reserveCheckJitter = 17 * time.Second
+
+	now = now.Add(10*time.Minute + 16*time.Second)
+	if scheduler.managedReserveCheckDue() {
+		t.Fatal("reserve check ignored jitter")
+	}
+	now = now.Add(time.Second)
+	if !scheduler.managedReserveCheckDue() {
+		t.Fatal("reserve check did not become due")
 	}
 }
 

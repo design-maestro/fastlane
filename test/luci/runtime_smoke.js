@@ -443,6 +443,21 @@ async function smoke(section, name, run) {
 		assert.match(text, /Add your first subscription/);
 	});
 
+	await smoke('VPN', 'retains measured country through newer reserve checks and failures', async () => {
+		const page = makeVPN();
+		page.readPings = () => ({});
+		for (const healthy of [true, false]) {
+			page.mergePersistedPings({ state: { health: { nl: { node_id: 'nl', healthy, last_latency: '45ms', last_checked_at: healthy ? '2026-09-03T18:04:00Z' : '2026-09-03T18:04:30Z' } } } }, page.pageData[1]);
+			assert.equal(page.pings['durev:nl'].country_code, 'NL');
+			assert.equal(page.pings['durev:nl'].healthy, healthy);
+		}
+		page.applyURLTestResult('durev', 'nl', { latency_ms: 40, checked_at: '2026-09-03T18:05:00Z' });
+		assert.equal(page.pings['durev:nl'].country_code, 'NL');
+		page.applyURLTestResult('durev', 'nl', { latency_ms: 41, checked_at: '2026-09-03T18:06:00Z', country_code: 'SE', egress_ip: '192.0.2.4' });
+		assert.equal(page.pings['durev:nl'].country_code, 'SE');
+		assert.equal(page.pings['durev:nl'].egress_ip, '192.0.2.4');
+	});
+
 	await smoke('VPN', 'renders recovering mode without claiming an active VPN server', async () => {
 		const page = makeVPN();
 		page.pageData[0].state.operational_mode = 'recovering';

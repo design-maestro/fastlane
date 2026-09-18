@@ -165,8 +165,15 @@ func mergeProbeHealth(current map[string]domain.NodeHealth, probed map[string]do
 		merged = make(map[string]domain.NodeHealth)
 	}
 	for nodeID, health := range current {
-		if nodeID == failedNodeID {
+		observed, exists := merged[nodeID]
+		if nodeID == failedNodeID || !exists || health.LastCheckedAt.After(observed.LastCheckedAt) {
+			if health.CountryCode == "" && observed.CountryCode != "" {
+				health.CountryCode, health.EgressIP = observed.CountryCode, observed.EgressIP
+			}
 			merged[nodeID] = health
+		} else if observed.CountryCode == "" && health.CountryCode != "" {
+			observed.CountryCode, observed.EgressIP = health.CountryCode, health.EgressIP
+			merged[nodeID] = observed
 		}
 	}
 	return merged

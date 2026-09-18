@@ -526,6 +526,9 @@ func TestInspectURLTestRetriesPortBindCollisionWithFreshPorts(t *testing.T) {
 	if result.LatencyMS != 123 {
 		t.Fatalf("unexpected URL test result: %+v", result)
 	}
+	if backend.applyCalls != 0 || !store.state.Health["node-1"].Healthy {
+		t.Fatal("row inspection must persist health without applying a connection")
+	}
 	if len(tester.requests) != 2 || len(backend.generateRequests) != 2 {
 		t.Fatalf("expected one retry with regenerated config, got requests=%d configs=%d", len(tester.requests), len(backend.generateRequests))
 	}

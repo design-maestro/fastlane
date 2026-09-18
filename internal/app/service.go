@@ -144,6 +144,7 @@ type Service struct {
 	backendReadyChecks      int
 	backendReadyDelay       time.Duration
 	backendEgressProbe      func(ctx context.Context) error
+	awgEgressProbe          func(ctx context.Context, device string) error
 	managedOutboundProbe    func(context.Context, backend.ManagedBackend, int, string) error
 	managedRecoveryDelay    time.Duration
 	backendEgressTimeout    time.Duration
@@ -155,6 +156,11 @@ type Service struct {
 	autoHealthState         *autoHealthStateCache
 	awgStore                AWGProfileStore
 	awgController           amneziawg.Controller
+	awgEgressMu             sync.Mutex
+	awgEgressDevice         string
+	awgEgressTransport      *http.Transport
+	awgEgressClient         *http.Client
+	awgEgressFreshAt        time.Time
 }
 
 // Dependencies groups the service construction inputs.
@@ -199,6 +205,7 @@ const (
 	backendReadyCheckDelay                = 250 * time.Millisecond
 	backendEgressProbeTimeout             = 12 * time.Second
 	backendEgressProbeRetryDelay          = 250 * time.Millisecond
+	awgEgressFreshConnectionInterval      = 5 * time.Minute
 	localDNSListen                        = "127.0.0.1"
 	localDNSPort                          = 1053
 	// Bit 0 is reserved by Fast Lane TPROXY policy routing (fwmark 0x1/0x1).
@@ -254,6 +261,7 @@ func NewService(deps Dependencies) *Service {
 
 	if deps.RuntimeEgressProbe && deps.Backend != nil && deps.HTTPClient != nil {
 		service.backendEgressProbe = service.defaultBackendEgressProbe
+		service.awgEgressProbe = service.defaultAWGEgressProbe
 	}
 
 	return service
@@ -747,7 +755,14 @@ func (s *Service) InspectURLTest(ctx context.Context, subscriptionID, nodeID str
 	if err != nil {
 		return speedtest.URLTestResult{}, err
 	}
-	return s.inspectURLTestNode(ctx, subscriptionID, node, settings, runtimeSettings)
+	result, err := s.inspectURLTestNode(ctx, subscriptionID, node, settings, runtimeSettings)
+	if err != nil {
+		return result, err
+	}
+	// A row-level check must survive a page reload and daemon restart too.
+	// Do not change connection state or count an invocation error as node failure.
+	err = s.persistInspectedHealth(subscriptionID, node, result, settings)
+	return result, err
 }
 
 func (s *Service) inspectURLTestNode(ctx context.Context, subscriptionID string, node domain.Node, settings, runtimeSettings domain.Settings) (speedtest.URLTestResult, error) {
@@ -5672,67 +5687,57 @@ func (s *Service) defaultBackendEgressProbe(ctx context.Context) error {
 	clientCopy.Transport = transport
 	clientCopy.Timeout = reqTimeout
 
-	type result struct {
-		err error
+	return probeEgressEndpoints(probeCtx, &clientCopy, endpoints)
+}
+
+// defaultAWGEgressProbe bypasses Xray and binds health traffic to the active
+// AWG interface. That keeps Xray's internal dial retries from multiplying one
+// watchdog round. The retained transport reuses healthy HTTPS connections.
+func (s *Service) defaultAWGEgressProbe(ctx context.Context, device string) error {
+	device = strings.TrimSpace(device)
+	if device == "" {
+		return errors.New("AmneziaWG interface is unavailable")
+	}
+	endpoints, err := s.configuredProbeURLs()
+	if err != nil {
+		return err
 	}
 
-	resCh := make(chan result, len(endpoints))
-	successCtx, cancelSuccess := context.WithCancel(probeCtx)
-	defer cancelSuccess()
-
-	for _, rawURL := range endpoints {
-		go func(urlStr string) {
-			req, err := http.NewRequestWithContext(successCtx, http.MethodGet, urlStr, nil)
-			if err != nil {
-				resCh <- result{err: err}
-				return
-			}
-
-			resp, err := clientCopy.Do(req)
-			if err != nil {
-				resCh <- result{err: err}
-				return
-			}
-
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-			_ = resp.Body.Close()
-
-			if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusInternalServerError {
-				resCh <- result{err: nil}
-				return
-			}
-			resCh <- result{err: fmt.Errorf("%s returned status %d", urlStr, resp.StatusCode)}
-		}(rawURL)
-	}
-
-	var lastErr error
-	success := false
-	for i := 0; i < len(endpoints); i++ {
-		select {
-		case <-probeCtx.Done():
-			if lastErr == nil {
-				lastErr = probeCtx.Err()
-			}
-			return lastErr
-		case res := <-resCh:
-			if res.err == nil {
-				success = true
-				cancelSuccess()
-				return nil
-			}
-			lastErr = res.err
+	s.awgEgressMu.Lock()
+	now := s.currentTime()
+	if s.awgEgressClient == nil || s.awgEgressDevice != device {
+		if s.awgEgressTransport != nil {
+			s.awgEgressTransport.CloseIdleConnections()
 		}
+		base := ensureSubscriptionHTTPClient(s.httpClient)
+		var transport *http.Transport
+		if base.Transport == nil {
+			transport = http.DefaultTransport.(*http.Transport).Clone()
+		} else {
+			var ok bool
+			transport, ok = base.Transport.(*http.Transport)
+			if !ok {
+				s.awgEgressMu.Unlock()
+				return fmt.Errorf("unsupported HTTP transport %T", base.Transport)
+			}
+			transport = transport.Clone()
+		}
+		transport.Proxy = nil
+		transport.DialContext = interfaceBoundDialContext(device)
+		s.awgEgressTransport = transport
+		s.awgEgressClient = &http.Client{Transport: transport, Timeout: 5 * time.Second}
+		s.awgEgressDevice = device
+		s.awgEgressFreshAt = now
+	} else if !now.Before(s.awgEgressFreshAt.Add(awgEgressFreshConnectionInterval)) {
+		s.awgEgressTransport.CloseIdleConnections()
+		s.awgEgressFreshAt = now
 	}
+	client := s.awgEgressClient
+	s.awgEgressMu.Unlock()
 
-	if success {
-		return nil
-	}
-
-	if lastErr == nil {
-		lastErr = errors.New("no egress probe endpoints configured")
-	}
-
-	return lastErr
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return probeEgressEndpoints(probeCtx, client, endpoints)
 }
 
 func backendStateMayStillBeStarting(serviceState string) bool {

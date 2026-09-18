@@ -14,7 +14,8 @@ import (
 )
 
 const managedReserveLimit = 2
-const managedReserveProbeLimit = 4
+const managedReserveProbeLimit = 2
+const managedReserveHealthyConfirmations = 2
 
 type managedReserveCandidate struct {
 	sub        domain.Subscription
@@ -23,7 +24,7 @@ type managedReserveCandidate struct {
 	verifiedAt time.Time
 }
 
-// MaintainManagedReserves verifies up to four candidates, with no more than
+// MaintainManagedReserves verifies up to two candidates, with no more than
 // two concurrent checks, through the live Xray probe inbounds. It retains at
 // most two verified reserves and never changes the user balancer target.
 func (s *Service) MaintainManagedReserves(ctx context.Context) error {

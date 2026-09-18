@@ -14,8 +14,10 @@ const (
 	maxRefreshConfigPollInterval = time.Second
 	maxHealthConfigPollInterval  = time.Second
 	// Bound synthetic traffic through the selected VPN. Egress failures
-	// require three rounds; explicit runtime failures require two.
-	connectionWatchInterval = 30 * time.Second
+	// require four rounds; explicit runtime failures require two.
+	connectionWatchInterval      = 30 * time.Second
+	managedReserveCheckInterval  = 10 * time.Minute
+	managedReserveCheckMaxJitter = 30 * time.Second
 )
 
 // Scheduler periodically refreshes subscriptions using the global settings interval.
@@ -36,6 +38,7 @@ type Scheduler struct {
 	recoveryFailureClass   string
 	lastOutboundCleanupAt  time.Time
 	lastReserveCheckAt     time.Time
+	reserveCheckJitter     time.Duration
 	recoveryRetryEvery     time.Duration
 	refreshConfigPollEvery time.Duration
 	healthConfigPollEvery  time.Duration
@@ -46,11 +49,14 @@ type Scheduler struct {
 
 // NewScheduler creates a scheduler instance.
 func NewScheduler(service *Service) *Scheduler {
+	now := time.Now()
 	return &Scheduler{
-		service: service,
-		now:     time.Now,
-		tick:    time.Minute,
-		stopCh:  make(chan struct{}),
+		service:            service,
+		now:                time.Now,
+		tick:               time.Minute,
+		stopCh:             make(chan struct{}),
+		lastReserveCheckAt: now,
+		reserveCheckJitter: time.Duration(now.UnixNano() % int64(managedReserveCheckMaxJitter+1)),
 	}
 }
 
@@ -184,8 +190,17 @@ func (s *Scheduler) consumeHealthTrigger() (string, bool) {
 }
 
 func (s *Scheduler) runConnectionWatchLoop(ctx context.Context) {
-	for s.wait(ctx, connectionWatchInterval) {
-		s.runConnectionWatchOnce(ctx)
+	ticker := time.NewTicker(connectionWatchInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.runConnectionWatchOnce(ctx)
+		}
 	}
 }
 
@@ -196,7 +211,7 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 		}
 		s.lastOutboundCleanupAt = s.now()
 	}
-	if s.service != nil && (s.lastReserveCheckAt.IsZero() || !s.now().Before(s.lastReserveCheckAt.Add(time.Minute))) {
+	if s.service != nil && s.managedReserveCheckDue() {
 		if err := s.service.MaintainManagedReserves(ctx); err != nil {
 			s.logWarn("verify managed xray reserves", "error", err.Error())
 		}
@@ -248,7 +263,7 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 	threshold := 2
 	if strings.HasPrefix(reason, activeGETFailureReasonPrefix) {
 		failureClass = "egress"
-		threshold = 3
+		threshold = 4
 	}
 	if routeKey != s.recoveryRouteKey || failureClass != s.recoveryFailureClass {
 		s.recoveryRouteKey = routeKey
@@ -284,6 +299,10 @@ func (s *Scheduler) runConnectionWatchOnce(ctx context.Context) {
 		s.recoveryFailures = 0
 		s.recoveryRouteKey = ""
 	}
+}
+
+func (s *Scheduler) managedReserveCheckDue() bool {
+	return !s.now().Before(s.lastReserveCheckAt.Add(managedReserveCheckInterval + s.reserveCheckJitter))
 }
 
 func (s *Scheduler) currentRecoveryRouteKey() string {
