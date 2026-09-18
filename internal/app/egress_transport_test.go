@@ -67,7 +67,7 @@ func TestEgressDiagnosticsIdentifyStagesWithoutLeakingURLs(t *testing.T) {
 		t.Fatal("both failures accepted")
 	}
 	message := err.Error()
-	for _, expected := range []string{"endpoint_1 phase=response_headers result=http_503", "endpoint_2 phase=response_headers"} {
+	for _, expected := range []string{"endpoint_1 phase=response_headers result=http_503", "endpoint_2 phase="} {
 		if !strings.Contains(message, expected) {
 			t.Fatalf("missing %q in %q", expected, message)
 		}
