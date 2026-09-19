@@ -96,7 +96,7 @@ func TestOpenWrtControllerPreparesSecretThroughStdinAndConnectsPolicyRoute(t *te
 			t.Fatal("private key leaked into process arguments")
 		}
 	}
-	for _, expected := range []string{"proto='amneziawg'", "private_key='" + testPrivateKey + "'", "nohostroute='1'", "route_allowed_ips='0'", "awg_s3='30'", "awg_i1="} {
+	for _, expected := range []string{"proto='amneziawg'", "private_key='" + testPrivateKey + "'", "nohostroute='0'", "route_allowed_ips='0'", "awg_s3='30'", "awg_i1="} {
 		if !strings.Contains(batch, expected) {
 			t.Fatalf("UCI batch missing %q:\n%s", expected, batch)
 		}

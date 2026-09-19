@@ -453,10 +453,10 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 	lines = append(lines, "delete network."+name, "delete network."+peerSection, "set network."+name+"=interface")
 	set(name, "proto", "amneziawg")
 	set(name, "private_key", profile.Interface.PrivateKey.base64())
-	// The AWG transport must follow the router's current upstream/default route.
-	// A netifd host dependency pins the endpoint to whichever WAN was active when
-	// the interface came up and becomes stale after mwan3 changes uplinks.
-	set(name, "nohostroute", "1")
+	// Keep the endpoint host dependency. The router's main default route is not
+	// necessarily mwan3's selected uplink for this UDP flow, so removing this
+	// route can break an otherwise working AWG connection.
+	set(name, "nohostroute", "0")
 	if profile.Interface.MTU > 0 {
 		set(name, "mtu", strconv.Itoa(int(profile.Interface.MTU)))
 	}
