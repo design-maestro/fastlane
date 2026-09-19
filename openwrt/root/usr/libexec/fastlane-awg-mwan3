@@ -1,0 +1,81 @@
+#!/bin/sh
+set -eu
+
+interface_name="fastlane_awg"
+dry_run=0
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--interface)
+			[ "$#" -ge 2 ] || exit 0
+			interface_name="$2"
+			shift 2
+			;;
+		--dry-run)
+			dry_run=1
+			shift
+			;;
+		*)
+			exit 0
+			;;
+	esac
+done
+
+case "${interface_name}" in
+	fastlane_awg|flawg_probe) ;;
+	*) exit 0 ;;
+esac
+
+command -v uci >/dev/null 2>&1 || exit 0
+command -v ubus >/dev/null 2>&1 || exit 0
+command -v jsonfilter >/dev/null 2>&1 || exit 0
+command -v ip >/dev/null 2>&1 || exit 0
+
+peer_section="amneziawg_${interface_name}"
+endpoint_host="$(uci -q get "network.${peer_section}.endpoint_host" 2>/dev/null || true)"
+[ -n "${endpoint_host}" ] || exit 0
+
+policy="$(uci -q get mwan3.default_v4.use_policy 2>/dev/null || true)"
+[ -n "${policy}" ] || exit 0
+
+mwan_status="$(ubus call mwan3 status 2>/dev/null || true)"
+[ -n "${mwan_status}" ] || exit 0
+selected_interface="$(printf '%s' "${mwan_status}" | jsonfilter -e "@.policies.ipv4.${policy}[0].interface" 2>/dev/null || true)"
+[ -n "${selected_interface}" ] || exit 0
+
+network_status="$(ubus call "network.interface.${selected_interface}" status 2>/dev/null || true)"
+[ -n "${network_status}" ] || exit 0
+network_up="$(printf '%s' "${network_status}" | jsonfilter -e '@.up' 2>/dev/null || true)"
+[ "${network_up}" = "true" ] || exit 0
+device="$(printf '%s' "${network_status}" | jsonfilter -e '@.l3_device' 2>/dev/null || true)"
+gateway="$(printf '%s' "${network_status}" | jsonfilter -e '@.route[@.target="0.0.0.0"].nexthop' 2>/dev/null | head -n1 || true)"
+[ -n "${device}" ] || exit 0
+
+case "${endpoint_host}" in
+	*[!0-9.]*|'')
+		command -v resolveip >/dev/null 2>&1 || exit 0
+		endpoint_ips="$(resolveip -4 -t 3 "${endpoint_host}" 2>/dev/null || true)"
+		;;
+	*) endpoint_ips="${endpoint_host}" ;;
+esac
+[ -n "${endpoint_ips}" ] || exit 0
+
+lock_dir="/var/run/fastlane-awg-mwan3.lock"
+mkdir "${lock_dir}" 2>/dev/null || exit 0
+trap 'rmdir "${lock_dir}" >/dev/null 2>&1 || true' EXIT HUP INT TERM
+
+for endpoint_ip in ${endpoint_ips}; do
+	case "${endpoint_ip}" in
+		*[!0-9.]*|'') continue ;;
+	esac
+	if [ "${dry_run}" = "1" ]; then
+		printf 'endpoint=%s interface=%s device=%s gateway=%s\n' \
+			"${endpoint_ip}" "${selected_interface}" "${device}" "${gateway}"
+		continue
+	fi
+	if [ -n "${gateway}" ]; then
+		ip -4 route replace "${endpoint_ip}/32" via "${gateway}" dev "${device}" proto static
+	else
+		ip -4 route replace "${endpoint_ip}/32" dev "${device}" proto static
+	fi
+done

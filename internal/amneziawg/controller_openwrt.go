@@ -21,6 +21,7 @@ const (
 	DefaultInterfaceName = "fastlane_awg"
 	ProbeInterfaceName   = "flawg_probe"
 	FastLaneAWGTool      = "/usr/libexec/fastlane-amneziawg"
+	FastLaneMwan3Helper  = "/usr/libexec/fastlane-awg-mwan3"
 	RouteTable           = 51821
 	ProbeRouteTable      = 51822
 	ProbeRulePriority    = 901
@@ -238,6 +239,9 @@ func (c *OpenWrtController) Prepare(ctx context.Context, profile Profile) error 
 }
 
 func (c *OpenWrtController) Connect(ctx context.Context) (InterfaceStatus, error) {
+	if err := c.syncMwanEndpointRoute(ctx); err != nil {
+		return InterfaceStatus{}, err
+	}
 	status, err := c.connectWithoutPolicy(ctx)
 	if err != nil {
 		return InterfaceStatus{}, err
@@ -247,6 +251,17 @@ func (c *OpenWrtController) Connect(ctx context.Context) (InterfaceStatus, error
 		return InterfaceStatus{}, err
 	}
 	return status, nil
+}
+
+func (c *OpenWrtController) syncMwanEndpointRoute(ctx context.Context) error {
+	if _, err := os.Stat(c.rooted(strings.TrimPrefix(FastLaneMwan3Helper, "/"))); err != nil {
+		return nil
+	}
+	output, err := c.run(ctx, nil, FastLaneMwan3Helper, "--interface", c.interfaceName())
+	if err != nil {
+		return fmt.Errorf("synchronize AmneziaWG endpoint with mwan3: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func (c *OpenWrtController) connectWithoutPolicy(ctx context.Context) (InterfaceStatus, error) {
@@ -430,6 +445,9 @@ func (c *OpenWrtController) installPolicyRoutes(ctx context.Context, status Inte
 
 // EnsurePolicyRoutes also repairs policy rules when upgrading an already-up tunnel.
 func (c *OpenWrtController) EnsurePolicyRoutes(ctx context.Context, status InterfaceStatus) error {
+	if err := c.syncMwanEndpointRoute(ctx); err != nil {
+		return err
+	}
 	return c.installPolicyRoutes(ctx, status)
 }
 
@@ -453,10 +471,10 @@ func (c *OpenWrtController) uciBatch(profile Profile) ([]byte, error) {
 	lines = append(lines, "delete network."+name, "delete network."+peerSection, "set network."+name+"=interface")
 	set(name, "proto", "amneziawg")
 	set(name, "private_key", profile.Interface.PrivateKey.base64())
-	// Keep the endpoint host dependency. The router's main default route is not
-	// necessarily mwan3's selected uplink for this UDP flow, so removing this
-	// route can break an otherwise working AWG connection.
-	set(name, "nohostroute", "0")
+	// Fast Lane owns this host route and synchronizes it with mwan3's selected
+	// failover member. netifd's one-time dependency otherwise remains pinned to
+	// the uplink that happened to be active when the tunnel was created.
+	set(name, "nohostroute", "1")
 	if profile.Interface.MTU > 0 {
 		set(name, "mtu", strconv.Itoa(int(profile.Interface.MTU)))
 	}
