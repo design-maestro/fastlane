@@ -547,6 +547,24 @@ func TestSchedulerDiscardsFailureFromConnectionReplacedDuringGET(t *testing.T) {
 	}
 }
 
+func TestConnectionRecoveryIgnoresTransitionInProgress(t *testing.T) {
+	state := domain.DefaultRuntimeState()
+	state.Mode = domain.SelectionModeManual
+	state.Connected = false
+	state.OperationalMode = domain.OperationalModeRecovering
+	state.CurrentOperation = &domain.RuntimeOperation{Kind: "switch", StartedAt: time.Now()}
+	store := &memoryStore{settings: domain.DefaultSettings(), state: state}
+	service := NewService(Dependencies{Store: store})
+
+	needed, reason, err := service.ConnectionRecoveryNeeded(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needed || reason != "" {
+		t.Fatalf("transition in progress triggered nested recovery: needed=%v reason=%q", needed, reason)
+	}
+}
+
 func TestSchedulerConnectionWatchFailsOverBeforeFullScan(t *testing.T) {
 	t.Parallel()
 

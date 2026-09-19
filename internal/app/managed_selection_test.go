@@ -172,6 +172,18 @@ func TestActivateManagedDirectPersistsWhenActiveNodeDisappeared(t *testing.T) {
 	}
 }
 
+func TestGETFailureDoesNotFailOpenConnectedVPN(t *testing.T) {
+	state := domain.DefaultRuntimeState()
+	state.Connected = true
+	state.OperationalMode = domain.OperationalModeVPN
+	if shouldFailOpenDirect(state, activeGETFailureReasonPrefix+"timeout") {
+		t.Fatal("connected VPN was allowed to fail open after an application-level timeout")
+	}
+	if !shouldFailOpenDirect(state, "AmneziaWG interface or handshake is unavailable") {
+		t.Fatal("confirmed runtime failure must still allow direct fallback")
+	}
+}
+
 func TestDirectRecoveryRequiresTwoSuccessfulManagedProbes(t *testing.T) {
 	current := domain.Node{ID: "old", Protocol: domain.ProtocolSocks, Address: "192.0.2.1", Port: 1080}
 	candidate := domain.Node{ID: "candidate", Protocol: domain.ProtocolSocks, Address: "192.0.2.2", Port: 1080}
