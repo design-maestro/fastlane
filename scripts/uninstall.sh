@@ -86,6 +86,14 @@ fastlane_awg_runtime_source_path() {
 	scope_path "/usr/libexec/fastlane-amneziawg-go"
 }
 
+fastlane_awg_mwan3_helper_path() {
+	scope_path "/usr/libexec/fastlane-awg-mwan3"
+}
+
+fastlane_mwan3_hotplug_source_path() {
+	scope_path "/usr/libexec/fastlane-mwan3-hotplug"
+}
+
 fastlane_self_update_helper_path() {
 	scope_path "/usr/libexec/fastlane-self-update"
 }
@@ -338,6 +346,9 @@ restore_manifest_packages "${install_manifest}"
 remove_path "${fastlane_binary}"
 remove_path "${fastlane_awg_runtime}"
 remove_path "${fastlane_awg_runtime_source}"
+remove_path "$(fastlane_awg_mwan3_helper_path)"
+remove_path "$(fastlane_mwan3_hotplug_source_path)"
+remove_path "$(scope_path "/etc/hotplug.d/iface/17-fastlane-awg")"
 remove_path "${fastlane_service}"
 remove_path "${fastlane_root}"
 

@@ -37,3 +37,35 @@ func TestAmneziaWGProtocolKeepsLegacyAndV31ToolchainsSeparate(t *testing.T) {
 		t.Fatal("AmneziaWG protocol must apply the profile MTU after setconf")
 	}
 }
+
+func TestAmneziaWGMwan3IntegrationUsesPolicyEvents(t *testing.T) {
+	t.Parallel()
+
+	helperPath := filepath.Join(repoRoot(t), "openwrt", "root", "usr", "libexec", "fastlane-awg-mwan3")
+	helper, err := os.ReadFile(helperPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"ubus call mwan3 status",
+		"mwan3.default_v4.use_policy",
+		"network.interface.${selected_interface}",
+		"ip -4 route replace",
+		"--dry-run",
+	} {
+		if !strings.Contains(string(helper), required) {
+			t.Fatalf("mwan3 helper is missing %q", required)
+		}
+	}
+
+	hotplugPath := filepath.Join(repoRoot(t), "openwrt", "root", "usr", "libexec", "fastlane-mwan3-hotplug")
+	hotplug, err := os.ReadFile(hotplugPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"ifup|ifdown|connected|disconnected", "fastlane-awg-mwan3 --interface fastlane_awg"} {
+		if !strings.Contains(string(hotplug), required) {
+			t.Fatalf("mwan3 hotplug is missing %q", required)
+		}
+	}
+}

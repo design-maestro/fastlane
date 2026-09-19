@@ -40,6 +40,13 @@ func newControllerForTest(t *testing.T, runner *controllerRunner) *OpenWrtContro
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	helper := filepath.Join(root, strings.TrimPrefix(FastLaneMwan3Helper, "/"))
+	if err := os.MkdirAll(filepath.Dir(helper), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	return &OpenWrtController{InterfaceName: DefaultInterfaceName, SysRoot: root, Runner: runner, WaitTimeout: time.Second}
 }
 
@@ -96,12 +103,15 @@ func TestOpenWrtControllerPreparesSecretThroughStdinAndConnectsPolicyRoute(t *te
 			t.Fatal("private key leaked into process arguments")
 		}
 	}
-	for _, expected := range []string{"proto='amneziawg'", "private_key='" + testPrivateKey + "'", "nohostroute='0'", "route_allowed_ips='0'", "awg_s3='30'", "awg_i1="} {
+	for _, expected := range []string{"proto='amneziawg'", "private_key='" + testPrivateKey + "'", "nohostroute='1'", "route_allowed_ips='0'", "awg_s3='30'", "awg_i1="} {
 		if !strings.Contains(batch, expected) {
 			t.Fatalf("UCI batch missing %q:\n%s", expected, batch)
 		}
 	}
 	joined := callsText(runner.calls)
+	if !strings.Contains(joined, FastLaneMwan3Helper+" --interface "+DefaultInterfaceName) {
+		t.Fatalf("mwan3 endpoint synchronization was not run before connect:\n%s", joined)
+	}
 	if !strings.Contains(joined, "ubus call network reload") {
 		t.Fatalf("netifd configuration was not reloaded:\n%s", joined)
 	}

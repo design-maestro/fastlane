@@ -12,6 +12,8 @@ FASTLANE_AWG_RUNTIME_TARGET="/usr/bin/amneziawg-go"
 FASTLANE_AWG_TOOL="/usr/libexec/fastlane-amneziawg"
 FASTLANE_AWG_PROTO_SOURCE="/usr/libexec/fastlane-amneziawg-proto"
 FASTLANE_AWG_PROTO_TARGET="/lib/netifd/proto/amneziawg.sh"
+FASTLANE_MWAN3_HOTPLUG_SOURCE="/usr/libexec/fastlane-mwan3-hotplug"
+FASTLANE_MWAN3_HOTPLUG_TARGET="/etc/hotplug.d/iface/17-fastlane-awg"
 FASTLANE_RUNTIME_ROOT="/tmp/fastlane-runtime"
 
 install_awg_runtime() {
@@ -40,6 +42,20 @@ install_awg_protocol() {
 	cp "${FASTLANE_AWG_PROTO_SOURCE}" "${staged}" || return 1
 	chmod 0755 "${staged}" || return 1
 	mv -f "${staged}" "${FASTLANE_AWG_PROTO_TARGET}"
+}
+
+install_mwan3_hotplug() {
+	local staged
+
+	[ -f "${FASTLANE_MWAN3_HOTPLUG_SOURCE}" ] || return 0
+	if [ -f "${FASTLANE_MWAN3_HOTPLUG_TARGET}" ] && cmp -s "${FASTLANE_MWAN3_HOTPLUG_SOURCE}" "${FASTLANE_MWAN3_HOTPLUG_TARGET}"; then
+		return 0
+	fi
+	mkdir -p "$(dirname "${FASTLANE_MWAN3_HOTPLUG_TARGET}")" || return 1
+	staged="${FASTLANE_MWAN3_HOTPLUG_TARGET}.fastlane-new.$$"
+	cp "${FASTLANE_MWAN3_HOTPLUG_SOURCE}" "${staged}" || return 1
+	chmod 0755 "${staged}" || return 1
+	mv -f "${staged}" "${FASTLANE_MWAN3_HOTPLUG_TARGET}"
 }
 
 migrate_health_runtime_files() {
@@ -74,6 +90,7 @@ start_service() {
 	[ -x "${FASTLANE_BIN}" ] || return 1
 	install_awg_protocol || return 1
 	install_awg_runtime || return 1
+	install_mwan3_hotplug || return 1
 	[ -x "${FASTLANE_CRON_HELPER}" ] && "${FASTLANE_CRON_HELPER}" ensure-xray-log-retention >/dev/null 2>&1 || true
 	migrate_health_runtime_files "${root}"
 
