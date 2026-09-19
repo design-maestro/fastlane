@@ -144,6 +144,13 @@ func (s *Service) runConnectionFailoverForRoute(ctx context.Context, failureReas
 	if err == nil || errors.Is(err, errAutoSelectionSnapshotChanged) {
 		return err
 	}
+	// An application-level GET timeout does not prove that the VPN runtime is
+	// gone. Keep the current, potentially degraded route until a replacement has
+	// passed verification. Failing open here used to tear down a working AWG
+	// tunnel while candidates were still unavailable.
+	if !shouldFailOpenDirect(snapshot.persistedState, failureReason) {
+		return err
+	}
 	managed, ok := s.backend.(backend.ManagedBackend)
 	if !ok {
 		return err
@@ -166,6 +173,13 @@ func (s *Service) runConnectionFailoverForRoute(ctx context.Context, failureReas
 		return fmt.Errorf("%v; activate direct fallback: %w", err, directErr)
 	}
 	return nil
+}
+
+func shouldFailOpenDirect(state domain.RuntimeState, failureReason string) bool {
+	if state.Connected && state.OperationalMode == domain.OperationalModeVPN && strings.HasPrefix(failureReason, activeGETFailureReasonPrefix) {
+		return false
+	}
+	return true
 }
 
 func (s *Service) activateManagedDirect(ctx context.Context, managed backend.ManagedBackend, state domain.RuntimeState, reason string) error {
@@ -424,6 +438,9 @@ func (s *Service) connectionRecoveryNeeded(ctx context.Context, includeManual bo
 	}
 	modeSupported := state.Mode == domain.SelectionModeAuto || (includeManual && state.Mode == domain.SelectionModeManual)
 	if !modeSupported || state.ZapretTest.Active {
+		return false, "", nil
+	}
+	if state.OperationalMode == domain.OperationalModeRecovering || state.CurrentOperation != nil {
 		return false, "", nil
 	}
 	if !state.Connected || state.ActiveSubscriptionID == "" || state.ActiveNodeID == "" {
