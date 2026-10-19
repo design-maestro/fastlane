@@ -413,7 +413,8 @@ return view.extend({
 	previewExclusionsCSV: function(content) {
 		this.busy = true;
 		this.renderAgain();
-		return this.execJSON([ '--json', 'services', 'import-csv', '--data', content, '--check' ]).then(L.bind(function(preview) {
+		var encoded = btoa(Array.from(new TextEncoder().encode(content), function(value) { return String.fromCharCode(value); }).join(''));
+		return this.execJSON([ '--json', 'services', 'import-csv', '--data-base64', encoded, '--check' ]).then(L.bind(function(preview) {
 			this.busy = false;
 			this.renderAgain();
 			var submit = E('button', { class: 'flr-modal-button fl-dialog-button fl-dialog-primary', click: L.bind(function(ev) {
@@ -422,7 +423,7 @@ return view.extend({
 				this.busy = true;
 				submit.disabled = true;
 				submit.textContent = _('Importing…');
-				return this.execJSON([ '--json', 'services', 'import-csv', '--data', content ]).then(L.bind(function() {
+				return this.execJSON([ '--json', 'services', 'import-csv', '--data-base64', encoded ]).then(L.bind(function() {
 					ui.hideModal();
 					return this.finishRuleAction(_('Exclusions imported.'));
 				}, this)).catch(L.bind(function(err) {
@@ -438,7 +439,15 @@ return view.extend({
 				E('div', { class: 'right fl-dialog-actions' }, [ E('button', { class: 'flr-modal-button fl-dialog-button', click: function() { if (!submit.disabled) ui.hideModal(); } }, [ _('Cancel') ]), submit ])
 			]);
 			if (modal && modal.classList) modal.classList.add('fastlane-routing-modal', 'fl-dialog');
-		}, this)).catch(L.bind(function(err) { this.failRuleAction(err, _('Could not import exclusions.')); }, this));
+		}, this)).catch(L.bind(function(err) {
+			this.busy = false;
+			this.renderAgain();
+			var modal = ui.showModal(_('Could not import exclusions.'), [
+				E('div', { class: 'flr-rule-form fl-dialog-form' }, [ E('p', {}, [ err.message || String(err) ]) ]),
+				E('div', { class: 'right fl-dialog-actions' }, [ E('button', { class: 'flr-modal-button fl-dialog-button', click: ui.hideModal }, [ _('Close') ]) ])
+			]);
+			if (modal && modal.classList) modal.classList.add('fastlane-routing-modal', 'fl-dialog');
+		}, this));
 	},
 
 	renderBypassRules: function() {

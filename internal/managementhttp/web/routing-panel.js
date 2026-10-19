@@ -259,6 +259,7 @@
   "New groups": "Новые группы",
   "Existing groups": "Существующие группы",
   "Groups with matching names will be replaced. Other exclusions and the routing mode will be kept. Importing may briefly reconnect VPN.": "Группы с совпадающими именами будут заменены. Остальные исключения и режим маршрутизации сохранятся. При импорте VPN может ненадолго переподключиться.",
+  "Close": "Закрыть",
   "Could not load exclusions.": "Не удалось загрузить исключения.",
   "No exclusions yet. Add a service or device cloud that must use the regular internet connection.": "Исключений пока нет. Добавьте сервис или облако устройства, которому нужен обычный интернет без VPN.",
   "domains": "доменов",

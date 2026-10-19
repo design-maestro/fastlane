@@ -1110,7 +1110,7 @@ async function smoke(section, name, run) {
 		const content = 'name;enabled;domains;cidrs;services\ncamera;true;camera.example;;\n';
 		resolver = async (_binary, args) => ({ code: 0, stdout: JSON.stringify({ added: 1, updated: 0 }) });
 		await page.previewExclusionsCSV(content);
-		commandSeen(['--json', 'services', 'import-csv', '--data', content, '--check']);
+		commandSeen(['--json', 'services', 'import-csv', '--data-base64', Buffer.from(content).toString('base64'), '--check']);
 		assert.equal(commands.length, 1, 'preview must not import');
 		const modal = modals[modals.length - 1];
 		assert.match(modal.title, /Import exclusions/);
