@@ -81,8 +81,18 @@ type ZapretTestState struct {
 	Restore ZapretTestRestoreState `json:"restore,omitempty"`
 }
 
+// ResumeConnection remembers the selection before an explicit disconnect.
+type ResumeConnection struct {
+	SubscriptionID string        `json:"subscription_id,omitempty"`
+	NodeID         string        `json:"node_id,omitempty"`
+	Mode           SelectionMode `json:"mode"`
+	AutoScope      string        `json:"auto_scope,omitempty"`
+	AWGProfileID   string        `json:"awg_profile_id,omitempty"`
+}
+
 // RuntimeState persists the operational state across restarts.
 type RuntimeState struct {
+	ResumeConnection           *ResumeConnection                `json:"resume_connection,omitempty"`
 	SchemaVersion              int                              `json:"schema_version"`
 	OperationalMode            OperationalMode                  `json:"operational_mode"`
 	SelectedOutboundTag        string                           `json:"selected_outbound_tag,omitempty"`

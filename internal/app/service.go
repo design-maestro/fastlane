@@ -1367,6 +1367,10 @@ func (s *Service) Disconnect(ctx context.Context) error {
 }
 
 func (s *Service) disconnect(ctx context.Context) error {
+	previous, err := s.store.LoadState()
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
 	if err := s.disconnectRuntime(ctx); err != nil {
 		return err
 	}
@@ -1374,6 +1378,9 @@ func (s *Service) disconnect(ctx context.Context) error {
 	state, err := s.store.LoadState()
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
+	}
+	if previous.Connected {
+		state.ResumeConnection = &domain.ResumeConnection{SubscriptionID: previous.ActiveSubscriptionID, NodeID: previous.ActiveNodeID, Mode: previous.Mode, AutoScope: previous.AutoScope, AWGProfileID: previous.ActiveAWGProfileID}
 	}
 	state.ActiveNodeID = ""
 	state.ActiveSubscriptionID = ""

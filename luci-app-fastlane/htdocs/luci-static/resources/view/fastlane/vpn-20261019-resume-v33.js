@@ -960,6 +960,13 @@ return view.extend({
 		return this.runAction(_('Disconnecting VPN…'), this.exec([ 'disconnect' ]), _('VPN disconnected.'));
 	},
 
+	handleResume: function(ev) {
+		if (ev) ev.preventDefault();
+		if (this.busy) return Promise.resolve();
+		if (!(this.status().state || {}).resume_connection) return this.handleAuto();
+		return this.runAction(_('Turning VPN on…'), this.exec([ 'connect', '--resume' ]), _('VPN enabled.'));
+	},
+
 	handleAWGImportOpen: function(ev) {
 		if (ev) ev.preventDefault();
 		var name = E('input', { type: 'text', placeholder: _('For example: Backup AWG'), maxlength: '80', autocomplete: 'off' });
@@ -1482,7 +1489,7 @@ return view.extend({
 				E('button', { class: 'fl-mode-option ' + (mode === 'auto' ? 'fl-mode-option-active' : ''), disabled: this.busy || !hasAvailableNodes ? 'disabled' : null, title: hasAvailableNodes ? (mode === 'auto' ? _('Check all servers and select the best again') : _('Enable automatic selection and choose the best server')) : _('Add a subscription first'), click: ui.createHandlerFn(this, 'handleAuto') }, [ _('Auto') ]),
 				E('button', { class: 'fl-mode-option ' + (mode === 'manual' ? 'fl-mode-option-active' : ''), disabled: this.busy || mode === 'manual' || !hasAvailableNodes ? 'disabled' : null, title: hasAvailableNodes ? '' : _('Add a subscription first'), click: ui.createHandlerFn(this, 'handleManualMode') }, [ _('Manual') ])
 			]),
-			E('button', { class: 'fl-button fl-button-danger fl-status-disconnect', disabled: this.busy || !connected ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleDisconnect') }, [ _('Disconnect') ])
+			E('button', { class: 'fl-button ' + (connected ? 'fl-button-danger' : 'fl-button-primary') + ' fl-status-disconnect', disabled: this.busy || (!connected && !hasAvailableNodes && !(state.resume_connection && state.resume_connection.awg_profile_id)) ? 'disabled' : null, click: ui.createHandlerFn(this, connected ? 'handleDisconnect' : 'handleResume') }, [ connected ? _('Disconnect') : _('Enable') ])
 		]);
 	},
 

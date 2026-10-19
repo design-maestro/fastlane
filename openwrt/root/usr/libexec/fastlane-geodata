@@ -13,6 +13,10 @@ SHA256_BIN="${FASTLANE_GEODATA_SHA256:-sha256sum}"
 XRAY_SERVICE="${FASTLANE_XRAY_SERVICE:-/etc/init.d/xray}"
 XRAY_BIN="${FASTLANE_XRAY_BIN:-xray}"
 XRAY_CONFIG="${FASTLANE_XRAY_CONFIG:-/etc/xray/config.json}"
+PROXY_URL="${FASTLANE_GEODATA_PROXY_URL:-http://127.0.0.1:10809}"
+PROBE_URLS="${FASTLANE_GEODATA_PROBE_URLS:-https://www.gstatic.com/generate_204 https://cp.cloudflare.com/generate_204}"
+NSLOOKUP_BIN="${FASTLANE_GEODATA_NSLOOKUP:-nslookup}"
+TIMEOUT_BIN="${FASTLANE_GEODATA_TIMEOUT:-timeout}"
 
 json_escape() {
 	printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -177,6 +181,41 @@ recover_xray_service() {
 	xray_service_running
 }
 
+probe_dns() {
+	"${TIMEOUT_BIN}" 5 "${NSLOOKUP_BIN}" example.com 127.0.0.1 >/dev/null 2>&1
+}
+
+probe_https() {
+	"${CURL_BIN}" --fail --silent --show-error --output /dev/null \
+		--connect-timeout 4 --max-time 8 --noproxy '' --proxy "${PROXY_URL}" "$1" >/dev/null 2>&1
+}
+
+capture_runtime_health() {
+	probe_dns || return 1
+	health_urls=""
+	for health_url in ${PROBE_URLS}; do
+		if probe_https "${health_url}"; then
+			health_urls="${health_urls} ${health_url}"
+		fi
+	done
+	[ -n "${health_urls}" ]
+}
+
+verify_runtime_health() {
+	health_attempt=0
+	while [ "${health_attempt}" -lt 3 ]; do
+		health_ok=1
+		probe_dns || health_ok=0
+		for health_url in ${health_urls}; do
+			probe_https "${health_url}" || health_ok=0
+		done
+		[ "${health_ok}" -eq 1 ] && return 0
+		health_attempt=$((health_attempt + 1))
+		[ "${health_attempt}" -ge 3 ] || sleep 1
+	done
+	return 1
+}
+
 acquire_update_lock() {
 	mkdir -p "$(dirname "${LOCK_DIR}")"
 	if mkdir "${LOCK_DIR}" 2>/dev/null; then
@@ -243,6 +282,7 @@ update() {
 	staged_manifest="${MANIFEST_FILE}.new.$$"
 	transaction_started=0
 	transaction_committed=0
+	runtime_touched=0
 	lock_acquired="${lock_already_acquired}"
 
 	rollback() {
@@ -267,6 +307,9 @@ update() {
 		trap - EXIT INT TERM HUP
 		if [ "${transaction_started}" -eq 1 ] && [ "${transaction_committed}" -ne 1 ]; then
 			rollback || true
+			if [ "${runtime_touched}" -eq 1 ]; then
+				recover_xray_service || true
+			fi
 		fi
 		if [ "${cleanup_status}" -ne 0 ] && [ "${lock_acquired:-0}" -eq 1 ]; then
 			cleanup_result=""
@@ -348,6 +391,19 @@ update() {
 	service_was_running=0
 	if xray_service_running; then
 		service_was_running=1
+		if [ ! -s "${XRAY_CONFIG}" ] || ! capture_runtime_health; then
+			write_status error "DNS or VPN HTTPS baseline failed; existing geodata kept"
+			printf 'До обновления не прошла проверка DNS/VPN; рабочие базы не изменены.\n' >&2
+			exit 1
+		fi
+	fi
+	# Databases not referenced by the running config need no runtime reload.
+	# Restarting anyway interrupts every LAN connection and discards API state.
+	reload_needed=0
+	if [ "${service_was_running}" -eq 1 ] &&
+		grep -Eq '"(geoip:|geosite:|ext:[^"]*\.dat:)' "${XRAY_CONFIG}" &&
+		! cmp -s "${work}/manifest.sha256" "${MANIFEST_FILE}"; then
+		reload_needed=1
 	fi
 
 	transaction_started=1
@@ -380,7 +436,8 @@ update() {
 	# Installing geodata while VPN is disconnected must not start Xray. When it
 	# was running, a zero exit status is not enough: the service must still be
 	# observable as running after reload/restart.
-	if [ "${service_was_running}" -eq 1 ]; then
+	if [ "${reload_needed}" -eq 1 ]; then
+		runtime_touched=1
 		service_refresh_ok=0
 		if "${XRAY_SERVICE}" reload >/dev/null 2>&1; then
 			if xray_service_running; then
@@ -393,13 +450,32 @@ update() {
 			rollback
 			transaction_started=0
 			if recover_xray_service; then
-				write_status error "Xray reload failed; previous geodata and service restored"
+				if verify_runtime_health; then
+					write_status error "Xray reload failed; previous geodata and connectivity restored"
+				else
+					write_status error "Xray reload failed; previous geodata restored but connectivity recovery failed"
+				fi
 			else
 				write_status error "Xray reload failed; previous geodata restored but service recovery failed"
 			fi
 			printf 'Новые GeoIP/GeoSite откачены: Xray не запущен после reload; восстановлена предыдущая пара.\n' >&2
 			exit 1
 		fi
+	fi
+	if [ "${service_was_running}" -eq 1 ] && ! verify_runtime_health; then
+		rollback
+		transaction_started=0
+		recovery_ok=1
+		if [ "${runtime_touched}" -eq 1 ]; then
+			recover_xray_service || recovery_ok=0
+		fi
+		if [ "${recovery_ok}" -eq 1 ] && verify_runtime_health; then
+			write_status error "DNS or VPN HTTPS failed after update; previous geodata and connectivity restored"
+		else
+			write_status error "DNS or VPN HTTPS failed after update; previous geodata restored but connectivity recovery failed"
+		fi
+		printf 'После обновления не прошла проверка DNS/VPN; возвращены предыдущие базы.\n' >&2
+		exit 1
 	fi
 	transaction_committed=1
 	write_status ok "GeoIP/GeoSite updated and verified"

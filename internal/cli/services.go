@@ -3,10 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/design-maestro/fastlane/internal/app"
 	"github.com/design-maestro/fastlane/internal/domain"
 )
 
@@ -42,8 +45,62 @@ fastlane firewall set targets openai youtube
 		newServicesGetCmd(opts),
 		newServicesSetCmd(opts),
 		newServicesDeleteCmd(opts),
+		newServicesExportCSVCmd(opts),
+		newServicesImportCSVCmd(opts),
 	)
 
+	return cmd
+}
+
+func newServicesExportCSVCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{Use: "export-csv", Short: "Export exclusions as Excel-compatible CSV", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			content, err := opts.service.ExportExclusionsCSV()
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprint(cmd.OutOrStdout(), content)
+			return err
+		},
+	}
+}
+
+func newServicesImportCSVCmd(opts *rootOptions) *cobra.Command {
+	var content string
+	var file string
+	var check bool
+	cmd := &cobra.Command{Use: "import-csv", Short: "Validate and merge exclusions from CSV", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			csvContent := content
+			if file != "" {
+				if content != "" {
+					return fmt.Errorf("provide only one CSV input")
+				}
+				info, err := os.Lstat(file)
+				if err != nil || !info.Mode().IsRegular() {
+					return fmt.Errorf("choose a regular CSV file")
+				}
+				input, err := os.Open(file)
+				if err != nil {
+					return err
+				}
+				defer input.Close()
+				data, err := io.ReadAll(io.LimitReader(input, app.MaxExclusionsCSVBytes+1))
+				if err != nil {
+					return err
+				}
+				csvContent = string(data)
+			}
+			result, err := opts.service.ImportExclusionsCSV(context.Background(), csvContent, check)
+			if err != nil {
+				return err
+			}
+			return printOutput(cmd, opts.jsonOutput, result, fmt.Sprintf("Exclusions: %d groups, %d added, %d updated", result.Groups, result.Added, result.Updated))
+		},
+	}
+	cmd.Flags().StringVar(&content, "data", "", "CSV contents (UTF-8, up to 64 KiB)")
+	cmd.Flags().StringVar(&file, "file", "", "Read UTF-8 CSV from a file (up to 64 KiB)")
+	cmd.Flags().BoolVar(&check, "check", false, "Validate without changing settings")
 	return cmd
 }
 

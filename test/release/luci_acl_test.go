@@ -68,6 +68,10 @@ func TestLuCIACLReadPermissionsUseSafeWhitelist(t *testing.T) {
 	if len(writePermissions) != 1 || writePermissions[0] != "exec" {
 		t.Fatalf("unexpected write ACL permissions: %v", writePermissions)
 	}
+	permissions := payload.App.Write.File["/tmp/fastlane-runtime/exclusions-import-*.csv"]
+	if len(permissions) != 1 || permissions[0] != "write" {
+		t.Fatalf("CSV upload must have only its scoped temporary-file write permission: %v", permissions)
+	}
 
 	for _, helper := range []string{
 		"/usr/libexec/fastlane-self-update",

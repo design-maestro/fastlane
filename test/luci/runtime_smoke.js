@@ -216,7 +216,8 @@ const fsStub = {
 		commands.push({ path: commandPath, args: [...args] });
 		return resolver(commandPath, [...args]);
 	},
-	write: async (filePath, content) => { fileWrites.push({ path: filePath, content }); }
+	write: async (filePath, content, mode) => { var entry = { path: filePath, content }; if (mode != null) entry.mode = mode; fileWrites.push(entry); },
+	remove: async () => {}
 };
 
 function defaultResolver(commandPath, args) {
@@ -758,6 +759,26 @@ async function smoke(section, name, run) {
 		commandSeen(['disconnect']);
 	});
 
+	await smoke('VPN', 'offers Enable when disconnected and resumes the persisted mode', async () => {
+		const page = makeVPN();
+		page.pageData[0].state.connected = false;
+		page.pageData[0].state.resume_connection = { mode: 'manual', subscription_id: 'durev', node_id: 'nl' };
+		const enable = page.renderStatus().children[5];
+		assert.equal(enable.disabled, false);
+		assert.match(treeText(enable), /Enable/);
+		await page.handleResume();
+		commandSeen(['connect', '--resume']);
+		commands = [];
+		page.pageData[0].state.resume_connection = { mode: 'auto', subscription_id: 'blanc', auto_scope: 'subscription' };
+		await page.handleResume();
+		commandSeen(['connect', '--resume']);
+		assert.equal(commands.length, 1);
+		commands = [];
+		page.busy = 'working';
+		await page.handleResume();
+		assert.equal(commands.length, 0);
+	});
+
 	await smoke('VPN', 'supports Enter and Space keyboard activation only', async () => {
 		const page = makeVPN();
 		for (const key of ['Enter', ' ']) {
@@ -1082,6 +1103,29 @@ async function smoke(section, name, run) {
 		await page.handleRuleDelete('roborock', { preventDefault() {} });
 		commandSeen(['--json', 'firewall', 'set', 'bypass', '--exclude-host', '192.168.1.50']);
 		commandSeen(['--json', 'services', 'delete', 'roborock']);
+	});
+
+	await smoke('Routes', 'previews a CSV before importing and recovers after failure', async () => {
+		const page = makeRouting(true, true);
+		assert.match(treeText(page.renderBypassRules()), /Export CSV/);
+		assert.match(treeText(page.renderBypassRules()), /Import CSV/);
+		const content = 'name;enabled;domains;cidrs;services\ncamera;true;camera.example;;\n';
+		resolver = async (_binary, args) => ({ code: 0, stdout: JSON.stringify({ added: 1, updated: 0 }) });
+		await page.previewExclusionsCSV(content);
+		const stagedCSV = fileWrites[fileWrites.length - 1];
+		commandSeen(['--json', 'services', 'import-csv', '--file', stagedCSV.path, '--check']);
+		assert.equal(stagedCSV.content, content);
+		assert.equal(stagedCSV.mode, 384);
+		assert.ok(commands[0].args.join(' ').length < 1024, 'LuCI command must stay within rpcd ACL length limit');
+		assert.equal(commands.length, 1, 'preview must not import');
+		const modal = modals[modals.length - 1];
+		assert.match(modal.title, /Import exclusions/);
+		assert.match(treeText(modal.body), /matching names will be replaced/);
+		const submit = modal.body[1].children[1];
+		resolver = async () => ({ code: 1, stdout: '', stderr: 'invalid CSV' });
+		await submit.attrs.click({ preventDefault() {} });
+		assert.equal(page.busy, false);
+		assert.ok(toasts.some((toast) => toast.type === 'error' && /Could not import/.test(toast.message)));
 	});
 
 	await smoke('Routes', 'describes the rest of the internet from the effective firewall policy', async () => {

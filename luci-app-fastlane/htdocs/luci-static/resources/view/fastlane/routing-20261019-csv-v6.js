@@ -27,6 +27,7 @@ var css = `
 body:has(.fastlane-routing-modal) #modal_overlay{position:fixed!important;inset:0!important;display:grid!important;place-items:center!important;padding:24px!important;background:rgba(0,6,8,.78)!important;overflow-y:auto!important}.fastlane-routing-modal{position:relative!important;inset:auto!important;width:min(660px,calc(100vw - 32px))!important;max-width:660px!important;max-height:calc(100vh - 48px)!important;margin:auto!important;padding:0!important;border:1px solid var(--fl-line-strong)!important;border-radius:16px!important;background:#071115!important;color:#ddd4ca!important;box-shadow:0 24px 70px rgba(0,0,0,.56)!important;overflow:auto!important;font-family:"Avenir Next",ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important}.fastlane-routing-modal h4{margin:0!important;padding:24px 24px 8px!important;border:0!important;background:transparent!important;color:#ddd4ca!important;font-size:22px!important;font-weight:750!important;letter-spacing:-.02em!important}.fastlane-routing-modal .right{display:flex!important;justify-content:flex-end!important;gap:10px!important;margin:0!important;padding:16px 24px 24px!important;border:0!important;border-top:1px solid var(--fl-line)!important;background:#071115!important}.fastlane-routing-modal .flr-modal-button{min-width:112px!important;min-height:44px!important;margin:0!important;border:1px solid var(--fl-line-strong)!important;border-radius:10px!important;padding:10px 16px!important;background:#0d1c21!important;color:var(--fl-text)!important;font:inherit!important;font-size:14px!important;font-weight:700!important;line-height:1!important;box-shadow:none!important;cursor:pointer}.fastlane-routing-modal .flr-modal-button:hover{border-color:#426068!important;background:#10252b!important}.fastlane-routing-modal .flr-modal-primary{border-color:#45a974!important;background:#45a974!important;color:#04110a!important}.fastlane-routing-modal .flr-modal-primary:hover{border-color:#54df91!important;background:#54df91!important}.fastlane-routing-modal .flr-modal-button:disabled{opacity:.5;cursor:wait}.fastlane-routing-modal .flr-modal-button:focus-visible{outline:2px solid var(--fl-green)!important;outline-offset:3px!important}body:not(.modal-overlay-active) #modal_overlay:has(.fastlane-routing-modal){display:none!important}
 .flr-advanced{margin-top:22px;border-top:1px solid var(--fl-line);padding-top:18px}.flr-advanced summary{display:flex;align-items:center;justify-content:space-between;min-height:44px;color:var(--fl-text);font-weight:700;cursor:pointer;list-style:none}.flr-advanced summary::-webkit-details-marker{display:none}.flr-advanced summary:after{content:"+";color:var(--fl-green);font-size:20px}.flr-advanced[open] summary:after{content:"−"}.flr-advanced-copy{max-width:72ch;margin:2px 0 22px;color:var(--fl-muted);font-size:13px;line-height:1.5}.flr-import{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:18px;align-items:stretch}.flr-import .flr-button{min-width:176px}.flr-input{width:100%;min-height:46px!important;padding:10px 13px!important;border:1px solid var(--fl-line-strong)!important;border-radius:9px!important;background:#050d10!important;color:var(--fl-text)!important;font:inherit!important}.flr-input::placeholder{color:var(--fl-subtle)}.flr-preview{margin-top:12px;padding:14px 16px;border:1px solid var(--fl-line);border-radius:10px;background:#050d10;color:var(--fl-muted);font-size:13px;line-height:1.55}.flr-preview strong{color:var(--fl-text)}
 @media(max-width:900px){.flr-head{align-items:flex-start;flex-direction:column}.flr-control{grid-template-columns:1fr}.flr-flow{grid-template-columns:1fr}.flr-arrow{height:28px;transform:rotate(90deg)}.flr-step{min-height:0}.flr-import{grid-template-columns:1fr}.flr-bypass-head,.flr-rule-head{align-items:stretch;flex-direction:column}.flr-bypass-head .flr-button{width:100%}.flr-rule-actions{display:grid;grid-template-columns:1fr 1fr}.flr-rule-actions .flr-button{width:100%}.flr-rule-grid{grid-template-columns:1fr}.flr-rule-switch{align-self:flex-start}.flr-button{width:100%}}@media(max-width:560px){body:has(.fastlane-routing-modal) #modal_overlay{place-items:end center!important;padding:12px!important}.fastlane-routing-modal{width:calc(100vw - 24px)!important;max-height:calc(100vh - 24px)!important;border-radius:14px!important}.fastlane-routing-modal h4{padding:20px 18px 6px!important;font-size:20px!important}.flr-bypass-head,.flr-rule,.flr-bypass-empty,.flr-bypass-error{padding-left:18px;padding-right:18px}.fastlane-routing-modal .right{padding:14px 18px 18px!important}.flr-rule-form{min-width:0;padding:10px 18px 16px}.fastlane-routing-modal .flr-modal-button{flex:1;min-width:0!important}}@media(prefers-reduced-motion:reduce){.flr-switch-track,.flr-switch-track:after,.flr-rule-switch-track:after{transition:none}}
+.flr-bypass-head>.flr-rule-actions{flex-wrap:wrap;justify-content:flex-end}@media(max-width:900px){.flr-bypass-head>.flr-rule-actions .flr-button:last-child{grid-column:1/-1}}
 `;
 
 function decodeHappLink(raw) {
@@ -373,6 +374,87 @@ return view.extend({
 		return E('div', { class: 'flr-rule-values' }, values.map(function(value) { return E('code', { class: 'flr-rule-value' }, [ value ]); }));
 	},
 
+	handleExportCSV: function(ev) {
+		if (ev) ev.preventDefault();
+		if (this.busy) return Promise.resolve();
+		this.busy = true;
+		this.renderAgain();
+		return this.execText([ 'services', 'export-csv' ]).then(L.bind(function(content) {
+			var url = URL.createObjectURL(new Blob([ '\ufeff' + content.replace(/^\ufeff/, '') ], { type: 'text/csv;charset=utf-8' }));
+			var link = E('a', { href: url, download: 'fastlane-exclusions.csv' });
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			window.setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+			this.busy = false;
+			this.renderAgain();
+		}, this)).catch(L.bind(function(err) { this.failRuleAction(err, _('Could not export exclusions.')); }, this));
+	},
+
+	handleImportCSV: function(ev) {
+		if (ev) ev.preventDefault();
+		if (this.busy) return Promise.resolve();
+		var input = E('input', { type: 'file', accept: '.csv,text/csv', 'aria-label': _('Import CSV') });
+		input.addEventListener('change', L.bind(function() {
+			var file = input.files && input.files[0];
+			if (!file) return;
+			if (file.size > 65536) {
+				fastlaneShell.showToast(_('Choose a CSV file up to 64 KiB.'), 'error');
+				return;
+			}
+			var reader = new FileReader();
+			reader.onerror = function() { fastlaneShell.showToast(_('Could not read the CSV file.'), 'error'); };
+			reader.onload = L.bind(function() { this.previewExclusionsCSV(String(reader.result || '')); }, this);
+			reader.readAsText(file);
+		}, this));
+		input.click();
+	},
+
+	previewExclusionsCSV: function(content) {
+		this.busy = true;
+		this.renderAgain();
+		var importPath = '/tmp/fastlane-runtime/exclusions-import-' + Date.now() + '-' + Math.random().toString(16).slice(2) + '.csv';
+		var cleanup = function() { return fs.remove(importPath).catch(function() {}); };
+		return fs.write(importPath, content, 384).then(L.bind(function() {
+			return this.execJSON([ '--json', 'services', 'import-csv', '--file', importPath, '--check' ]);
+		}, this)).then(L.bind(function(preview) {
+			this.busy = false;
+			this.renderAgain();
+			var submit = E('button', { class: 'flr-modal-button fl-dialog-button fl-dialog-primary', click: L.bind(function(ev) {
+				ev.preventDefault();
+				if (this.busy) return;
+				this.busy = true;
+				submit.disabled = true;
+				submit.textContent = _('Importing…');
+				return this.execJSON([ '--json', 'services', 'import-csv', '--file', importPath ]).then(cleanup).then(L.bind(function() {
+					ui.hideModal();
+					return this.finishRuleAction(_('Exclusions imported.'));
+				}, this)).catch(L.bind(function(err) {
+					cleanup();
+					ui.hideModal();
+					this.failRuleAction(err, _('Could not import exclusions.'));
+				}, this));
+			}, this) }, [ _('Import') ]);
+			var modal = ui.showModal(_('Import exclusions'), [
+				E('div', { class: 'flr-rule-form fl-dialog-form' }, [
+					E('p', {}, [ _('New groups') + ': ' + preview.added + '. ' + _('Existing groups') + ': ' + preview.updated + '.' ]),
+					E('p', {}, [ _('Groups with matching names will be replaced. Other exclusions and the routing mode will be kept. Importing may briefly reconnect VPN.') ])
+				]),
+				E('div', { class: 'right fl-dialog-actions' }, [ E('button', { class: 'flr-modal-button fl-dialog-button', click: function() { if (!submit.disabled) { cleanup(); ui.hideModal(); } } }, [ _('Cancel') ]), submit ])
+			]);
+			if (modal && modal.classList) modal.classList.add('fastlane-routing-modal', 'fl-dialog');
+		}, this)).catch(L.bind(function(err) {
+			cleanup();
+			this.busy = false;
+			this.renderAgain();
+			var modal = ui.showModal(_('Could not import exclusions.'), [
+				E('div', { class: 'flr-rule-form fl-dialog-form' }, [ E('p', {}, [ err.message || String(err) ]) ]),
+				E('div', { class: 'right fl-dialog-actions' }, [ E('button', { class: 'flr-modal-button fl-dialog-button', click: ui.hideModal }, [ _('Close') ]) ])
+			]);
+			if (modal && modal.classList) modal.classList.add('fastlane-routing-modal', 'fl-dialog');
+		}, this));
+	},
+
 	renderBypassRules: function() {
 		var rules = this.customRules();
 		var body = [];
@@ -396,7 +478,11 @@ return view.extend({
 			]));
 		}
 		return E('section', { class: 'flr-bypass' }, [
-			E('div', { class: 'flr-bypass-head' }, [ E('div', {}, [ E('h2', {}, [ _('Direct access exclusions') ]), E('p', {}, [ _('Traffic matching an enabled group bypasses VPN. Everything else follows the route above.') ]) ]), E('button', { class: 'flr-button flr-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRuleOpen', null) }, [ '+ ', _('Add exclusion') ]) ])
+			E('div', { class: 'flr-bypass-head' }, [ E('div', {}, [ E('h2', {}, [ _('Direct access exclusions') ]), E('p', {}, [ _('Traffic matching an enabled group bypasses VPN. Everything else follows the route above.') ]) ]), E('div', { class: 'flr-rule-actions' }, [
+				typeof this.handleExportCSV === 'function' ? E('button', { class: 'flr-button', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleExportCSV') }, [ _('Export CSV') ]) : '',
+				typeof this.handleImportCSV === 'function' ? E('button', { class: 'flr-button', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleImportCSV') }, [ _('Import CSV') ]) : '',
+				E('button', { class: 'flr-button flr-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRuleOpen', null) }, [ '+ ', _('Add exclusion') ])
+			]) ])
 		].concat(body));
 	},
 

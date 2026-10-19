@@ -1403,3 +1403,45 @@ msgstr "Трафик идёт через экспериментальный ту
 
 msgid "failed"
 msgstr "ошибка"
+
+msgid "Enable"
+msgstr "Включить"
+
+msgid "Turning VPN on…"
+msgstr "Включаю VPN…"
+
+msgid "VPN enabled."
+msgstr "VPN включён."
+
+msgid "Export CSV"
+msgstr "Экспорт CSV"
+
+msgid "Import CSV"
+msgstr "Импорт CSV"
+
+msgid "Could not export exclusions."
+msgstr "Не удалось выгрузить исключения."
+
+msgid "Choose a CSV file up to 64 KiB."
+msgstr "Выберите CSV-файл размером до 64 КиБ."
+
+msgid "Could not read the CSV file."
+msgstr "Не удалось прочитать CSV-файл."
+
+msgid "Exclusions imported."
+msgstr "Исключения загружены."
+
+msgid "Could not import exclusions."
+msgstr "Не удалось загрузить исключения."
+
+msgid "Import exclusions"
+msgstr "Импорт исключений"
+
+msgid "New groups"
+msgstr "Новые группы"
+
+msgid "Existing groups"
+msgstr "Существующие группы"
+
+msgid "Groups with matching names will be replaced. Other exclusions and the routing mode will be kept. Importing may briefly reconnect VPN."
+msgstr "Группы с совпадающими именами будут заменены. Остальные исключения и режим маршрутизации сохранятся. При импорте VPN может ненадолго переподключиться."
