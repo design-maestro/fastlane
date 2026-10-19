@@ -49,6 +49,7 @@ esac
 			"FASTLANE_XRAY_BIN="+filepath.Join(binDir, "missing-xray"),
 			"FASTLANE_XRAY_SERVICE="+service,
 		)
+		cmd.Env = append(cmd.Env, geoDataHealthyRuntimeEnv(t, binDir)...)
 		return cmd.CombinedOutput()
 	}
 
@@ -538,6 +539,7 @@ esac
 		"FASTLANE_XRAY_BIN="+filepath.Join(binDir, "missing-xray"),
 		"FASTLANE_XRAY_SERVICE="+service,
 	)
+	cmd.Env = append(cmd.Env, geoDataHealthyRuntimeEnv(t, binDir)...)
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("expected post-reload running check to fail: %s", output)
@@ -679,4 +681,104 @@ esac
 
 func geoDataManifest(geoIP, geoSite string) string {
 	return fmt.Sprintf("%x  geoip.dat\n%x  geosite.dat\n", sha256.Sum256([]byte(geoIP)), sha256.Sum256([]byte(geoSite)))
+}
+
+func geoDataHealthyRuntimeEnv(t *testing.T, dir string) []string {
+	t.Helper()
+	config := filepath.Join(dir, "config.json")
+	writeFile(t, config, `{"routing":{"rules":[{"ip":["geoip:ru"]}]}}`, 0o644)
+	probe := filepath.Join(dir, "healthy-probe")
+	writeFile(t, probe, "#!/bin/sh\nexit 0\n", 0o755)
+	timeout := filepath.Join(dir, "timeout")
+	writeFile(t, timeout, "#!/bin/sh\nshift\nexec \"$@\"\n", 0o755)
+	return []string{
+		"FASTLANE_XRAY_CONFIG=" + config,
+		"FASTLANE_GEODATA_CURL=" + probe,
+		"FASTLANE_GEODATA_NSLOOKUP=" + probe,
+		"FASTLANE_GEODATA_TIMEOUT=" + timeout,
+	}
+}
+
+func TestGeoDataHelperPreservesConnectivity(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"unused", "unchanged", "dns-failure", "https-failure", "baseline-failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			assets := filepath.Join(dir, "assets")
+			fixtures := filepath.Join(dir, "downloads")
+			oldIP, oldSite := "old-ip", "old-site category-ru"
+			newIP, newSite := "new-ip", "new-site category-ru"
+			if scenario == "unchanged" {
+				newIP, newSite = oldIP, oldSite
+			}
+			for name, data := range map[string]string{"geoip.dat": oldIP, "geosite.dat": oldSite, ".fastlane-geodata-manifest.sha256": geoDataManifest(oldIP, oldSite)} {
+				writeFile(t, filepath.Join(assets, name), data, 0o644)
+			}
+			for name, data := range map[string]string{"geoip.dat": newIP, "geosite.dat": newSite} {
+				writeFile(t, filepath.Join(fixtures, name), data, 0o644)
+				writeFile(t, filepath.Join(fixtures, name+".sha256sum"), fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte(data)), name), 0o644)
+			}
+			downloader := filepath.Join(dir, "wget")
+			writeFile(t, downloader, fmt.Sprintf("#!/bin/sh\ncp %q/\"${4##*/}\" \"$3\"\n", fixtures), 0o755)
+			env := geoDataHealthyRuntimeEnv(t, dir)
+			if scenario == "unused" {
+				writeFile(t, filepath.Join(dir, "config.json"), `{"routing":{"rules":[]}}`, 0o644)
+			}
+			serviceLog := filepath.Join(dir, "service.log")
+			reloaded := filepath.Join(dir, "reloaded")
+			service := filepath.Join(dir, "service")
+			writeFile(t, service, fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$1" >>%q
+case "$1" in
+status) echo running ;;
+reload) touch %q ;;
+restart|start|running) exit 0 ;;
+*) exit 1 ;;
+esac
+`, serviceLog, reloaded), 0o755)
+			probe := fmt.Sprintf(`#!/bin/sh
+if [ -f %q ] && [ "$(cat %q/geoip.dat)" = new-ip ]; then exit 1; fi
+exit 0
+`, reloaded, assets)
+			switch scenario {
+			case "dns-failure":
+				writeFile(t, filepath.Join(dir, "dns"), probe, 0o755)
+				env = append(env, "FASTLANE_GEODATA_NSLOOKUP="+filepath.Join(dir, "dns"))
+			case "https-failure":
+				writeFile(t, filepath.Join(dir, "https"), probe, 0o755)
+				env = append(env, "FASTLANE_GEODATA_CURL="+filepath.Join(dir, "https"))
+			case "baseline-failure":
+				writeFile(t, filepath.Join(dir, "dns"), "#!/bin/sh\nexit 1\n", 0o755)
+				env = append(env, "FASTLANE_GEODATA_NSLOOKUP="+filepath.Join(dir, "dns"))
+			}
+			cmd := exec.Command("sh", filepath.Join(repoRoot(t), "openwrt/root/usr/libexec/fastlane-geodata"), "update")
+			cmd.Env = append(os.Environ(), env...)
+			cmd.Env = append(cmd.Env, "FASTLANE_GEODATA_DIR="+assets, "FASTLANE_GEODATA_WORKDIR="+filepath.Join(dir, "work"), "FASTLANE_GEODATA_WGET="+downloader, "FASTLANE_XRAY_SERVICE="+service, "FASTLANE_XRAY_BIN="+filepath.Join(dir, "missing-xray"))
+			output, err := cmd.CombinedOutput()
+			wantFailure := strings.HasSuffix(scenario, "failure")
+			if (err != nil) != wantFailure {
+				t.Fatalf("update failure=%t, want %t: %s", err != nil, wantFailure, output)
+			}
+			wantIP, wantSite := newIP, newSite
+			if wantFailure {
+				wantIP, wantSite = oldIP, oldSite
+			}
+			for name, want := range map[string]string{"geoip.dat": wantIP, "geosite.dat": wantSite, ".fastlane-geodata-manifest.sha256": geoDataManifest(wantIP, wantSite)} {
+				got, readErr := os.ReadFile(filepath.Join(assets, name))
+				if readErr != nil || string(got) != want {
+					t.Fatalf("%s: got %q, want %q: %v", name, got, want, readErr)
+				}
+			}
+			log, _ := os.ReadFile(serviceLog)
+			wantReload := scenario == "dns-failure" || scenario == "https-failure"
+			if strings.Contains(string(log), "reload\n") != wantReload {
+				t.Fatalf("unexpected service actions: %s", log)
+			}
+			status, _ := os.ReadFile(filepath.Join(assets, ".fastlane-geodata-status"))
+			if wantReload && (!strings.Contains(string(log), "restart\n") || !strings.Contains(string(status), "connectivity restored")) {
+				t.Fatalf("missing verified recovery: log=%s status=%s", log, status)
+			}
+		})
+	}
 }
