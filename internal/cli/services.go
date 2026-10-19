@@ -3,11 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/design-maestro/fastlane/internal/app"
 	"github.com/design-maestro/fastlane/internal/domain"
 )
 
@@ -65,16 +67,29 @@ func newServicesExportCSVCmd(opts *rootOptions) *cobra.Command {
 
 func newServicesImportCSVCmd(opts *rootOptions) *cobra.Command {
 	var content string
-	var fromEnv bool
+	var file string
 	var check bool
 	cmd := &cobra.Command{Use: "import-csv", Short: "Validate and merge exclusions from CSV", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			csvContent := content
-			if fromEnv {
+			if file != "" {
 				if content != "" {
 					return fmt.Errorf("provide only one CSV input")
 				}
-				csvContent = os.Getenv("FASTLANE_EXCLUSIONS_CSV")
+				info, err := os.Lstat(file)
+				if err != nil || !info.Mode().IsRegular() {
+					return fmt.Errorf("choose a regular CSV file")
+				}
+				input, err := os.Open(file)
+				if err != nil {
+					return err
+				}
+				defer input.Close()
+				data, err := io.ReadAll(io.LimitReader(input, app.MaxExclusionsCSVBytes+1))
+				if err != nil {
+					return err
+				}
+				csvContent = string(data)
 			}
 			result, err := opts.service.ImportExclusionsCSV(context.Background(), csvContent, check)
 			if err != nil {
@@ -84,7 +99,7 @@ func newServicesImportCSVCmd(opts *rootOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&content, "data", "", "CSV contents (UTF-8, up to 64 KiB)")
-	cmd.Flags().BoolVar(&fromEnv, "data-env", false, "Read UTF-8 CSV from FASTLANE_EXCLUSIONS_CSV for LuCI transport")
+	cmd.Flags().StringVar(&file, "file", "", "Read UTF-8 CSV from a file (up to 64 KiB)")
 	cmd.Flags().BoolVar(&check, "check", false, "Validate without changing settings")
 	return cmd
 }

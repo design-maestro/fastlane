@@ -79,8 +79,8 @@ return view.extend({
 		}, this));
 	},
 
-	execJSON: function(args, env) {
-		return fs.exec(binary, args, env).then(function(result) {
+	execJSON: function(args) {
+		return fs.exec(binary, args).then(function(result) {
 			if (result.code !== 0) throw new Error(trim(result.stderr || result.stdout));
 			return JSON.parse(trim(result.stdout));
 		});
@@ -413,8 +413,11 @@ return view.extend({
 	previewExclusionsCSV: function(content) {
 		this.busy = true;
 		this.renderAgain();
-		var env = { FASTLANE_EXCLUSIONS_CSV: content };
-		return this.execJSON([ '--json', 'services', 'import-csv', '--data-env', '--check' ], env).then(L.bind(function(preview) {
+		var importPath = '/tmp/fastlane-runtime/exclusions-import-' + Date.now() + '-' + Math.random().toString(16).slice(2) + '.csv';
+		var cleanup = function() { return fs.remove(importPath).catch(function() {}); };
+		return fs.write(importPath, content, 384).then(L.bind(function() {
+			return this.execJSON([ '--json', 'services', 'import-csv', '--file', importPath, '--check' ]);
+		}, this)).then(L.bind(function(preview) {
 			this.busy = false;
 			this.renderAgain();
 			var submit = E('button', { class: 'flr-modal-button fl-dialog-button fl-dialog-primary', click: L.bind(function(ev) {
@@ -423,10 +426,11 @@ return view.extend({
 				this.busy = true;
 				submit.disabled = true;
 				submit.textContent = _('Importing…');
-				return this.execJSON([ '--json', 'services', 'import-csv', '--data-env' ], env).then(L.bind(function() {
+				return this.execJSON([ '--json', 'services', 'import-csv', '--file', importPath ]).then(cleanup).then(L.bind(function() {
 					ui.hideModal();
 					return this.finishRuleAction(_('Exclusions imported.'));
 				}, this)).catch(L.bind(function(err) {
+					cleanup();
 					ui.hideModal();
 					this.failRuleAction(err, _('Could not import exclusions.'));
 				}, this));
@@ -436,10 +440,11 @@ return view.extend({
 					E('p', {}, [ _('New groups') + ': ' + preview.added + '. ' + _('Existing groups') + ': ' + preview.updated + '.' ]),
 					E('p', {}, [ _('Groups with matching names will be replaced. Other exclusions and the routing mode will be kept. Importing may briefly reconnect VPN.') ])
 				]),
-				E('div', { class: 'right fl-dialog-actions' }, [ E('button', { class: 'flr-modal-button fl-dialog-button', click: function() { if (!submit.disabled) ui.hideModal(); } }, [ _('Cancel') ]), submit ])
+				E('div', { class: 'right fl-dialog-actions' }, [ E('button', { class: 'flr-modal-button fl-dialog-button', click: function() { if (!submit.disabled) { cleanup(); ui.hideModal(); } } }, [ _('Cancel') ]), submit ])
 			]);
 			if (modal && modal.classList) modal.classList.add('fastlane-routing-modal', 'fl-dialog');
 		}, this)).catch(L.bind(function(err) {
+			cleanup();
 			this.busy = false;
 			this.renderAgain();
 			var modal = ui.showModal(_('Could not import exclusions.'), [

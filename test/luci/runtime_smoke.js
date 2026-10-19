@@ -212,11 +212,12 @@ let commands = [];
 let fileWrites = [];
 let resolver = defaultResolver;
 const fsStub = {
-	exec: async (commandPath, args, env) => {
-		commands.push({ path: commandPath, args: [...args], env });
+	exec: async (commandPath, args) => {
+		commands.push({ path: commandPath, args: [...args] });
 		return resolver(commandPath, [...args]);
 	},
-	write: async (filePath, content) => { fileWrites.push({ path: filePath, content }); }
+	write: async (filePath, content, mode) => { var entry = { path: filePath, content }; if (mode != null) entry.mode = mode; fileWrites.push(entry); },
+	remove: async () => {}
 };
 
 function defaultResolver(commandPath, args) {
@@ -1110,8 +1111,10 @@ async function smoke(section, name, run) {
 		const content = 'name;enabled;domains;cidrs;services\ncamera;true;camera.example;;\n';
 		resolver = async (_binary, args) => ({ code: 0, stdout: JSON.stringify({ added: 1, updated: 0 }) });
 		await page.previewExclusionsCSV(content);
-		commandSeen(['--json', 'services', 'import-csv', '--data-env', '--check']);
-		assert.equal(commands[0].env.FASTLANE_EXCLUSIONS_CSV, content);
+		const stagedCSV = fileWrites[fileWrites.length - 1];
+		commandSeen(['--json', 'services', 'import-csv', '--file', stagedCSV.path, '--check']);
+		assert.equal(stagedCSV.content, content);
+		assert.equal(stagedCSV.mode, 384);
 		assert.ok(commands[0].args.join(' ').length < 1024, 'LuCI command must stay within rpcd ACL length limit');
 		assert.equal(commands.length, 1, 'preview must not import');
 		const modal = modals[modals.length - 1];
