@@ -1,6 +1,6 @@
 module github.com/design-maestro/fastlane
 
-go 1.26.6
+go 1.26.9
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.4

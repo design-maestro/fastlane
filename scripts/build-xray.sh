@@ -24,13 +24,13 @@ if [ "${GOARCH}" = "mips" ] || [ "${GOARCH}" = "mipsle" ]; then
 	echo "Using GOMIPS=${GOMIPS}"
 	(
 		cd "${XRAY_SOURCE_DIR}"
-		GOTOOLCHAIN=go1.26.6 CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" GOMIPS="${GOMIPS}" \
+		GOTOOLCHAIN=go1.26.9 CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" GOMIPS="${GOMIPS}" \
 			go build -trimpath -ldflags="-s -w" -o "${OUTPUT_DIR}/xray" ./main
 	)
 else
 	(
 		cd "${XRAY_SOURCE_DIR}"
-		GOTOOLCHAIN=go1.26.6 CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
+		GOTOOLCHAIN=go1.26.9 CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
 			go build -trimpath -ldflags="-s -w" -o "${OUTPUT_DIR}/xray" ./main
 	)
 fi
