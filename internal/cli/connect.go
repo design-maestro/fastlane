@@ -13,11 +13,21 @@ func newConnectCmd(opts *rootOptions) *cobra.Command {
 	var auto bool
 	var latencyMS float64
 	var global bool
+	var resume bool
 
 	cmd := &cobra.Command{
 		Use:   "connect",
 		Short: "Connect to a specific node or enable auto mode",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if resume {
+				if auto || global || subscriptionID != "" || nodeID != "" {
+					return fmt.Errorf("--resume cannot be combined with a server or selection mode")
+				}
+				if err := opts.service.ResumeConnection(context.Background()); err != nil {
+					return err
+				}
+				return printOutput(cmd, opts.jsonOutput, map[string]bool{"connected": true}, "VPN resumed")
+			}
 			if auto {
 				if nodeID != "" {
 					if subscriptionID == "" {
@@ -60,6 +70,7 @@ func newConnectCmd(opts *rootOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&auto, "auto", false, "Automatically select the best node")
 	cmd.Flags().Float64Var(&latencyMS, "latency-ms", 0, "Measured HTTPS GET latency in milliseconds")
 	cmd.Flags().BoolVar(&global, "global", false, "Keep auto mode scoped to all subscriptions")
+	cmd.Flags().BoolVar(&resume, "resume", false, "Restore the connection selected before disconnecting")
 	return cmd
 }
 

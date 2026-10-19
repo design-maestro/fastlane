@@ -247,6 +247,18 @@
   "Adding…": "Добавляю…",
   "Exclusion saved.": "Исключение сохранено.",
   "Exclusion added and enabled.": "Исключение добавлено и включено.",
+  "Could not export exclusions.": "Не удалось выгрузить исключения.",
+  "Import CSV": "Импорт CSV",
+  "Choose a CSV file up to 64 KiB.": "Выберите CSV-файл размером до 64 КиБ.",
+  "Could not read the CSV file.": "Не удалось прочитать CSV-файл.",
+  "Importing…": "Импортирую…",
+  "Exclusions imported.": "Исключения загружены.",
+  "Could not import exclusions.": "Не удалось загрузить исключения.",
+  "Import": "Импортировать",
+  "Import exclusions": "Импорт исключений",
+  "New groups": "Новые группы",
+  "Existing groups": "Существующие группы",
+  "Groups with matching names will be replaced. Other exclusions and the routing mode will be kept. Importing may briefly reconnect VPN.": "Группы с совпадающими именами будут заменены. Остальные исключения и режим маршрутизации сохранятся. При импорте VPN может ненадолго переподключиться.",
   "Could not load exclusions.": "Не удалось загрузить исключения.",
   "No exclusions yet. Add a service or device cloud that must use the regular internet connection.": "Исключений пока нет. Добавьте сервис или облако устройства, которому нужен обычный интернет без VPN.",
   "domains": "доменов",
@@ -259,6 +271,7 @@
   "No IP addresses": "Нет IP-адресов",
   "Direct access exclusions": "Исключения из VPN",
   "Traffic matching an enabled group bypasses VPN. Everything else follows the route above.": "Трафик включённой группы идёт напрямую, в обход VPN. Всё остальное следует маршруту выше.",
+  "Export CSV": "Экспорт CSV",
   "Could not read the HAPP profile.": "Не удалось прочитать HAPP-профиль.",
   "HAPP profile": "Профиль HAPP",
   "Detected: direct": "Распознано: напрямую",
@@ -372,7 +385,11 @@ renderBypassRules: function() {
 			]));
 		}
 		return E('section', { class: 'flr-bypass' }, [
-			E('div', { class: 'flr-bypass-head' }, [ E('div', {}, [ E('h2', {}, [ _('Direct access exclusions') ]), E('p', {}, [ _('Traffic matching an enabled group bypasses VPN. Everything else follows the route above.') ]) ]), E('button', { class: 'flr-button flr-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRuleOpen', null) }, [ '+ ', _('Add exclusion') ]) ])
+			E('div', { class: 'flr-bypass-head' }, [ E('div', {}, [ E('h2', {}, [ _('Direct access exclusions') ]), E('p', {}, [ _('Traffic matching an enabled group bypasses VPN. Everything else follows the route above.') ]) ]), E('div', { class: 'flr-rule-actions' }, [
+				typeof this.handleExportCSV === 'function' ? E('button', { class: 'flr-button', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleExportCSV') }, [ _('Export CSV') ]) : '',
+				typeof this.handleImportCSV === 'function' ? E('button', { class: 'flr-button', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleImportCSV') }, [ _('Import CSV') ]) : '',
+				E('button', { class: 'flr-button flr-button-primary', disabled: this.busy ? 'disabled' : null, click: ui.createHandlerFn(this, 'handleRuleOpen', null) }, [ '+ ', _('Add exclusion') ])
+			]) ])
 		].concat(body));
 	},
 renderImportPreview: function() {

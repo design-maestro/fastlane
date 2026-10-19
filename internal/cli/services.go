@@ -42,8 +42,40 @@ fastlane firewall set targets openai youtube
 		newServicesGetCmd(opts),
 		newServicesSetCmd(opts),
 		newServicesDeleteCmd(opts),
+		newServicesExportCSVCmd(opts),
+		newServicesImportCSVCmd(opts),
 	)
 
+	return cmd
+}
+
+func newServicesExportCSVCmd(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{Use: "export-csv", Short: "Export exclusions as Excel-compatible CSV", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			content, err := opts.service.ExportExclusionsCSV()
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprint(cmd.OutOrStdout(), content)
+			return err
+		},
+	}
+}
+
+func newServicesImportCSVCmd(opts *rootOptions) *cobra.Command {
+	var content string
+	var check bool
+	cmd := &cobra.Command{Use: "import-csv", Short: "Validate and merge exclusions from CSV", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			result, err := opts.service.ImportExclusionsCSV(context.Background(), content, check)
+			if err != nil {
+				return err
+			}
+			return printOutput(cmd, opts.jsonOutput, result, fmt.Sprintf("Exclusions: %d groups, %d added, %d updated", result.Groups, result.Added, result.Updated))
+		},
+	}
+	cmd.Flags().StringVar(&content, "data", "", "CSV contents (UTF-8, up to 64 KiB)")
+	cmd.Flags().BoolVar(&check, "check", false, "Validate without changing settings")
 	return cmd
 }
 
