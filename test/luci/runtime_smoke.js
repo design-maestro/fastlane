@@ -771,7 +771,8 @@ async function smoke(section, name, run) {
 		commands = [];
 		page.pageData[0].state.resume_connection = { mode: 'auto', subscription_id: 'blanc', auto_scope: 'subscription' };
 		await page.handleResume();
-		commandSeen(['--json', 'inspect', 'health-check', '--subscription', 'blanc', '--select']);
+		commandSeen(['connect', '--resume']);
+		assert.equal(commands.length, 1);
 		commands = [];
 		page.busy = 'working';
 		await page.handleResume();

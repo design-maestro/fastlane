@@ -37,3 +37,29 @@ func TestDisconnectResumePreservesManualSelection(t *testing.T) {
 		t.Fatal("removed server must not be silently replaced")
 	}
 }
+
+func TestResumeAutoRestoresPreviousServerWithoutPoolProbe(t *testing.T) {
+	for _, scope := range []string{autoScopeAll, "sub"} {
+		t.Run(scope, func(t *testing.T) {
+			store := &memoryStore{settings: domain.DefaultSettings(), state: domain.DefaultRuntimeState(), subs: []domain.Subscription{{ID: "sub", Nodes: []domain.Node{{ID: "node", Protocol: domain.ProtocolSocks, Address: "192.0.2.1", Port: 1080}}}}}
+			service := NewService(Dependencies{Store: store, Backend: &recordingBackend{}})
+			ctx := context.Background()
+			if err := service.ConnectManual(ctx, "sub", "node"); err != nil {
+				t.Fatal(err)
+			}
+			store.state.Mode = domain.SelectionModeAuto
+			store.state.AutoScope = scope
+			if err := service.Disconnect(ctx); err != nil {
+				t.Fatal(err)
+			}
+			service = NewService(Dependencies{Store: store, Backend: &recordingBackend{}})
+			// No pool prober is configured: resume must directly apply the saved node.
+			if err := service.ResumeConnection(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if !store.state.Connected || store.state.ActiveNodeID != "node" || store.state.Mode != domain.SelectionModeAuto || store.state.AutoScope != scope || !store.settings.AutoMode || store.settings.Mode != domain.SelectionModeAuto {
+				t.Fatalf("previous automatic connection not restored: %+v %+v", store.state, store.settings)
+			}
+		})
+	}
+}

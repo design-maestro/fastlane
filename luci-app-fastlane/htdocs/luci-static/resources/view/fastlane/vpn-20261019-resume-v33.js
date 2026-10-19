@@ -963,11 +963,7 @@ return view.extend({
 	handleResume: function(ev) {
 		if (ev) ev.preventDefault();
 		if (this.busy) return Promise.resolve();
-		var resume = (this.status().state || {}).resume_connection;
-		if (!resume || resume.mode === 'auto') {
-			var scope = resume && resume.auto_scope !== 'all' ? resume.subscription_id : 'all';
-			return this.runAction(_('Turning VPN on…'), this.execJSON([ '--json', 'inspect', 'health-check', '--subscription', scope || 'all', '--select' ]), _('Automatic selection started in the background. You can close the page.'));
-		}
+		if (!(this.status().state || {}).resume_connection) return this.handleAuto();
 		return this.runAction(_('Turning VPN on…'), this.exec([ 'connect', '--resume' ]), _('VPN enabled.'));
 	},
 

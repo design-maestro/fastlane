@@ -115,7 +115,7 @@ cp "${ROOT_DIR}/luci-app-fastlane/htdocs/luci-static/resources/fastlane/"*.js \
 cp "${ROOT_DIR}/luci-app-fastlane/htdocs/luci-static/resources/fastlane/assets/"*.png \
 	"${DATA_DIR}/www/luci-static/resources/fastlane/assets/"
 for view_name in \
-	vpn.js vpn-20261019-resume-v32.js \
+	vpn.js vpn-20261019-resume-v33.js \
 	routing.js routing-20261019-csv-v6.js \
 	diagnostics.js diagnostics-20260904-v3.js \
 	settings.js settings-20260918-v10.js
