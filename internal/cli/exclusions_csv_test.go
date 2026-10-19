@@ -2,7 +2,7 @@ package cli
 
 import (
 	"bytes"
-	"encoding/base64"
+	"strings"
 	"testing"
 
 	"github.com/design-maestro/fastlane/internal/app"
@@ -10,14 +10,14 @@ import (
 )
 
 func TestImportCSVSingleLineTransport(t *testing.T) {
-	t.Parallel()
 	store := &cliMemoryStore{settings: domain.DefaultSettings(), state: domain.DefaultRuntimeState()}
 	service := app.NewService(app.Dependencies{Store: store})
-	data := "\ufeffname;enabled;domains;cidrs;services\r\ncloud;true;cloud.example.com;;\r\n"
+	data := "\ufeffname;enabled;domains;cidrs;services\r\ncloud;true;" + strings.Repeat("cloud.example.com ", 80) + ";;\r\n"
+	t.Setenv("FASTLANE_EXCLUSIONS_CSV", data)
 	for _, check := range []bool{true, false} {
 		cmd := newServicesCmd(&rootOptions{service: service, jsonOutput: true})
 		cmd.SetOut(new(bytes.Buffer))
-		args := []string{"import-csv", "--data-base64", base64.StdEncoding.EncodeToString([]byte(data))}
+		args := []string{"import-csv", "--data-env"}
 		if check {
 			args = append(args, "--check")
 		}

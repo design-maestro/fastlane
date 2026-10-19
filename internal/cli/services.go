@@ -2,13 +2,12 @@ package cli
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/design-maestro/fastlane/internal/app"
 	"github.com/design-maestro/fastlane/internal/domain"
 )
 
@@ -66,20 +65,16 @@ func newServicesExportCSVCmd(opts *rootOptions) *cobra.Command {
 
 func newServicesImportCSVCmd(opts *rootOptions) *cobra.Command {
 	var content string
-	var encoded string
+	var fromEnv bool
 	var check bool
 	cmd := &cobra.Command{Use: "import-csv", Short: "Validate and merge exclusions from CSV", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			csvContent := content
-			if encoded != "" {
-				if content != "" || len(encoded) > base64.StdEncoding.EncodedLen(app.MaxExclusionsCSVBytes) {
-					return fmt.Errorf("provide one CSV input up to 64 KiB")
+			if fromEnv {
+				if content != "" {
+					return fmt.Errorf("provide only one CSV input")
 				}
-				decoded, err := base64.StdEncoding.DecodeString(encoded)
-				if err != nil {
-					return fmt.Errorf("decode CSV: %w", err)
-				}
-				csvContent = string(decoded)
+				csvContent = os.Getenv("FASTLANE_EXCLUSIONS_CSV")
 			}
 			result, err := opts.service.ImportExclusionsCSV(context.Background(), csvContent, check)
 			if err != nil {
@@ -89,7 +84,7 @@ func newServicesImportCSVCmd(opts *rootOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&content, "data", "", "CSV contents (UTF-8, up to 64 KiB)")
-	cmd.Flags().StringVar(&encoded, "data-base64", "", "Base64 UTF-8 CSV for single-line LuCI transport")
+	cmd.Flags().BoolVar(&fromEnv, "data-env", false, "Read UTF-8 CSV from FASTLANE_EXCLUSIONS_CSV for LuCI transport")
 	cmd.Flags().BoolVar(&check, "check", false, "Validate without changing settings")
 	return cmd
 }
