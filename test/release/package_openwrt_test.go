@@ -59,9 +59,9 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "fastlane", "assets", "fastlane-mark.png"), "png", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "subscriptions.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn.js"), "'use strict';\n", 0o644)
-	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20260918-country-v31.js"), "'use strict';\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "vpn-20261019-resume-v32.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing.js"), "'use strict';\n", 0o644)
-	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20260906-v5.js"), "'use strict';\n", 0o644)
+	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "routing-20261019-csv-v6.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "firewall.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "dns.js"), "'use strict';\n", 0o644)
 	writeFile(t, filepath.Join(repoDir, "luci-app-fastlane", "htdocs", "luci-static", "resources", "view", "fastlane", "about.js"), "'use strict';\n", 0o644)
@@ -183,8 +183,8 @@ func TestPackageOpenWrtFallsBackToTarWhenBSDTarMissing(t *testing.T) {
 		t.Fatalf("expected settings view in package data: %v", err)
 	}
 	for _, name := range []string{
-		"vpn-20260918-country-v31.js",
-		"routing-20260906-v5.js",
+		"vpn-20261019-resume-v32.js",
+		"routing-20261019-csv-v6.js",
 		"diagnostics-20260904-v3.js",
 		"settings-20260918-v10.js",
 	} {

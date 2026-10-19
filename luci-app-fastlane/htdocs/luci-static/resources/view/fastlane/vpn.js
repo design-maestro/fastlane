@@ -1,4 +1,4 @@
 'use strict';
-'require view.fastlane.vpn-20260918-country-v31 as fastlaneVPN';
+'require view.fastlane.vpn-20261019-resume-v32 as fastlaneVPN';
 
 return fastlaneVPN;

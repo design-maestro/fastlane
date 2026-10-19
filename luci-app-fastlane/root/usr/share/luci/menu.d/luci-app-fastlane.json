@@ -17,7 +17,7 @@
 		"order": 10,
 		"action": {
 			"type": "view",
-			"path": "fastlane/vpn-20260918-country-v31"
+			"path": "fastlane/vpn-20261019-resume-v32"
 		}
 	},
 	"admin/services/fastlane/diagnostics": {
@@ -33,7 +33,7 @@
 		"order": 20,
 		"action": {
 			"type": "view",
-			"path": "fastlane/routing-20260906-v5"
+			"path": "fastlane/routing-20261019-csv-v6"
 		}
 	},
 	"admin/services/fastlane/settings": {
